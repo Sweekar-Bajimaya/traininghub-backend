@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment-specific settings and secrets (copy env.sample.py -> env.py)
+config/settings/env.py
+.env
+keys/
+*.pem
+
+# Uploads / static builds
+media/
+staticfiles/
+
+# Tooling
+.idea/
+.vscode/
+*.log
+
+#Claude
+.claude
+.agents
+
+#mcp
+.mcp.json

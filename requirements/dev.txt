@@ -1,0 +1,7 @@
+-r base.txt
+django-extensions
+django-debug-toolbar==4.2.0
+ipdb
+ipython
+fabric3
+pylint

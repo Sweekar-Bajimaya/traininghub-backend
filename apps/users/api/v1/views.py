@@ -1,0 +1,76 @@
+from django.contrib.auth import get_user_model
+from rest_framework.generics import RetrieveUpdateAPIView, UpdateAPIView
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.views import (
+    TokenBlacklistView,
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
+from apps.common.viewsets import CreateListRetrieveUpdateViewSet
+from apps.users.api.v1.serializers import (
+    AdminSerializer,
+    LoginSerializer,
+    PasswordChangeSerializer,
+    ProfileSerializer,
+    UpdateStatusSerializer,
+)
+from apps.users.constants import Role
+from apps.users.permissions import HasPlatformPermission
+
+User = get_user_model()
+
+
+class LoginView(TokenObtainPairView):
+    serializer_class = LoginSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "login"
+
+
+class RefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "token_refresh"
+
+
+class LogoutView(TokenBlacklistView):
+    throttle_scope = "token_refresh"
+
+
+class MeView(RetrieveUpdateAPIView):
+    serializer_class = ProfileSerializer
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_object(self):
+        return self.request.user
+
+
+class PasswordChangeView(UpdateAPIView):
+    serializer_class = PasswordChangeSerializer
+    http_method_names = ["put"]
+
+    def get_object(self):
+        return self.request.user
+
+
+class AdminViewSet(CreateListRetrieveUpdateViewSet):
+    """Super Admin only. No DELETE: suspend through users/{id}/status/."""
+
+    serializer_class = AdminSerializer
+    permission_classes = [HasPlatformPermission]
+    required_permission = "users.manage_admins"
+    queryset = (
+        User.objects.filter(role=Role.ADMIN)
+        .prefetch_related("user_permissions")
+        .order_by("-created_at", "-pk")
+    )
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+
+class UserStatusView(UpdateAPIView):
+    permission_classes = [HasPlatformPermission]
+    required_permission = "users.manage_account_status"
+    queryset = User.objects.all()
+    serializer_class = UpdateStatusSerializer
+    http_method_names = ["patch"]
