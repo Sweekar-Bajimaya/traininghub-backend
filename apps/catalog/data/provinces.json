@@ -1,0 +1,58 @@
+[
+  {
+    "id": 2,
+    "name": "Madesh Province",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 3,
+    "name": "Bagmati Province",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 4,
+    "name": "Gandaki Pradesh",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 5,
+    "name": "Lumbini Province",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 7,
+    "name": "Sudurpashchim Pradesh",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 6,
+    "name": "Karnali Pradesh",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  },
+  {
+    "id": 1,
+    "name": "Koshi Province",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "country": 603
+  }
+]

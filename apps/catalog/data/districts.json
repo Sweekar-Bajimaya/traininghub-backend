@@ -1,0 +1,642 @@
+[
+  {
+    "id": 52,
+    "name": "Kapilvastu",
+    "name_ne": "",
+    "alternative_names": [
+      "KAPILBASTU"
+    ],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 53,
+    "name": "Parasi",
+    "name_ne": "",
+    "alternative_names": [
+      "NAWALPARASI (BARDAGHAT WEST)"
+    ],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 43,
+    "name": "Nawalpur",
+    "name_ne": "",
+    "alternative_names": [
+      "NAWALPARASI (BARDAGHAT EAST)"
+    ],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 3,
+    "name": "Ilam",
+    "name_ne": "",
+    "alternative_names": [
+      "ILLAM"
+    ],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 1,
+    "name": "Bhojpur",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 2,
+    "name": "Dhankuta",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 4,
+    "name": "Jhapa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 5,
+    "name": "Khotang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 6,
+    "name": "Morang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 7,
+    "name": "Okhaldhunga",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 8,
+    "name": "Panchthar",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 9,
+    "name": "Sankhuwasabha",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 10,
+    "name": "Solukhumbu",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 11,
+    "name": "Sunsari",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 12,
+    "name": "Taplejung",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 14,
+    "name": "Udayapur",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 15,
+    "name": "Bara",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 17,
+    "name": "Mahottari",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 18,
+    "name": "Parsa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 19,
+    "name": "Rautahat",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 20,
+    "name": "Saptari",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 21,
+    "name": "Sarlahi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 22,
+    "name": "Siraha",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 2
+  },
+  {
+    "id": 24,
+    "name": "Chitwan",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 25,
+    "name": "Dhading",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 26,
+    "name": "Dolakha",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 27,
+    "name": "Kathmandu",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 29,
+    "name": "Lalitpur",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 31,
+    "name": "Nuwakot",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 32,
+    "name": "Ramechhap",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 33,
+    "name": "Rasuwa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 34,
+    "name": "Sindhuli",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 36,
+    "name": "Baglung",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 37,
+    "name": "Gorkha",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 38,
+    "name": "Kaski",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 39,
+    "name": "Lamjung",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 40,
+    "name": "Manang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 41,
+    "name": "Mustang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 42,
+    "name": "Myagdi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 44,
+    "name": "Parbat",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 45,
+    "name": "Syangja",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 46,
+    "name": "Tanahun",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 4
+  },
+  {
+    "id": 47,
+    "name": "Arghakhanchi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 48,
+    "name": "Banke",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 49,
+    "name": "Bardiya",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 50,
+    "name": "Dang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 51,
+    "name": "Gulmi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 54,
+    "name": "Palpa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 55,
+    "name": "Pyuthan",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 56,
+    "name": "Rolpa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 57,
+    "name": "Rupandehi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 58,
+    "name": "Dailekh",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 59,
+    "name": "Dolpa",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 60,
+    "name": "Humla",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 61,
+    "name": "Jajarkot",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 62,
+    "name": "Jumla",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 63,
+    "name": "Kalikot",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 64,
+    "name": "Mugu",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 66,
+    "name": "Salyan",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 67,
+    "name": "Surkhet",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 68,
+    "name": "Achham",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 69,
+    "name": "Baitadi",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 70,
+    "name": "Bajhang",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 71,
+    "name": "Bajura",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 72,
+    "name": "Dadeldhura",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 73,
+    "name": "Darchula",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 74,
+    "name": "Doti",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 75,
+    "name": "Kailali",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 76,
+    "name": "Kanchanpur",
+    "name_ne": "",
+    "alternative_names": [],
+    "alternative_names_ne": [],
+    "province": 7
+  },
+  {
+    "id": 77,
+    "name": "Eastern Rukum",
+    "name_ne": "",
+    "alternative_names": [
+      "RUKUM EAST"
+    ],
+    "alternative_names_ne": [],
+    "province": 5
+  },
+  {
+    "id": 28,
+    "name": "Kavrepalanchok",
+    "name_ne": "",
+    "alternative_names": [
+      "KAVREPALANCHOWK"
+    ],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 35,
+    "name": "Sindhupalchok",
+    "name_ne": "",
+    "alternative_names": [
+      "SINDHUPALCHOWK"
+    ],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 65,
+    "name": "Western Rukum",
+    "name_ne": "",
+    "alternative_names": [
+      "RUKUM WEST"
+    ],
+    "alternative_names_ne": [],
+    "province": 6
+  },
+  {
+    "id": 30,
+    "name": "Makwanpur",
+    "name_ne": "",
+    "alternative_names": [
+      "MAKAWANPUR"
+    ],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 23,
+    "name": "Bhaktapur",
+    "name_ne": "",
+    "alternative_names": [
+      "BHAKTPUR"
+    ],
+    "alternative_names_ne": [],
+    "province": 3
+  },
+  {
+    "id": 13,
+    "name": "Terhathum",
+    "name_ne": "",
+    "alternative_names": [
+      "TERATHUM"
+    ],
+    "alternative_names_ne": [],
+    "province": 1
+  },
+  {
+    "id": 16,
+    "name": "Dhanusha",
+    "name_ne": "",
+    "alternative_names": [
+      "DHANUSA"
+    ],
+    "alternative_names_ne": [],
+    "province": 2
+  }
+]

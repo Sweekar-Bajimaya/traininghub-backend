@@ -151,6 +151,7 @@ There is exactly one Super Admin, who can do everything and grants other admin u
 * Institute registration with verification documents
 
 * Admin approval / rejection / request for information / suspension
+* A rejected institute can re-apply for verification; only approved institutes are visible on the public site
 
 * Institute profile with several locations (see Institute Locations)
 
@@ -395,7 +396,7 @@ Examples of business rules:
 
 An institute can operate from several locations (for example branches in different cities), and its trainings can take place at different ones.
 
-* An institute has one or more locations chosen from the managed Nepal province / district / city list, each with an address.
+* An institute has one or more locations chosen from the managed Nepal province / district / municipality list, each with an address.
 
 * One location can be marked as the main office.
 
