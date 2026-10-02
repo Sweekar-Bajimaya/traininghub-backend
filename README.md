@@ -36,6 +36,7 @@ python manage.py generate_rsa_keys
 
 # 5. database and first user
 python manage.py migrate
+python manage.py load_locations       # Nepal provinces / districts / municipalities
 python manage.py createsuperuser      # creates the one and only Super Admin
 
 # 6. run
@@ -55,6 +56,7 @@ Optional settings are environment variables with defaults: `REDIS_URL` (`redis:/
 | Check before committing | `python manage.py check` and `python manage.py makemigrations --check --dry-run` |
 | Create migrations       | `python manage.py makemigrations` then `python manage.py migrate`                |
 | Background worker       | `python manage.py qcluster`                                                      |
+| Reload location data    | `python manage.py load_locations` (safe to re-run)                               |
 
 Tests create their own test database, so the PostgreSQL user needs permission to create databases.
 Redis must be running (throttling uses it).
@@ -67,11 +69,12 @@ apps/
   api/v1/     mounts each app's URLs under /api/v1/
   common/     base models, base viewsets, shared serializers and validators
   users/      User model, roles and permissions, JWT auth, admin management
+  catalog/    Nepal locations (province / district / municipality), loader and locations API
 docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
 
-Planned apps: `institutes`, `catalog`, `enquiries`, `notifications`, `analytics`.
+Planned apps: `institutes`, `enquiries`, `notifications`, `analytics`. `catalog` will also hold categories and trainings.
 
 ## Users API (`/api/v1/user/`)
 
@@ -84,6 +87,16 @@ Planned apps: `institutes`, `catalog`, `enquiries`, `notifications`, `analytics`
 
 There is no public registration. Admins are created by the Super Admin; institute owners will be created
 by institute registration. Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF`.
+
+## Locations API (`/api/v1/locations/`)
+
+| Endpoint | What it returns |
+| --- | --- |
+| `GET /` | active locations; filter with `level`, `parent`, `province`, `district`, search with `search` |
+| `GET {id}/` | one location |
+| `GET tree/` | province > district > municipality tree (cached) |
+
+All are public and read-only. Example for a district dropdown: `GET /api/v1/locations/?level=DISTRICT&parent=<province id>`.
 
 ## Working on the code
 
