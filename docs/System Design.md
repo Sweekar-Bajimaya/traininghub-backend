@@ -35,11 +35,17 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/catalog/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
 | Enquiry statuses | `NEW`, `CONTACTED`, `CONVERTED`, `CLOSED`. Kept easy to change later |
 | Location | Managed list of Nepal provinces / districts / **municipalities**. The third level is called Municipality in code and UI and includes rural municipalities. Names are kept exactly as they appear in the data (no normalising of "Province" / "Pradesh") |
-| API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`); an app's URL module is relative to its prefix. The audience split for institutes (`institutes/` public, `institute/` portal, `admin/`) is still a proposal |
+| API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`, `institutes/` public, `institute/` portal, `admin/` console); an app's URL module is relative to its prefix |
 | Institute re-application | A rejected institute can re-apply for verification (`REJECTED` → `PENDING`) |
 | Institute visibility | Only `APPROVED` institutes, and their approved trainings, appear on the public site. Pending, info-requested, rejected and suspended institutes are not visible |
 | Institute type | A fixed list, required at registration: Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School, Company, NGO/INGO, Government |
 | Institute profile | Plain columns on `Institute` (option A), not a generic items table. The gallery is a small separate table |
+| Institute registration | One JSON request creates the institute (`PENDING`), its owner and optional locations. The owner can log in at once and uploads verification documents afterwards. Approval needs at least one active location and one document |
+| Verification documents | pdf, jpg or png, max 5 MB, stored privately (never a URL), streamed only to the owning institute and to admins with `manage_institutes`. Which documents are required is not enforced beyond "at least one" |
+| Staff powers | Staff do everything except manage staff and invitations (owner only). No ownership transfer. Removing staff deactivates the account and revokes its refresh tokens |
+| Suspended institutes | Staff keep their accounts and can log in; the institute is hidden from the public site |
+| Staff invitations | Valid 7 days; email sent with Django `send_mail`, queued with django-q2 after commit (needs `qcluster`); only a sha256 hash of the token is stored; the full `notifications` app comes later |
+| Institute name | Not unique; the slug is |
 | Pricing | Single fee, NPR only. Discounts may come later |
 | Time zone | All trainings in NPT (`Asia/Kathmandu`), including online. Multiple sessions allowed |
 | Certification | Free-text field managed by the institute |
@@ -53,7 +59,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | :---- | :---- | :---- |
 | `common` | BaseModel, SlugModel, shared serializers / viewsets / validators | exists |
 | `users` | User, roles, permissions, auth endpoints, admin team | in progress |
-| `institutes` | Institute, locations, staff membership and invitations, verification documents, profile (about, CEO message, gallery, contacts, social), status workflow | planned |
+| `institutes` | Institute, locations, staff membership and invitations, verification documents, profile columns, gallery, status workflow | built (on defaults, see section 8) |
 | `catalog` | Category (tree), Location (managed Nepal list), Training, sessions, curriculum modules, learning outcomes | in progress: `Location`, its loader and API are built |
 | `enquiries` | Enquiry, status workflow, device tracking | planned |
 | `notifications` | In-app notifications + email dispatch (django-q2 tasks) | planned |
@@ -133,9 +139,26 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 - Views use DRF generics / the `common` mixin viewsets; logic sits in serializer `create()` / `update()` calling the service.
 - A database `IntegrityError` that slips past validation returns 409, not 500.
 
+### 3.5 Institutes API (built)
+
+| Endpoint | Who | Notes |
+| :---- | :---- | :---- |
+| `POST institute/register/` | public | Throttled (`institute_register`, 5/hour). Creates the institute (`PENDING`), its owner and optional locations in one transaction. `status`, `role` and `slug` in the payload are ignored |
+| `POST institute/invitations/accept/` | public | Throttled (`invitation_accept`, 10/hour). Creates a staff account from a valid, unexpired, unused token |
+| `GET institutes/`, `institutes/{slug}/` | public | `APPROVED` only; filter `type`, search `name`; constant number of queries; the card shows the main location with district and province |
+| `GET, PATCH institute/profile/`, `POST institute/resubmit/` | institute staff | `resubmit` moves `INFO_REQUESTED` or `REJECTED` back to `PENDING` |
+| `institute/locations/` (list, create, patch) and `.../{id}/set-main/`, `.../deactivate/` | institute staff | Only active municipalities; the first location is main; the main one cannot be deactivated |
+| `institute/documents/` (list, upload) and `.../{id}/download/` | institute staff | Multipart; the response never contains the file path; downloads are streamed after a membership check |
+| `institute/gallery/` (list, create, patch, delete) and `.../reorder/` | institute staff | Public images; reorder takes every id exactly once |
+| `institute/staff/` (list, delete), `institute/invitations/` (list, create, delete) | owner only | Removing staff deactivates the account and revokes its refresh tokens; the invitation token is never returned |
+| `admin/institutes/` and `.../{id}/{approve,reject,request-info,suspend,reinstate}/` | `users.manage_institutes` | Reject, request-info and suspend need a reason; approve needs one active location and one document |
+| `admin/institutes/{id}/documents/{doc}/` (PATCH) and `.../download/` | `users.manage_institutes` | Document review: `VERIFIED` or `REJECTED` |
+
+Rows of another institute return 404. Verification documents live under `PRIVATE_MEDIA_ROOT`, outside `MEDIA_ROOT`, and never get a URL. Invitation tokens are stored as a sha256 hash only.
+
 ## 4. Key workflows
 
-1. **Institute onboarding**: register (multi-step form + documents) → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
+1. **Institute onboarding**: register (one JSON request: institute, owner, optional locations; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
 2. **Training lifecycle**: institute drafts → submits → admin approves / requests changes / rejects → published (public) → unpublish / cancel / complete.
 3. **Enquiry**: public submit (captcha + throttle) → institute notified (email + dashboard) → institute updates status → admin sees conversion stats. The visitor's device sees it under "My enquiries" for 90 days.
 3a. **Staff invitation**: institute owner invites by email → invitee accepts and sets a password → becomes `INSTITUTE_STAFF` of that institute.
@@ -144,6 +167,7 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 ## 5. API surface (v1, sketch)
 
 - **Public**: `GET trainings`, `trainings/{slug}`, `categories`, `locations`, `institutes`, `institutes/{slug}`, `POST enquiries`, `GET my-enquiries` (by device token, last 90 days).
+- **Built (institutes):** see section 3.5 for `institutes/`, `institute/` and `admin/institutes/`.
 - **Built:** `GET locations/` (filters `level`, `parent`, `province`, `district`; `search` on name; only active rows; one query, unpaginated, about 850 rows), `GET locations/{id}/`, `GET locations/tree/` (province > district > municipality, cached in Redis until a location changes).
 - **Institute**: auth, profile + documents + gallery + locations, staff invitations, CRUD trainings, submit for review, enquiries list / update, dashboard stats.
 - **Admin**: institute review actions, training review actions, categories and locations CRUD, enquiries monitor / export, admin team, platform settings.
@@ -165,7 +189,7 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 1. [x] Repo hygiene, settings (Redis cache + django-q2, SMTP, reCAPTCHA setting, throttle scopes), exception handler, JWT auth class.
 2. [x] `users`: model, manager, permission classes, services, serializers, views and URLs, migration, tests. The Django admin site for users is read-only.
 2a. [x] `users` hardening: single Super Admin constraint, case-insensitive unique email, `blank=True` on `phone_number`.
-3. [ ] `institutes` (including locations and staff invitations) - **next**. The plan, its four milestones and the decisions it needs (questions 3, 11 and 21-28 below) are in `docs/institutes-checklist.md`, mirrored in Notion.
+3. [x] `institutes`: models and constraints, services, public / admin / portal APIs and 131 tests (the whole suite is 174). The decisions it was built on were confirmed on 2026-10-02.
 4. [ ] `catalog`: `Location` model, the `load_locations` loader and the public locations API are **done** (built before `institutes`, which depends on them). Categories, trainings and sessions are still to do.
 5. [ ] `enquiries`, `notifications`, `analytics`.
 6. [ ] Search, filters and public API polish.
@@ -175,32 +199,24 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 
 1. **Enquiry retention**: after 90 days an enquiry disappears from the visitor's "My enquiries". Does the institute keep it indefinitely, or should old enquiries be deleted too?
 2. **Browser auth storage**: where does the frontend keep the access and refresh tokens (memory, `localStorage`, or an httpOnly cookie)? This affects security and CORS settings.
-3. **Staff invitation details**: can invited staff do everything the owner can (except removing the owner), or are there limits? Can ownership be transferred?
-4. **Completion / cancellation**: set manually by the institute, or does the system complete a training after `end_date`? Are enquirers told about a cancellation?
-5. **Category depth**: strictly two levels or arbitrary? Only admins with `manage_categories` create them?
-6. **Enquiry status moves**: free or forward-only? Who changes them: institute staff only, or admins with `manage_enquiries` too?
-7. **Enquiries after the deadline**: allowed after the registration deadline or the start date?
-8. **Search**: the PRD lists "Instructor Name" but there is no instructor field. Add a text field on `Training` or drop it? Full-text language configuration (English, `simple`, Nepali script)?
-9. **Redis outage**: should throttled / captcha-protected enquiry submit fail closed or open?
-10. **Editing an approved training**: does it need re-review, or only for some fields (fee, dates)?
-11. **Suspended institutes**: can a suspended institute's staff still log in?
-12. **Training levels**: the fixed values for training `level` are still needed.
-13. **Duration**: independent field or computed from sessions / dates? Filtering needs a numeric unit.
-14. **Notifications**: which events notify whom (in-app and email)? Is the enquirer ever emailed?
-15. **Reports**: which provider "Reports" / "Sessions" dashboard items belong to the MVP ("Participants" is phase 2)?
-16. **PRD wording**: the Problem Statement and some user stories describe the later phase, and the "Training Instructors" list repeats the Learner list. Treat as phase 2 / ignore?
-17. **Privacy**: retention, consent and export rules for enquirer name / phone.
-18. **Unlimited seats**: confirm that a training without a `seats` value counts as always available.
-19. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
-20. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
-21. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
-22. **Institute registration and locations**: must an institute give at least one location when it registers, or only before approval (the current plan)?
-23. **Institute documents**: which verification documents are required, which file types, and what size limit (`ATTACHMENT_MAX_UPLOAD_SIZE` is still undefined)?
-24. **Invitation email**: there is no `notifications` app yet. Send invitation emails directly now (Django `send_mail`, queued with django-q2 after commit), or build `notifications` first?
-25. **Invitation expiry**: how long is an invitation valid (the plan assumes 7 days)?
-26. **Institute name**: must it be unique? Today only the slug is.
-27. **Institute profile columns**: confirm the list (CEO name and message, website, contact email and phone, Facebook, LinkedIn).
-28. **Institute URLs**: adopt the audience split (`institutes/` public, `institute/` portal, `admin/` console)?
+3. **Completion / cancellation**: set manually by the institute, or does the system complete a training after `end_date`? Are enquirers told about a cancellation?
+4. **Category depth**: strictly two levels or arbitrary? Only admins with `manage_categories` create them?
+5. **Enquiry status moves**: free or forward-only? Who changes them: institute staff only, or admins with `manage_enquiries` too?
+6. **Enquiries after the deadline**: allowed after the registration deadline or the start date?
+7. **Search**: the PRD lists "Instructor Name" but there is no instructor field. Add a text field on `Training` or drop it? Full-text language configuration (English, `simple`, Nepali script)?
+8. **Redis outage**: should throttled / captcha-protected enquiry submit fail closed or open?
+9. **Editing an approved training**: does it need re-review, or only for some fields (fee, dates)?
+10. **Training levels**: the fixed values for training `level` are still needed.
+11. **Duration**: independent field or computed from sessions / dates? Filtering needs a numeric unit.
+12. **Notifications**: which events notify whom (in-app and email)? Is the enquirer ever emailed?
+13. **Reports**: which provider "Reports" / "Sessions" dashboard items belong to the MVP ("Participants" is phase 2)?
+14. **PRD wording**: the Problem Statement and some user stories describe the later phase, and the "Training Instructors" list repeats the Learner list. Treat as phase 2 / ignore?
+15. **Privacy**: retention, consent and export rules for enquirer name / phone.
+16. **Unlimited seats**: confirm that a training without a `seats` value counts as always available.
+17. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
+18. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
+19. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
+20. **Editing an approved institute**: today an institute's staff can change the profile of an `APPROVED` institute without re-review (as for trainings, question 9). Should some fields (name, type) need re-approval?
 
 ## 9. Decision log (answered questions)
 
@@ -215,3 +231,4 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 - Institutes and locations (2026-10-02): the third location level is **Municipality**, and names stay as in the data. The team keeps the location data and documents its source. The institute type is a fixed list the team will provide. The institute profile uses plain columns (option A). A rejected institute can re-apply (`REJECTED` → `PENDING`); only `APPROVED` institutes are publicly visible.
 - Institute types and location data (2026-10-02): the seven institute types are fixed (see the decisions table). The location data files are in `apps/catalog/data/`; the empty `catalog` app is scaffolded and installed, its models and loader are not written yet.
 - Locations built (2026-10-02): one `Location` table, loaded by `load_locations` (7 provinces, 77 districts, 752 municipalities), public read-only API under `locations/`. URL prefixes are declared only in `apps/api/v1/urls.py`.
+- Institutes built (2026-10-02): models and constraints, services, public / admin / portal APIs, 131 tests. The nine defaults it was built on (staff powers, suspended staff login, locations at registration, documents, invitation email and expiry, unique name, profile columns, URL split) were confirmed on 2026-10-02 by ticking "Confirm the nine decisions" in the Notion work list; they are in the decisions table above.

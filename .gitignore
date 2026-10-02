@@ -25,3 +25,6 @@ staticfiles/
 
 #mcp
 .mcp.json
+
+#private_media
+private_media/

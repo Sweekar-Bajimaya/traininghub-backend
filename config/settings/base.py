@@ -54,6 +54,7 @@ if DEBUG:
 LOCAL_APPS = [
     "apps.users",
     "apps.catalog",
+    "apps.institutes",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -161,6 +162,8 @@ REST_FRAMEWORK = {
         "password_reset": "5/min",
         # Anonymous enquiry submission (also limited per phone number in the view).
         "enquiry": "10/hour",
+        "institute_register": "5/hour",
+        "invitation_accept": "10/hour",
     },
 }
 
@@ -192,9 +195,14 @@ SIMPLE_JWT = {
 # `python manage.py generate_rsa_keys`;
 JWT_KEY_DIR = BASE_DIR.parent / "keys"
 
+# Verification documents are private: outside MEDIA_ROOT and never served by URL.
+# BASE_DIR is config/, so .parent is the project root (next to keys/).
+PRIVATE_MEDIA_ROOT = BASE_DIR.parent / "private_media"
+
 # True only while the key-generation command itself is running, so a fresh
 # checkout can create the keys that settings otherwise refuse to start without.
 _GENERATING_JWT_KEYS = "generate_rsa_keys" in sys.argv
+
 
 def load_jwt_key(filename, loader):
     """Load a PEM key, or refuse to start if it is missing.
@@ -213,6 +221,7 @@ def load_jwt_key(filename, loader):
             f"JWT key {path} not found. Run: python manage.py generate_rsa_keys"
         ) from None
     return loader(data)
+
 
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.Argon2PasswordHasher",
@@ -257,7 +266,16 @@ EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "TrainingHub <no-reply@traininghub.com.np>")
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL", "TrainingHub <no-reply@traininghub.com.np>"
+)
 
 # Google reCAPTCHA, verified server-side on public submit endpoints.
 RECAPTCHA_SECRET_KEY = os.environ.get("RECAPTCHA_SECRET_KEY", "")
+
+# Institute constant terms
+INSTITUTE_INVITATION_TTL_DAYS = 7
+INSTITUTE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+INSTITUTE_DOCUMENT_EXTENSIONS = ("pdf", "jpg", "jpeg", "png")
+INSTITUTE_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png")
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")

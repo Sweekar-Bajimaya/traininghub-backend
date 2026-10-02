@@ -46,7 +46,12 @@ python manage.py runserver
 Check it works: open `http://localhost:8000/api/root/` (Swagger UI, only when `DEBUG=True`). The root `http://localhost:8000/` returns 404 on purpose.
 
 Optional settings are environment variables with defaults: `REDIS_URL` (`redis://localhost:6379/0`),
-`EMAIL_*`, `DEFAULT_FROM_EMAIL`, `RECAPTCHA_SECRET_KEY`.
+`EMAIL_*`, `DEFAULT_FROM_EMAIL`, `RECAPTCHA_SECRET_KEY`, `FRONTEND_BASE_URL` (`http://localhost:3000`, used in
+staff invitation links).
+
+Institute verification documents are stored in `private_media/` in the project root (created on first upload,
+gitignored, never served by URL). Staff invitation emails are sent by the background worker, so run
+`python manage.py qcluster` (needs Redis); with the default console email backend the email appears in that terminal.
 
 ## Everyday commands
 
@@ -70,11 +75,12 @@ apps/
   common/     base models, base viewsets, shared serializers and validators
   users/      User model, roles and permissions, JWT auth, admin management
   catalog/    Nepal locations (province / district / municipality), loader and locations API
+  institutes/ institutes, staff and invitations, documents, locations, gallery; public, portal and admin APIs
 docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
 
-Planned apps: `institutes`, `enquiries`, `notifications`, `analytics`. `catalog` will also hold categories and trainings.
+Planned apps: `enquiries`, `notifications`, `analytics`. `catalog` will also hold categories and trainings.
 
 ## Users API (`/api/v1/user/`)
 
@@ -85,8 +91,8 @@ Planned apps: `institutes`, `enquiries`, `notifications`, `analytics`. `catalog`
 | `admins/` (list, create, retrieve, update)          | Super Admin only                                        |
 | `PATCH users/{id}/status/`                          | `manage_account_status` permission (suspend / activate) |
 
-There is no public registration. Admins are created by the Super Admin; institute owners will be created
-by institute registration. Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF`.
+There is no public user registration. Admins are created by the Super Admin; institute owners are created by
+institute registration (below). Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF`.
 
 ## Locations API (`/api/v1/locations/`)
 
@@ -97,6 +103,19 @@ by institute registration. Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITU
 | `GET tree/` | province > district > municipality tree (cached) |
 
 All are public and read-only. Example for a district dropdown: `GET /api/v1/locations/?level=DISTRICT&parent=<province id>`.
+
+## Institutes API
+
+| Prefix | Who | What |
+| --- | --- | --- |
+| `/api/v1/institutes/` | public | approved institutes: list (filter `type`, search `search`) and `{slug}/` |
+| `/api/v1/institute/register/` | public | register an institute and its owner (JSON); then log in and upload documents |
+| `/api/v1/institute/invitations/accept/` | public | accept a staff invitation with the emailed token |
+| `/api/v1/institute/` `profile/`, `resubmit/`, `locations/`, `documents/`, `gallery/` | institute staff | manage the institute; another institute's rows are a 404 |
+| `/api/v1/institute/` `staff/`, `invitations/` | owner only | list or remove staff; invite, list or revoke invitations |
+| `/api/v1/admin/institutes/` | `manage_institutes` | review: `approve`, `reject`, `request-info`, `suspend`, `reinstate`; document review and download |
+
+An institute becomes public only when an admin approves it, which needs at least one active location and one document.
 
 ## Working on the code
 
