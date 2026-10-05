@@ -2,7 +2,7 @@ from rest_framework.test import APITestCase
 
 from apps.institutes import services
 from apps.institutes.constants import InstituteStatus
-from apps.institutes.models import Institute
+from apps.institutes.models import Institute, InstituteLocation
 from apps.institutes.tests.helpers import (
     PASSWORD,
     TempMediaMixin,
@@ -166,8 +166,19 @@ class PublicInstituteApiTests(TempMediaMixin, APITestCase):
                 "district": "District",
                 "province": "Province",
                 "address": "Main Road",
+                "map_url": "",
             },
         )
+
+    def test_the_map_link_is_saved_and_shown(self):
+        institute = self.approved("Alpha", "alpha@example.com")
+        InstituteLocation.objects.filter(institute=institute).update(
+            map_url="https://maps.example/alpha"
+        )
+        card = self.client.get(PUBLIC_URL).data["results"][0]
+        self.assertEqual(card["location"]["map_url"], "https://maps.example/alpha")
+        detail = self.client.get(f"{PUBLIC_URL}{institute.slug}/").data
+        self.assertEqual(detail["locations"][0]["map_url"], "https://maps.example/alpha")
 
     def test_detail_by_slug(self):
         institute = self.approved("Alpha", "alpha@example.com")

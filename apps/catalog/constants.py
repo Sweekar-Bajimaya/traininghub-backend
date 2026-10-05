@@ -20,3 +20,4 @@ class MunicipalityType:
 
 
 TREE_CACHE_KEY = "catalog:location-tree:v1"
+CATEGORY_TREE_CACHE_KEY = "catalog:category-tree:v1"
