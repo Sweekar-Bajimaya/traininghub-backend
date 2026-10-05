@@ -76,7 +76,7 @@ ADMIN_PAYLOAD = {
 
 class UsersApiTestCase(APITestCase):
     def setUp(self):
-        cache.clear()  # throttle counters live in Redis
+        cache.delete_pattern("throttle_*")  # throttle counters live in Redis; do not flush the django-q broker
         self.super_admin = User.objects.create_superuser("root@example.com", PASSWORD)
         self.admin = services.create_admin(
             email="admin@example.com", password=PASSWORD, full_name="Admin"

@@ -10,8 +10,8 @@ an account. The frontend is a separate Next.js project.
 - `docs/System Design.md` - architecture and every decision made so far, plus open questions.
   Read it before designing anything; where the PRD and the design prototypes disagree, the decisions
   in System Design.md win.
-- `docs/institutes-checklist.md` - build plan for the next app (decisions, milestones, code snippets); mirrored in
-  Notion. It is a working list, not a record of what exists.
+- `docs/institutes-checklist.md` - the work list `institutes` was built from (decisions assumed, milestones, snippets);
+  mirrored in Notion. A record of the plan, not of the code: where they differ, the code wins.
 - `design/*.html` - three UI prototypes (Training Hub, Institute Portal, Admin Console). Each is a
   bundled single file: the screens live in a base64/gzip `__bundler/template` + `__bundler/manifest`
   script, so grepping the HTML for UI text finds nothing - decode it first.
@@ -54,7 +54,9 @@ or an open question gets answered. Rules:
 - Institute types (fixed list): Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School,
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
-  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly.
+  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute, owner,
+  optional locations); the owner then logs in (even while `PENDING`) and uploads verification documents. Approval needs at
+  least one active location and one document. A suspended institute's staff keep their accounts.
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
   on client IP.
@@ -69,7 +71,8 @@ config/
   exception_handlers.py   maps Django ValidationError -> 400 and database IntegrityError -> 409
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
-  api/v1/urls.py          declares every URL prefix: `user/`, `locations/` (one include per resource group)
+  api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `institutes/`, `institute/`, `admin/`
+                          (one include per resource group)
   common/                 BaseModel (created_at/modified_at), SlugModel, BaseViewSet, DynamicFields
                           serializers, validators, helpers
   users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
@@ -79,14 +82,19 @@ apps/
                           `province` / `district`), management command `load_locations` (data in
                           `catalog/data/`: provinces.json, districts.json, cities.json), public read-only API
                           under `locations/` (list with filters, detail, cached `tree/`)
+  institutes/             Institute, members, invitations, documents, locations, gallery; `services.py` (status
+                          workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
+                          (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
+                          (register, profile, locations, documents, gallery, staff, invitations, resubmit), admin
+                          `admin/institutes/` (review actions, document review and download)
 docs/  design/            see "Source of truth"
 ```
 
-Planned apps (not created yet): `institutes`, `enquiries`, `notifications`, `analytics`; later `applications`,
+Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
 `learners`, `reviews`. `catalog` still needs categories, trainings and sessions.
 Each app follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
-(`apps/users/api/v1/urls/users.py` and `apps/catalog/api/v1/urls/locations.py` are the package form: one
-module per URL group).
+(`apps/users/api/v1/urls/users.py`, `apps/catalog/api/v1/urls/locations.py` and the three modules in
+`apps/institutes/api/v1/urls/` are the package form: one module per URL group).
 
 ## Commands
 
@@ -100,8 +108,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | migrate | `python manage.py makemigrations` then `python manage.py migrate` |
 | load locations | `python manage.py load_locations` (upserts from `apps/catalog/data/`; safe to re-run, never re-activates a retired location) |
 | dev server | `python manage.py runserver` |
-| task worker | `python manage.py qcluster` (needs Redis) |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) and `apps/catalog/tests/` (Location constraints, loader, locations API); needs Postgres where the test DB can be created, and Redis for throttling and the location tree cache |
+| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails stay queued |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/catalog/tests/` (Location constraints, loader, locations API) and `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey); needs Postgres where the test DB can be created, and Redis for throttling and the location tree cache |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
@@ -120,6 +128,12 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   registered with an empty prefix must be a `SimpleRouter` (`DefaultRouter` adds a root view at `""`).
 - Filter on a foreign key with `NumberFilter(field_name="<fk>_id")`, not django-filter's default
   `ModelChoiceFilter`, which runs an extra query per request to check that the row exists.
+- Institute-scoped views mix in `InstituteScopedMixin` and use `IsInstituteMember` / `IsInstituteOwner`
+  (`apps/institutes/permissions.py`): the queryset is filtered to the caller's institute, so another institute's row is a
+  404, not a 403. Staff can do everything except manage staff and invitations (owner only).
+- Read settings with `from django.conf import settings`, never `from config import settings` (the raw module ignores
+  `override_settings`). In tests clear throttles with `cache.delete_pattern("throttle_*")`, never `cache.clear()`: the
+  same Redis database holds the django-q broker.
 - Project skills `backend-best-practices` and `drf-generics` are in `.claude/skills/` (that folder is gitignored,
   so they are local to this checkout).
 - Public vs authenticated: `ActiveAccountJWTAuthentication` (default auth class) treats a deactivated
@@ -155,6 +169,12 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - **The location tree is cached in Redis with no expiry** (`catalog:location-tree:v1`). `Location` `post_save` /
   `post_delete` and `load_locations` clear it; `QuerySet.update()` and `bulk_update()` do not, so delete the key
   yourself after those.
+- **Verification documents are private.** They are stored under `PRIVATE_MEDIA_ROOT` (`private_media/` in the project
+  root, gitignored; note `BASE_DIR` is `config/`, so it is `BASE_DIR.parent`), `PrivateStorage` raises on `.url`, and
+  they are only served by `private_file_response` after a permission check. `InstituteDocument` is deliberately not
+  registered in the admin site. Upload validators check extension and size only (`INSTITUTE_UPLOAD_MAX_BYTES`, 5 MB).
+- **Staff invitation tokens** are stored as a sha256 hash only; the raw token goes into the queued email task with
+  `save=False`, so django-q does not keep it in its results table. The link uses `FRONTEND_BASE_URL`.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
   uploads raise `AttributeError` until it is added to `base.py`.
 
@@ -162,12 +182,10 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 
 - Do institutes keep enquiries after the 90-day "My enquiries" window?
 - Where the frontend stores access/refresh tokens (memory, `localStorage`, httpOnly cookie).
-- Limits for invited institute staff; ownership transfer.
 - How an admin's password is reset (the API only lets the Super Admin set the initial password).
 - Whether `/admin/` is renamed or restricted at the proxy before production (it is on the default path, no 2FA).
 - The team still has to document where the location data came from.
 - Who edits Nepal locations at runtime (today only `load_locations` writes them; the admin site is read-only).
-- The decisions `institutes` needs before it is built: System Design.md section 8.
 
 ## Verification
 

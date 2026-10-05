@@ -1,220 +1,108 @@
-# Institutes App – Build Checklist
+# Institutes App – Todo List
 
-Todo list for the `institutes` app with code snippets. Section 1 (the `catalog` locations) is **built**; everything else is snippets still to apply.
-They follow `docs/System Design.md` and the project skills (services for writes, DRF generics, locking, no N+1).
-Items marked **BLOCKER** need a decision first. Tick items off as you go.
-Updated 2026-10-02 with the findings from the other project's location catalog (section 1). Notion copy: "Institutes App – Build Checklist" under the System Design Review page.
+Ordered work list for the `institutes` app, with code snippets. Follow it top to bottom: each milestone is its own commit,
+with `python manage.py check`, `makemigrations --check --dry-run` and the full test suite green before you move on.
+Notion copy: "Institutes App – Todo List (M0–M5)" under the System Design Review page.
 
-## Status and next steps (2026-10-02)
+The snippets follow `docs/System Design.md` and the project skills (services for writes, DRF generics, locking, no N+1).
+They were checked against the repo as of 2026-10-02 (43 tests passing, `catalog` locations loaded).
 
-**Built and tested** (43 tests pass): `users` (26 tests), `common`, and the `catalog` locations (17 tests). The locations are
-loaded on the dev database (7 provinces, 77 districts, 752 municipalities) and served at `/api/v1/locations/`.
-**Not committed yet:** the `catalog` app and the doc changes since the last commit.
+## Status (2026-10-02)
 
-**Next: the `institutes` app**, in four milestones. Each one is its own commit, with `check`,
-`makemigrations --check` and the full test suite green.
+**M0 to M5 are built and tested** (the whole suite is 174 tests, 131 of them in `institutes`; `check` and
+`makemigrations --check` are clean). Still open:
+- a manual run of the full journey with `runserver` and `qcluster` (the `EndToEndTests` test covers it through the API);
 
-| Milestone | Contents | Blocked by (section 0) |
-|---|---|---|
-| M1 Data layer | settings, `.gitignore`, `LOCAL_APPS`, constants, models (with profile columns and gallery), migration, read-only admin, constraint tests | unique name, profile columns, required documents |
-| M2 Services | status workflow, registration, locations, invitations, staff removal, documents; service and concurrency tests | staff powers, suspended staff login, locations at registration, invitation expiry |
-| M3 Public and admin API | registration, public list and detail, admin review actions, document review and download; permission and query-count tests | URL convention |
-| M4 Portal API | profile, gallery, locations, documents, staff, invitations and accepting them | invitation email delivery |
+What differs from the snippets below, because the code was checked against the repo:
+- `validators.py` and `models.py` use `from django.conf import settings` (the raw `config.settings` module ignores `override_settings`).
+- `OwnerSerializer.phone_number` also has a uniqueness check, so a duplicate phone is a 400 instead of a 409.
+- The public queryset orders locations `-is_main, pk`; the admin review actions re-read the institute through the viewset queryset so the response keeps the owner and documents.
+- `AdminDocumentView` has an empty `queryset` only so the Swagger schema generator is happy.
+- The tests clear throttles with `cache.delete_pattern("throttle_*")`; `cache.clear()` would also flush the django-q broker (same Redis database). `apps/users/tests.py` was changed the same way.
+- Query-count tests warm up first (permissions and membership are loaded once per user), and start from one row (an empty page skips the data query).
 
-Then update the docs listed in section 10.
+## Decisions this list assumes
 
-## 0. Decisions and blockers (resolve first)
+The nine decisions below were open when this list was written. Each row shows the default the code was built on. They were
+confirmed on 2026-10-02 (ticked in the Notion work list). To change one later, edit the place named in the last column.
 
-- [x] **Location level name:** decided, `MUNICIPALITY`, shown as "Municipality" in the UI.
-- [x] **Province names:** decided, keep them exactly as in the data (no normalising). Assumption: this is how the answer "keep it in province while having in data" was read.
-- [ ] **Nepali names.** `name_ne` and alternative spellings are empty in the source. Recommendation: leave them out until the content exists.
-- [ ] **Who edits locations at runtime.** `users.manage_categories` covers "categories and locations". Admin API CRUD, or only the loader?
-- [x] **Location data files:** copied into `apps/catalog/data/` and checked (7 / 77 / 752, no orphan parents, no duplicate
-  `(district, name)`, 22 municipality names repeat across districts). The file names stay as they are (`provinces.json`,
-  `districts.json`, `cities.json`, which holds the municipalities); no rename. The team documents the source. Remaining task:
-  delete the unused `local_government.py` from that folder.
-- [x] **Institute `type` values:** decided, seven fixed types (snippet in section 3). Assumption: `type` is required at registration.
-- [x] **Profile fields:** decided, option A (plain columns on `Institute`, section 7). Still to confirm: the exact column list.
-- [x] **Rejected institute:** decided, it can re-apply (`REJECTED` → `PENDING`). Assumption: it re-applies on the same institute record and account, after updating its details and documents. Only `APPROVED` institutes are publicly visible.
-- [ ] **Suspended institute staff** (Q12): snippets let them log in but not publish. Confirm.
-- [ ] **Staff powers** (Q4): invited staff can do everything except remove the owner or invite staff; only the owner invites. Confirm or give limits.
-- [ ] **Locations at registration**: must an institute give at least one location when registering (diagram says 1..*)?
-  The checklist enforces at least one active location before **approval**, not at registration. Confirm.
-- [ ] **Required documents**, file types and size limit. `ATTACHMENT_MAX_UPLOAD_SIZE` is still undefined (deliberate),
-  so document upload needs a size rule of its own.
-- [ ] **Invitation expiry**: snippets assume 7 days. Confirm.
-- [ ] **Invitation email delivery:** there is no `notifications` app yet, so nothing can send the invite token.
-  Recommendation: send it now with Django's `send_mail`, queued with django-q2 after the transaction commits; build the
-  full `notifications` app (in-app + templates) later. Alternative: build `notifications` first.
-- [ ] **Unique institute name?** Not stated, so not enforced. Slug is unique.
-- [ ] **URL convention** (`institutes/`, `institute/`, `admin/` by audience): proposed, not yet adopted.
+| # | Decision | Default used | Milestone |
+|---|---|---|---|
+| 1 | Can a suspended institute's staff log in? | Yes. They cannot publish, and the institute is hidden from the public site | M2 |
+| 2 | Staff powers | Staff can do everything except manage staff and invitations (owner only). No ownership transfer | M2, M4 |
+| 3 | Locations at registration | Optional at registration; at least one active location before approval | M2 |
+| 4 | Documents | pdf / jpg / png, max 5 MB. Uploaded **after** registration, by the owner, in the portal; at least one before approval | M1, M2 |
+| 5 | Invitation expiry | 7 days | M2 |
+| 6 | Unique institute name | No (the slug is unique) | M1 |
+| 7 | Profile columns | CEO name and message, website, contact email and phone, Facebook, LinkedIn | M1 |
+| 8 | URL split | `institutes/` public, `institute/` portal, `admin/` console | M3 |
+| 9 | Invitation email | Sent now with Django `send_mail`, queued with django-q2 after commit. The full `notifications` app comes later | M2 |
 
-## 1. Prerequisite: the `catalog` app with `Location`
+Already decided: the seven institute types, profile as plain columns plus a gallery table, a rejected institute can re-apply
+(`REJECTED` to `PENDING`), only `APPROVED` institutes are public, a staff user belongs to one institute, level `MUNICIPALITY`.
 
-`InstituteLocation` points at the managed location list, which the design places in `catalog`. Build a minimal `catalog`
-(locations only) first, otherwise `institutes` cannot migrate.
+Two corrections to earlier snippets, found by reading the repo:
+- `BASE_DIR` is the `config/` folder, not the project root, so `BASE_DIR / "private_media"` would land inside `config/`. Use `BASE_DIR.parent / "private_media"` (next to `keys/`).
+- A `FileField` with a callable storage builds the storage **once at import**, so `override_settings` cannot redirect it in tests. The storage below reads the setting on every use.
 
-### What we take from the other project's catalog
+---
 
-- Same idea: Province, then District, then local government (municipality or rural municipality). 7 provinces, 77 districts,
-  752 local governments; 22 municipality names repeat across districts, so the district must be shown next to the name.
-- **Avoid its problems:** denormalised ancestor columns that nothing keeps consistent; fixed primary keys copied from the JSON
-  with no sequence reset; the rural / urban category thrown away; no active flag; a loader doing one query per row with no
-  tests; a separate marketing `City` table and a free-text `Location` that overlap the real hierarchy.
-- **Our choices:** one `Location` table; a `code` column holds the source id (unique per level) and the database assigns
-  primary keys; `type` kept for municipalities; `is_active`; ancestors derived in exactly one place; check constraints on the
-  shape; a bulk, idempotent loader with a test.
+## M0 – Before you start
 
-### Tasks
+- [x] Commit the finished `catalog` work, then branch:
 
-- [x] **Built (2026-10-02):** `apps/catalog/` with `constants.py`, the `Location` model, `load_locations`, signals that clear
-  the tree cache, a read-only admin, the public API under `/api/v1/locations/` and 17 tests (all passing, 43 in the whole
-  suite). The snippets below are what was applied, with these fixes: `MunicipalityType.CHOICES` is a tuple (a set gave an
-  unstable order), the constraint names are spelled `catalog_` (migration `0002`), the list filters `is_active=True`,
-  foreign-key filters are `NumberFilter`s on `*_id` (no extra query), and the URLs are a package mounted at `locations/`
-  with a `SimpleRouter`.
-- [x] Run on the dev database: `migrate catalog` (`0002` applied) and `load_locations` (7 / 77 / 752 rows).
-- [x] Constants and model:
-
-  ```python
-  # apps/catalog/constants.py
-  class LocationLevel:
-      PROVINCE, DISTRICT, MUNICIPALITY = "PROVINCE", "DISTRICT", "MUNICIPALITY"
-      CHOICES = ((PROVINCE, "Province"), (DISTRICT, "District"), (MUNICIPALITY, "Municipality"))
-
-
-  class MunicipalityType:
-      METROPOLITAN, SUB_METROPOLITAN = "METROPOLITAN", "SUB_METROPOLITAN"
-      MUNICIPALITY, RURAL_MUNICIPALITY = "MUNICIPALITY", "RURAL_MUNICIPALITY"
-      CHOICES = (
-          (METROPOLITAN, "Metropolitan city"), (SUB_METROPOLITAN, "Sub-metropolitan city"),
-          (MUNICIPALITY, "Municipality"), (RURAL_MUNICIPALITY, "Rural municipality"),
-      )
-
-
-  # apps/catalog/models.py
-  class Location(BaseModel):
-      code = models.PositiveIntegerField()              # id from the source file, NOT the primary key
-      name = models.CharField(max_length=255)
-      level = models.CharField(max_length=12, choices=LocationLevel.CHOICES)
-      type = models.CharField(max_length=20, choices=MunicipalityType.CHOICES, blank=True)
-      parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="children")
-      # denormalised ancestors: a province or district filter is one indexed equality
-      province = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="+")
-      district = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="+")
-      is_active = models.BooleanField(default=True)
-
-      class Meta:
-          constraints = [
-              models.UniqueConstraint(fields=["level", "code"], name="catalog_location_level_code_uniq"),
-              models.UniqueConstraint(fields=["parent", "name"], name="catalog_location_parent_name_uniq"),
-              models.CheckConstraint(name="catalog_location_level_shape", condition=(
-                  models.Q(level="PROVINCE", parent__isnull=True, province__isnull=True, district__isnull=True)
-                  | models.Q(level="DISTRICT", parent__isnull=False, province__isnull=False, district__isnull=True)
-                  | models.Q(level="MUNICIPALITY", parent__isnull=False, province__isnull=False, district__isnull=False)
-              )),
-          ]
-          indexes = [
-              models.Index(fields=["level", "parent"], name="catalog_location_level_idx"),
-              models.Index(fields=["province"], name="catalog_location_province_idx"),
-              models.Index(fields=["district"], name="catalog_location_district_idx"),
-          ]
-
-      def __str__(self):
-          return self.name
-
-      def save(self, *args, **kwargs):
-          # The single place that derives the ancestor columns; the loader sets the same values in bulk.
-          if self.level == LocationLevel.DISTRICT:
-              self.province_id = self.parent_id
-          elif self.level == LocationLevel.MUNICIPALITY:
-              self.district_id = self.parent_id
-              self.province_id = self.parent.province_id
-          super().save(*args, **kwargs)
+  ```sh
+  git add apps/catalog apps/api/v1/urls.py config/settings/base.py CLAUDE.md README.md docs
+  git commit -m "Add catalog app: Location model, load_locations command and public locations API"
+  git switch -c feature/institutes
   ```
 
-- [x] Loader `python manage.py load_locations`: three bulk upserts, parents resolved from dictionaries built once, each JSON
-  file read once, idempotent:
+- [x] Confirm the nine decisions above (or reply "use the defaults"). Ticked in the Notion work list on 2026-10-02, so the defaults are the decisions.
 
-  ```python
-  # apps/catalog/management/commands/load_locations.py (core part)
-  TYPE_MAP = {
-      "Metropolitan City": "METROPOLITAN", "Sub-Metropolitan City": "SUB_METROPOLITAN",
-      "Municipality": "MUNICIPALITY", "Rural Municipality": "RURAL_MUNICIPALITY",
-      "Gaunpalika": "RURAL_MUNICIPALITY",       # 2 rows; Gaunpalika = rural municipality
-  }
+## M1 – Data layer (models, settings, admin, constraint tests)
 
-  @transaction.atomic
-  def handle(self, *args, **options):
-      read = lambda name: json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
+- [x] Scaffold the app:
 
-      self._upsert([dict(code=p["id"], name=p["name"].strip(), level="PROVINCE")
-                    for p in read("provinces.json")])
-      province = dict(Location.objects.filter(level="PROVINCE").values_list("code", "pk"))
-
-      self._upsert([dict(code=d["id"], name=d["name"].strip(), level="DISTRICT",
-                         parent_id=province[d["province"]], province_id=province[d["province"]])
-                    for d in read("districts.json")])
-      district = {c: (pk, prov) for c, pk, prov in
-                  Location.objects.filter(level="DISTRICT").values_list("code", "pk", "province_id")}
-
-      self._upsert([dict(code=m["id"], name=m["name"].strip(), level="MUNICIPALITY",
-                         type=TYPE_MAP[m["category"]],
-                         parent_id=district[m["district"]][0], district_id=district[m["district"]][0],
-                         province_id=district[m["district"]][1])
-                    for m in read("cities.json")])
-
-  def _upsert(self, rows):
-      Location.objects.bulk_create(
-          [Location(**r) for r in rows], update_conflicts=True,
-          unique_fields=["level", "code"],
-          update_fields=["name", "type", "parent", "province", "district"],
-      )
+  ```sh
+  mkdir -p apps/institutes/{migrations,tests,api/v1/urls}
+  touch apps/institutes/{__init__,constants,storage,validators,models,services,tasks,permissions,admin}.py \
+        apps/institutes/{migrations,tests,api,api/v1,api/v1/urls}/__init__.py \
+        apps/institutes/api/v1/{serializers,views}.py
   ```
 
-- [x] Loader test: run the command twice and assert 7 provinces, 77 districts and 752 municipalities; assert every
-  municipality's `province_id` equals its district's `province_id`; assert the second run changes nothing.
-- [x] Location API (read-only, public): `parent_id` filter and a name search for the dependent selects, plus **one cached
-  tree endpoint** (about 850 small rows) invalidated on admin write. Use `select_related("parent")` on lists so showing the
-  district next to a repeated municipality name costs no extra queries.
-- [x] Read-only admin for `Location` (same pattern as `users`).
-- [x] Migrations generated: `0001_initial` (applied) and `0002_fix_choices_and_constraint_names`.
+  ```python
+  # apps/institutes/apps.py
+  from django.apps import AppConfig
 
-## 2. Settings and scaffold for `institutes`
 
-- [ ] Settings (new, so document them):
+  class InstitutesConfig(AppConfig):
+      name = "apps.institutes"
+  ```
+
+- [x] Settings and `.gitignore`:
 
   ```python
   # config/settings/base.py
-  PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"       # gitignored; swap for a private S3 bucket later
-  INSTITUTE_INVITATION_TTL_DAYS = 7                     # assumption, see section 0
+  LOCAL_APPS = ["apps.users", "apps.catalog", "apps.institutes"]
 
-  REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update({
-      "institute_register": "5/hour",
-      "invitation_accept": "10/hour",
-  })
+  # Verification documents are private: outside MEDIA_ROOT and never served by URL.
+  # BASE_DIR is config/, so .parent is the project root (next to keys/).
+  PRIVATE_MEDIA_ROOT = BASE_DIR.parent / "private_media"
+
+  INSTITUTE_INVITATION_TTL_DAYS = 7
+  INSTITUTE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+  INSTITUTE_DOCUMENT_EXTENSIONS = ("pdf", "jpg", "jpeg", "png")
+  INSTITUTE_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png")
+  FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+
+  # inside REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]:
+  #     "institute_register": "5/hour",
+  #     "invitation_accept": "10/hour",
   ```
 
-- [ ] Add `"apps.institutes"` to `LOCAL_APPS` and `private_media/` to `.gitignore`.
-- [ ] Create `apps/institutes/` with `__init__.py`, `apps.py`, `models.py`, `constants.py`, `services.py`, `storage.py`,
-  `permissions.py`, `admin.py`, `tests/__init__.py`, `api/v1/{__init__,serializers,views}.py` and
-  `api/v1/urls/{__init__,public,portal,admin}.py`. Every package needs an `__init__.py` or tests are silently skipped.
-- [ ] Mount the URLs. Prefixes live only in `apps/api/v1/urls.py` (decided, as for `locations/`); the audience split itself is still a proposal
-  (public / `institute/` portal / `admin/`):
+  Add `private_media/` to `.gitignore`.
 
-  ```python
-  # apps/api/v1/urls.py
-  urlpatterns = [
-      path("user/", include("apps.users.api.v1.urls.users")),
-      path("institutes/", include("apps.institutes.api.v1.urls.public")),
-      path("institute/", include("apps.institutes.api.v1.urls.portal")),
-      path("admin/", include("apps.institutes.api.v1.urls.admin")),
-  ]
-  ```
-
-## 3. Constants and state machine
-
-- [ ] `apps/institutes/constants.py`, in the style of `users/constants.py`:
+- [x] `apps/institutes/constants.py`:
 
   ```python
   class InstituteStatus:
@@ -228,31 +116,14 @@ Then update the docs listed in section 10.
           (PENDING, "Pending"), (APPROVED, "Approved"), (REJECTED, "Rejected"),
           (INFO_REQUESTED, "Info requested"), (SUSPENDED, "Suspended"),
       )
-      # Allowed moves. A rejected institute can re-apply (REJECTED -> PENDING).
       TRANSITIONS = {
           PENDING: {APPROVED, REJECTED, INFO_REQUESTED},
           INFO_REQUESTED: {PENDING},
+          REJECTED: {PENDING},               # a rejected institute can re-apply
           APPROVED: {SUSPENDED},
           SUSPENDED: {APPROVED},
-          REJECTED: {PENDING},
       }
       REASON_REQUIRED = {REJECTED, INFO_REQUESTED, SUSPENDED}
-
-
-  class MemberRole:
-      OWNER = "OWNER"
-      STAFF = "STAFF"
-      CHOICES = ((OWNER, "Owner"), (STAFF, "Staff"))
-
-
-  class DocumentStatus:
-      PENDING, VERIFIED, REJECTED = "PENDING", "VERIFIED", "REJECTED"
-      CHOICES = ((PENDING, "Pending"), (VERIFIED, "Verified"), (REJECTED, "Rejected"))
-
-
-  class InvitationStatus:
-      PENDING, ACCEPTED, REVOKED = "PENDING", "ACCEPTED", "REVOKED"
-      CHOICES = ((PENDING, "Pending"), (ACCEPTED, "Accepted"), (REVOKED, "Revoked"))
 
 
   class InstituteType:
@@ -273,23 +144,85 @@ Then update the docs listed in section 10.
           (NGO_INGO, "NGO/INGO"),
           (GOVERNMENT, "Government"),
       )
+
+
+  class MemberRole:
+      OWNER = "OWNER"
+      STAFF = "STAFF"
+      CHOICES = ((OWNER, "Owner"), (STAFF, "Staff"))
+
+
+  class DocumentStatus:
+      PENDING, VERIFIED, REJECTED = "PENDING", "VERIFIED", "REJECTED"
+      CHOICES = ((PENDING, "Pending"), (VERIFIED, "Verified"), (REJECTED, "Rejected"))
+
+
+  class InvitationStatus:
+      PENDING, ACCEPTED, REVOKED = "PENDING", "ACCEPTED", "REVOKED"
+      CHOICES = ((PENDING, "Pending"), (ACCEPTED, "Accepted"), (REVOKED, "Revoked"))
   ```
 
-## 4. Models and migration
-
-- [ ] Private storage for documents (never under public `media/`):
+- [x] Private storage (reads the setting on every use; has no URL on purpose):
 
   ```python
   # apps/institutes/storage.py
+  import os
+
   from django.conf import settings
   from django.core.files.storage import FileSystemStorage
 
 
-  def private_storage():
-      return FileSystemStorage(location=settings.PRIVATE_MEDIA_ROOT)
+  class PrivateStorage(FileSystemStorage):
+      """Files live under settings.PRIVATE_MEDIA_ROOT and are only served by an authorised view."""
+
+      @property
+      def base_location(self):
+          return settings.PRIVATE_MEDIA_ROOT
+
+      @property
+      def location(self):
+          return os.path.abspath(self.base_location)
+
+      def url(self, name):
+          raise ValueError("Private files have no URL.")
   ```
 
-- [ ] Models. `registered_at` from the design is covered by `BaseModel.created_at`, so it is not added.
+- [x] Validators. The upload checks look at the extension and size only; add content sniffing (for example `python-magic`) if documents ever need it:
+
+  ```python
+  # apps/institutes/validators.py
+  import os
+
+  from django.conf import settings
+  from django.core.exceptions import ValidationError
+
+  from apps.catalog.constants import LocationLevel
+
+
+  def validate_institute_location(location):
+      if location.level != LocationLevel.MUNICIPALITY or not location.is_active:
+          raise ValidationError("Choose an active municipality.")
+
+
+  def _validate_upload(file, extensions):
+      extension = os.path.splitext(file.name)[1].lower().lstrip(".")
+      if extension not in extensions:
+          raise ValidationError(f"Allowed file types: {', '.join(extensions)}.")
+      if file.size > settings.INSTITUTE_UPLOAD_MAX_BYTES:
+          raise ValidationError(f"The file is larger than {settings.INSTITUTE_UPLOAD_MAX_BYTES // (1024 * 1024)} MB.")
+
+
+  def validate_document_file(file):
+      _validate_upload(file, settings.INSTITUTE_DOCUMENT_EXTENSIONS)
+
+
+  def validate_image_file(file):
+      _validate_upload(file, settings.INSTITUTE_IMAGE_EXTENSIONS)
+  ```
+
+  This deliberately does not use `validate_attachment`, which needs the undefined `ATTACHMENT_MAX_UPLOAD_SIZE`.
+
+- [x] Models (`registered_at` is `BaseModel.created_at`; the profile is plain columns):
 
   ```python
   # apps/institutes/models.py
@@ -303,18 +236,27 @@ Then update the docs listed in section 10.
   from apps.institutes.constants import (
       DocumentStatus, InstituteStatus, InstituteType, InvitationStatus, MemberRole,
   )
-  from apps.institutes.storage import private_storage
+  from apps.institutes.storage import PrivateStorage
+  from apps.institutes.validators import validate_document_file, validate_image_file
 
 
   class Institute(BaseModel, SlugModel):
       name = models.CharField(max_length=255)
-      type = models.CharField(max_length=30, choices=InstituteType.CHOICES)   # fixed list, required
+      type = models.CharField(max_length=30, choices=InstituteType.CHOICES)
       established_year = models.PositiveSmallIntegerField(null=True, blank=True)
-      description = models.TextField(blank=True)
-      logo = models.ImageField(upload_to=get_upload_path, blank=True)
+      description = models.TextField(blank=True)                      # "about"
+      logo = models.ImageField(upload_to=get_upload_path, blank=True, validators=[validate_image_file])
       status = models.CharField(max_length=20, choices=InstituteStatus.CHOICES,
                                 default=InstituteStatus.PENDING)
       status_reason = models.TextField(blank=True)
+      # profile
+      ceo_name = models.CharField(max_length=150, blank=True)
+      ceo_message = models.TextField(blank=True)
+      website = models.URLField(blank=True)
+      contact_email = models.EmailField(blank=True)
+      contact_phone = models.CharField(max_length=25, blank=True, validators=[validate_phone_number])
+      facebook_url = models.URLField(blank=True)
+      linkedin_url = models.URLField(blank=True)
 
       class Meta:
           indexes = [models.Index(fields=["status"], name="institutes_status_idx")]
@@ -324,9 +266,8 @@ Then update the docs listed in section 10.
 
 
   class InstituteMember(BaseModel):
-      # OneToOne = a staff user belongs to ONE institute only (Q6), unique at the DB level.
-      user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
-                                  related_name="membership")
+      # OneToOne: a staff user belongs to ONE institute only, enforced by the database.
+      user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="membership")
       institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="members")
       role = models.CharField(max_length=10, choices=MemberRole.CHOICES)
 
@@ -343,7 +284,7 @@ Then update the docs listed in section 10.
       institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="invitations")
       email = models.EmailField()
       role = models.CharField(max_length=10, choices=MemberRole.CHOICES, default=MemberRole.STAFF)
-      token_hash = models.CharField(max_length=64, unique=True)   # sha256 of the emailed token
+      token_hash = models.CharField(max_length=64, unique=True)       # sha256 of the emailed token
       status = models.CharField(max_length=10, choices=InvitationStatus.CHOICES,
                                 default=InvitationStatus.PENDING)
       expires_at = models.DateTimeField()
@@ -352,8 +293,7 @@ Then update the docs listed in section 10.
 
       class Meta:
           constraints = [
-              # one pending invitation per (institute, email), case-insensitive
-              models.UniqueConstraint(
+              models.UniqueConstraint(                                # one pending invite per institute and email
                   Lower("email"), "institute", condition=models.Q(status=InvitationStatus.PENDING),
                   name="institutes_one_pending_invite",
               ),
@@ -364,7 +304,8 @@ Then update the docs listed in section 10.
   class InstituteDocument(BaseModel):
       institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="documents")
       name = models.CharField(max_length=150)
-      file = models.FileField(upload_to=get_upload_path, storage=private_storage)
+      file = models.FileField(upload_to=get_upload_path, storage=PrivateStorage,
+                              validators=[validate_document_file])
       status = models.CharField(max_length=10, choices=DocumentStatus.CHOICES,
                                 default=DocumentStatus.PENDING)
 
@@ -374,7 +315,7 @@ Then update the docs listed in section 10.
 
   class InstituteLocation(BaseModel):
       institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="locations")
-      # must be a MUNICIPALITY-level, active Location; checked in the service (see below)
+      # must be an active MUNICIPALITY-level Location; checked by validate_institute_location
       location = models.ForeignKey("catalog.Location", on_delete=models.PROTECT, related_name="+")
       address = models.CharField(max_length=255)
       contact_phone = models.CharField(max_length=25, blank=True, validators=[validate_phone_number])
@@ -393,62 +334,156 @@ Then update the docs listed in section 10.
               ),
           ]
           indexes = [models.Index(fields=["institute", "is_active"], name="institutes_loc_active_idx")]
+
+
+  class InstituteGalleryImage(BaseModel):
+      institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="gallery")
+      image = models.ImageField(upload_to=get_upload_path, validators=[validate_image_file])
+      caption = models.CharField(max_length=200, blank=True)
+      position = models.PositiveSmallIntegerField(default=0)          # no unique: a reorder is one bulk_update
+
+      class Meta:
+          indexes = [models.Index(fields=["institute", "position"], name="institutes_gallery_pos_idx")]
   ```
 
-- [ ] A validator used by the serializer and the service, because a foreign key alone would also accept a province or a retired municipality:
+- [x] `python manage.py makemigrations institutes`, read the migration, then `python manage.py migrate`. Never hand-edit it.
+- [x] Read-only admin, same pattern as `users`. Do **not** register `InstituteDocument` (its files are private):
 
   ```python
-  def validate_institute_location(location):
-      if location.level != LocationLevel.MUNICIPALITY or not location.is_active:
-          raise ValidationError({"location": "Choose an active city / municipality."})
+  # apps/institutes/admin.py
+  from django.contrib import admin
+
+  from apps.institutes.models import Institute
+
+
+  @admin.register(Institute)
+  class InstituteAdmin(admin.ModelAdmin):
+      list_display = ("name", "type", "status", "created_at")
+      list_filter = ("status", "type")
+      search_fields = ("name", "slug")
+      ordering = ("-created_at", "-pk")
+
+      def has_add_permission(self, request):
+          return False
+
+      def has_change_permission(self, request, obj=None):
+          return False
+
+      def has_delete_permission(self, request, obj=None):
+          return False
   ```
 
-- [ ] `python manage.py makemigrations institutes`, then `migrate`. Do not hand-edit migrations.
-- [ ] Read-only admin, same pattern as `users` (no add / change / delete). Documents are private, so the admin must not link to the files.
-
-> **Correction to the Notion review page (section 6):** it proposes a composite foreign key
-> `(institute_id, institute_location_id)` on `Training`. Django 5.2 has no composite foreign keys. The rule
-> "a training's location belongs to the same institute" must be enforced in `TrainingService` plus a test, not by the database.
-
-## 5. Permissions and scoping
-
-- [ ] `apps/institutes/permissions.py` (the existing `IsInstituteStaff` checks only the role; these also check membership):
+- [x] Test helpers. Uploads go to temporary folders, so tests never write into `private_media/` or `config/media/`:
 
   ```python
-  from rest_framework.permissions import BasePermission
+  # apps/institutes/tests/helpers.py
+  import tempfile
 
-  from apps.institutes.constants import MemberRole
+  from django.contrib.auth import get_user_model
+  from django.core.files.uploadedfile import SimpleUploadedFile
+  from django.test import override_settings
+
+  from apps.catalog.models import Location
+  from apps.institutes.constants import InstituteStatus, InstituteType, MemberRole
+  from apps.institutes.models import Institute, InstituteLocation, InstituteMember
+  from apps.users.constants import Role
+
+  User = get_user_model()
+  PASSWORD = "Str0ng-pass-123!"
 
 
-  class IsInstituteMember(BasePermission):
-      def has_permission(self, request, view):
-          u = request.user
-          return bool(u and u.is_authenticated and hasattr(u, "membership"))
+  def make_municipality(code=1, name="Municipality"):
+      province, _ = Location.objects.get_or_create(level="PROVINCE", code=1, defaults={"name": "Province"})
+      district, _ = Location.objects.get_or_create(
+          level="DISTRICT", code=1, defaults={"name": "District", "parent": province})
+      return Location.objects.create(level="MUNICIPALITY", code=code, name=name, parent=district,
+                                     type="MUNICIPALITY")
 
 
-  class IsInstituteOwner(IsInstituteMember):
-      def has_permission(self, request, view):
-          return super().has_permission(request, view) and request.user.membership.role == MemberRole.OWNER
+  def make_institute(name="Alpha Institute", status=InstituteStatus.PENDING, email="owner@example.com"):
+      institute = Institute.objects.create(name=name, type=InstituteType.COMPANY, status=status)
+      owner = User.objects.create_user(email, PASSWORD, full_name="Owner", role=Role.INSTITUTE_STAFF)
+      InstituteMember.objects.create(user=owner, institute=institute, role=MemberRole.OWNER)
+      return institute, owner
+
+
+  def add_location(institute, municipality, *, is_main=False, is_active=True):
+      return InstituteLocation.objects.create(
+          institute=institute, location=municipality, address="Main Road", is_main=is_main, is_active=is_active)
+
+
+  def pdf(name="license.pdf"):
+      return SimpleUploadedFile(name, b"%PDF-1.4 test", content_type="application/pdf")
+
+
+  class TempMediaMixin:
+      """Put MEDIA_ROOT and PRIVATE_MEDIA_ROOT in temporary folders for the test."""
+
+      def setUp(self):
+          super().setUp()
+          for setting in ("MEDIA_ROOT", "PRIVATE_MEDIA_ROOT"):
+              folder = tempfile.TemporaryDirectory()
+              self.addCleanup(folder.cleanup)
+              override = override_settings(**{setting: folder.name})
+              override.enable()
+              self.addCleanup(override.disable)
   ```
 
-- [ ] A mixin so other institutes' rows are never reachable (they return 404, not 403):
+- [x] Constraint tests:
 
   ```python
-  class InstituteScopedMixin:
-      """Limit the queryset to the caller's institute."""
-      def get_queryset(self):
-          return super().get_queryset().filter(institute_id=self.request.user.membership.institute_id)
+  # apps/institutes/tests/test_models.py
+  from django.db import IntegrityError, transaction
+  from django.test import TestCase
+  from django.utils import timezone
+
+  from apps.institutes.constants import InvitationStatus, MemberRole
+  from apps.institutes.models import InstituteInvitation, InstituteMember
+  from apps.institutes.tests.helpers import (
+      PASSWORD, User, add_location, make_institute, make_municipality,
+  )
+
+
+  class InstituteConstraintTests(TestCase):
+      def setUp(self):
+          self.institute, self.owner = make_institute()
+          self.municipality = make_municipality()
+
+      def test_second_owner_rejected(self):
+          other = User.objects.create_user("other@example.com", PASSWORD)
+          with self.assertRaises(IntegrityError), transaction.atomic():
+              InstituteMember.objects.create(user=other, institute=self.institute, role=MemberRole.OWNER)
+
+      def test_user_cannot_belong_to_two_institutes(self):
+          other_institute, _ = make_institute(name="Beta", email="beta@example.com")
+          with self.assertRaises(IntegrityError), transaction.atomic():
+              InstituteMember.objects.create(user=self.owner, institute=other_institute, role=MemberRole.STAFF)
+
+      def test_two_active_main_locations_rejected(self):
+          add_location(self.institute, self.municipality, is_main=True)
+          with self.assertRaises(IntegrityError), transaction.atomic():
+              add_location(self.institute, self.municipality, is_main=True)
+
+      def test_inactive_main_location_rejected(self):
+          with self.assertRaises(IntegrityError), transaction.atomic():
+              add_location(self.institute, self.municipality, is_main=True, is_active=False)
+
+      def test_duplicate_pending_invitation_rejected_case_insensitively(self):
+          make = lambda email, status: InstituteInvitation.objects.create(
+              institute=self.institute, email=email, status=status, token_hash=email,
+              expires_at=timezone.now())
+          make("a@example.com", InvitationStatus.PENDING)
+          with self.assertRaises(IntegrityError), transaction.atomic():
+              make("A@Example.com", InvitationStatus.PENDING)
+          make("b@example.com", InvitationStatus.REVOKED)      # revoked ones do not block
+          make("B@example.com", InvitationStatus.PENDING)
   ```
 
-- [ ] Query cost: `request.user.membership` is one query per request. If it matters, `select_related("membership")`
-  where `ActiveAccountJWTAuthentication` loads the user.
+- [x] **M1 done when:** `check` clean, `makemigrations --check --dry-run` clean, constraint tests pass, the whole suite still passes.
 
-## 6. Services (`apps/institutes/services.py`)
+## M2 – Services (all business rules and transactions)
 
-All writes live here, inside `transaction.atomic()`, locking before check-then-write. There is no `AuditLog` or notification
-service yet, so leave TODO markers like `users/services.py` does.
-
-- [ ] Institute workflow:
+- [x] `apps/institutes/services.py`, part 1: the status workflow. Every move is checked against `TRANSITIONS` under a row lock:
 
   ```python
   import hashlib
@@ -460,36 +495,48 @@ service yet, so leave TODO markers like `users/services.py` does.
   from django.core.exceptions import ValidationError
   from django.db import transaction
   from django.utils import timezone
+  from django_q.tasks import async_task
 
-  from apps.institutes.constants import InstituteStatus, InvitationStatus, MemberRole
-  from apps.institutes.models import (
-      Institute, InstituteDocument, InstituteInvitation, InstituteLocation, InstituteMember,
+  from apps.institutes.constants import (
+      DocumentStatus, InstituteStatus, InvitationStatus, MemberRole,
   )
+  from apps.institutes.models import (
+      Institute, InstituteDocument, InstituteGalleryImage, InstituteInvitation,
+      InstituteLocation, InstituteMember,
+  )
+  from apps.institutes.validators import validate_institute_location
+  from apps.users import services as user_services
   from apps.users.constants import Role
 
   User = get_user_model()
 
 
-  def _transition(institute, to, *, reason=""):
+  def _transition(institute, to, *, reason="", check=None):
       """Caller must be inside transaction.atomic()."""
       institute = Institute.objects.select_for_update().get(pk=institute.pk)
       if to not in InstituteStatus.TRANSITIONS[institute.status]:
           raise ValidationError(f"Cannot move from {institute.status} to {to}.")
       if to in InstituteStatus.REASON_REQUIRED and not reason.strip():
           raise ValidationError({"reason": "A reason is required."})
+      if check:
+          check(institute)
       institute.status = to
       institute.status_reason = reason
       institute.save(update_fields=["status", "status_reason", "modified_at"])
       return institute
 
 
+  def _ready_for_approval(institute):
+      if not institute.locations.filter(is_active=True).exists():
+          raise ValidationError("Add at least one active location before approval.")
+      if not institute.documents.exists():
+          raise ValidationError("Upload at least one verification document before approval.")
+
+
   @transaction.atomic
   def approve(institute, *, by):
-      institute = Institute.objects.select_for_update().get(pk=institute.pk)
-      if not institute.locations.filter(is_active=True).exists():   # proposal, see section 0
-          raise ValidationError("Add at least one active location before approval.")
-      # TODO(audit) + TODO(notify): institute owner
-      return _transition(institute, InstituteStatus.APPROVED)
+      # TODO(audit) + TODO(notify): the institute owner
+      return _transition(institute, InstituteStatus.APPROVED, check=_ready_for_approval)
 
 
   @transaction.atomic
@@ -504,7 +551,7 @@ service yet, so leave TODO markers like `users/services.py` does.
 
   @transaction.atomic
   def suspend(institute, *, by, reason):
-      # Staff keep their accounts (they can still log in, Q12); public queries hide the institute.
+      # Staff keep their accounts (decision 1); the public queries hide the institute.
       return _transition(institute, InstituteStatus.SUSPENDED, reason=reason)
 
 
@@ -515,48 +562,61 @@ service yet, so leave TODO markers like `users/services.py` does.
 
   @transaction.atomic
   def resubmit(institute):
-      """Owner answers an info request, or re-applies after a rejection."""
+      """The owner answers an info request, or re-applies after a rejection."""
       return _transition(institute, InstituteStatus.PENDING)
   ```
 
-- [ ] Registration (public): institute, owner, locations and documents in **one** transaction, with bulk inserts:
+- [x] Part 2: registration and locations:
 
   ```python
   @transaction.atomic
-  def register(*, institute_data, owner, locations=(), documents=()):
-      """owner = {"email", "password", "full_name", ...}. The owner is always INSTITUTE_STAFF."""
-      for loc in locations:
-          validate_institute_location(loc["location"])   # bulk_create skips model validation
+  def register(*, institute_data, owner, locations=()):
+      """owner = {"email", "password", "full_name", optional "phone_number"}; the owner is always INSTITUTE_STAFF.
+      Documents are uploaded afterwards through the portal (decision 4)."""
+      for item in locations:
+          validate_institute_location(item["location"])        # bulk_create skips model validation
       institute = Institute.objects.create(**institute_data)
       owner_user = User.objects.create_user(role=Role.INSTITUTE_STAFF, **owner)
       InstituteMember.objects.create(user=owner_user, institute=institute, role=MemberRole.OWNER)
-
       InstituteLocation.objects.bulk_create([
-          InstituteLocation(institute=institute, is_main=(i == 0), **loc)   # first = main office
-          for i, loc in enumerate(locations)
+          InstituteLocation(institute=institute, is_main=(i == 0), **item)      # the first one is the main office
+          for i, item in enumerate(locations)
       ])
-      InstituteDocument.objects.bulk_create(
-          [InstituteDocument(institute=institute, **doc) for doc in documents]
-      )
       # TODO(notify): admins with manage_institutes
       return institute
-  ```
 
-  A duplicate owner email raises `IntegrityError`, which the exception handler turns into 409. Prefer a serializer
-  `UniqueValidator(lookup="iexact")` so the user gets a 400 first.
 
-- [ ] Locations (also validate the municipality on add and update):
+  @transaction.atomic
+  def add_location(institute, *, location, address, contact_phone=""):
+      validate_institute_location(location)
+      Institute.objects.select_for_update().get(pk=institute.pk)             # serialise per institute
+      first = not institute.locations.filter(is_active=True).exists()
+      return InstituteLocation.objects.create(
+          institute=institute, location=location, address=address,
+          contact_phone=contact_phone, is_main=first,
+      )
 
-  ```python
+
+  @transaction.atomic
+  def update_location(instance, **fields):
+      if "location" in fields:
+          validate_institute_location(fields["location"])
+      instance = InstituteLocation.objects.select_for_update().get(pk=instance.pk)
+      for name, value in fields.items():
+          setattr(instance, name, value)
+      instance.save(update_fields=[*fields, "modified_at"])
+      return instance
+
+
   @transaction.atomic
   def set_main_location(location):
-      Institute.objects.select_for_update().get(pk=location.institute_id)   # serialise per institute
+      Institute.objects.select_for_update().get(pk=location.institute_id)
       location = InstituteLocation.objects.get(pk=location.pk)
       if not location.is_active:
           raise ValidationError("An inactive location cannot be the main office.")
       InstituteLocation.objects.filter(
           institute_id=location.institute_id, is_main=True
-      ).exclude(pk=location.pk).update(is_main=False)     # clear first, then set (partial unique index)
+      ).exclude(pk=location.pk).update(is_main=False)         # clear first, then set (partial unique index)
       location.is_main = True
       location.save(update_fields=["is_main", "modified_at"])
       return location
@@ -574,7 +634,44 @@ service yet, so leave TODO markers like `users/services.py` does.
       return location
   ```
 
-- [ ] Staff invitations (token stored hashed, single use, role always STAFF because there is one owner):
+- [x] Part 3: documents and gallery:
+
+  ```python
+  @transaction.atomic
+  def add_document(institute, *, name, file):
+      return InstituteDocument.objects.create(institute=institute, name=name, file=file)
+
+
+  @transaction.atomic
+  def review_document(document, *, status, by):
+      if status not in (DocumentStatus.VERIFIED, DocumentStatus.REJECTED):
+          raise ValidationError({"status": "Choose VERIFIED or REJECTED."})
+      document = InstituteDocument.objects.select_for_update().get(pk=document.pk)
+      document.status = status
+      document.save(update_fields=["status", "modified_at"])
+      return document
+
+
+  @transaction.atomic
+  def add_gallery_image(institute, *, image, caption=""):
+      Institute.objects.select_for_update().get(pk=institute.pk)
+      return InstituteGalleryImage.objects.create(
+          institute=institute, image=image, caption=caption,
+          position=institute.gallery.count(),                  # appended at the end
+      )
+
+
+  @transaction.atomic
+  def reorder_gallery(institute, ids):
+      images = {i.pk: i for i in InstituteGalleryImage.objects.select_for_update().filter(institute=institute)}
+      if sorted(images) != sorted(ids):
+          raise ValidationError("Send every gallery image id exactly once.")
+      for position, pk in enumerate(ids):
+          images[pk].position = position
+      InstituteGalleryImage.objects.bulk_update(images.values(), ["position"])
+  ```
+
+- [x] Part 4: staff and invitations. The raw token exists only in the email and in memory; the database keeps a hash, and the queued task is not saved in django-q's results table (`save=False`):
 
   ```python
   def _hash(token):
@@ -583,15 +680,23 @@ service yet, so leave TODO markers like `users/services.py` does.
 
   @transaction.atomic
   def invite(*, institute, email, by):
+      email = email.strip()
+      Institute.objects.select_for_update().get(pk=institute.pk)
+      institute.invitations.filter(                            # an expired invite must not block a new one
+          email__iexact=email, status=InvitationStatus.PENDING, expires_at__lt=timezone.now(),
+      ).update(status=InvitationStatus.REVOKED)
       if User.objects.filter(email__iexact=email).exists():
           raise ValidationError({"email": "This email already has an account."})   # one institute per user
+      if institute.invitations.filter(email__iexact=email, status=InvitationStatus.PENDING).exists():
+          raise ValidationError({"email": "An invitation is already pending for this email."})
       token = secrets.token_urlsafe(32)
       invitation = InstituteInvitation.objects.create(
           institute=institute, email=email, role=MemberRole.STAFF, invited_by=by,
           token_hash=_hash(token),
           expires_at=timezone.now() + timedelta(days=settings.INSTITUTE_INVITATION_TTL_DAYS),
       )
-      # TODO(notify): transaction.on_commit(lambda: send invite email containing `token`)
+      transaction.on_commit(lambda: async_task(
+          "apps.institutes.tasks.send_invitation_email", invitation.pk, token, save=False))
       return invitation
 
 
@@ -605,6 +710,8 @@ service yet, so leave TODO markers like `users/services.py` does.
       )
       if invitation is None or invitation.expires_at < timezone.now():
           raise ValidationError("This invitation is invalid or has expired.")
+      if User.objects.filter(email__iexact=invitation.email).exists():
+          raise ValidationError("This email already has an account.")
       user = User.objects.create_user(
           email=invitation.email, password=password, full_name=full_name, role=Role.INSTITUTE_STAFF,
       )
@@ -612,79 +719,283 @@ service yet, so leave TODO markers like `users/services.py` does.
       invitation.status = InvitationStatus.ACCEPTED
       invitation.save(update_fields=["status", "modified_at"])
       return user
+
+
+  @transaction.atomic
+  def revoke_invitation(invitation, *, by):
+      invitation = InstituteInvitation.objects.select_for_update().get(pk=invitation.pk)
+      if invitation.status != InvitationStatus.PENDING:
+          raise ValidationError("Only a pending invitation can be revoked.")
+      invitation.status = InvitationStatus.REVOKED
+      invitation.save(update_fields=["status", "modified_at"])
+      return invitation
+
+
+  @transaction.atomic
+  def remove_staff(member, *, by):
+      member = InstituteMember.objects.select_for_update().select_related("user").get(pk=member.pk)
+      if member.role == MemberRole.OWNER:
+          raise ValidationError("The owner cannot be removed.")
+      user = member.user
+      member.delete()
+      user_services.set_status(user, active=False, by=by)      # deactivates and revokes refresh tokens
   ```
 
-- [ ] Also needed: `revoke_invitation`, `remove_staff` (owner only; never the owner; deactivate the user and revoke their
-  tokens like `users.services.set_status`), `upload_document`, `review_document` (admin: verified / rejected).
-
-## 7. Profile fields (decided: option A, plain columns)
-
-The institute profile uses plain columns on `Institute` (easy to validate and filter), plus a small gallery table.
-"About" is the existing `description` column. The exact column list below is a proposal to confirm.
-
-- [ ] Add the columns to `Institute` (all optional, so registration needs none of them):
-
   ```python
-  # apps/institutes/models.py, inside Institute
-  ceo_name = models.CharField(max_length=150, blank=True)
-  ceo_message = models.TextField(blank=True)
-  website = models.URLField(blank=True)
-  contact_email = models.EmailField(blank=True)
-  contact_phone = models.CharField(max_length=25, blank=True, validators=[validate_phone_number])
-  facebook_url = models.URLField(blank=True)
-  linkedin_url = models.URLField(blank=True)
+  # apps/institutes/tasks.py
+  from django.conf import settings
+  from django.core.mail import send_mail
+
+  from apps.institutes.constants import InvitationStatus
+  from apps.institutes.models import InstituteInvitation
+
+
+  def send_invitation_email(invitation_id, token):
+      invitation = InstituteInvitation.objects.select_related("institute").get(pk=invitation_id)
+      if invitation.status != InvitationStatus.PENDING:
+          return
+      link = f"{settings.FRONTEND_BASE_URL}/accept-invitation?token={token}"
+      send_mail(
+          subject=f"You are invited to join {invitation.institute.name} on TrainingHub",
+          message=f"Open this link to set your password and join:\n\n{link}\n\nIt expires on "
+                  f"{invitation.expires_at:%d %b %Y}.",
+          from_email=None,                                      # DEFAULT_FROM_EMAIL
+          recipient_list=[invitation.email],
+      )
   ```
 
-- [ ] Gallery table. No unique constraint on `position`, so a reorder can run as one `bulk_update` (a swap would break a unique constraint halfway):
+  The queued email is only delivered while `python manage.py qcluster` is running (it also needs Redis).
+
+- [x] Service tests (`apps/institutes/tests/test_services.py`). These show the pattern; add the rest from the list below:
 
   ```python
-  class InstituteGalleryImage(BaseModel):
-      institute = models.ForeignKey(Institute, on_delete=models.CASCADE, related_name="gallery")
-      image = models.ImageField(upload_to=get_upload_path)
-      caption = models.CharField(max_length=200, blank=True)
-      position = models.PositiveSmallIntegerField(default=0)
+  import hashlib
+  from unittest import mock
+
+  from django.core.exceptions import ValidationError
+  from django.test import TestCase
+  from django.utils import timezone
+
+  from apps.institutes import services
+  from apps.institutes.constants import InstituteStatus
+  from apps.institutes.models import Institute, InstituteInvitation, InstituteLocation
+  from apps.institutes.tests.helpers import (
+      PASSWORD, TempMediaMixin, User, add_location, make_institute, make_municipality, pdf,
+  )
+  from apps.users.constants import Role
+
+
+  class WorkflowTests(TempMediaMixin, TestCase):
+      def setUp(self):
+          super().setUp()
+          self.institute, self.owner = make_institute()
+          self.admin = User.objects.create_user("admin@example.com", PASSWORD, role=Role.ADMIN)
+
+      def test_every_pair_of_statuses(self):
+          for start, allowed in InstituteStatus.TRANSITIONS.items():
+              for target in InstituteStatus.TRANSITIONS:
+                  with self.subTest(start=start, target=target):
+                      Institute.objects.filter(pk=self.institute.pk).update(status=start)
+                      if target in allowed:
+                          result = services._transition(self.institute, target, reason="because")
+                          self.assertEqual(result.status, target)
+                      else:
+                          with self.assertRaises(ValidationError):
+                              services._transition(self.institute, target, reason="because")
+
+      def test_reason_is_required_to_reject(self):
+          with self.assertRaises(ValidationError):
+              services.reject(self.institute, by=self.admin, reason="  ")
+
+      def test_approval_needs_a_location_and_a_document(self):
+          with self.assertRaises(ValidationError):
+              services.approve(self.institute, by=self.admin)
+          add_location(self.institute, make_municipality(), is_main=True)
+          with self.assertRaises(ValidationError):
+              services.approve(self.institute, by=self.admin)
+          services.add_document(self.institute, name="License", file=pdf())
+          self.assertEqual(services.approve(self.institute, by=self.admin).status, InstituteStatus.APPROVED)
+
+      def test_rejected_institute_can_re_apply(self):
+          services.reject(self.institute, by=self.admin, reason="Unclear documents")
+          self.assertEqual(services.resubmit(self.institute).status, InstituteStatus.PENDING)
+
+
+  class RegistrationTests(TestCase):
+      def setUp(self):
+          self.municipality = make_municipality()
+          self.owner = {"email": "new@example.com", "password": PASSWORD, "full_name": "New Owner"}
+          self.data = {"name": "New Institute", "type": "COMPANY"}
+
+      def test_creates_everything_with_the_first_location_as_main(self):
+          institute = services.register(
+              institute_data=self.data, owner=self.owner,
+              locations=[{"location": self.municipality, "address": "A"},
+                         {"location": self.municipality, "address": "B"}],
+          )
+          self.assertEqual(institute.status, InstituteStatus.PENDING)
+          self.assertEqual(institute.members.get().user.role, Role.INSTITUTE_STAFF)
+          self.assertEqual(list(institute.locations.order_by("pk").values_list("is_main", flat=True)), [True, False])
+
+      def test_a_failure_leaves_nothing_behind(self):
+          with mock.patch.object(InstituteLocation.objects, "bulk_create", side_effect=RuntimeError("boom")):
+              with self.assertRaises(RuntimeError):
+                  services.register(institute_data=self.data, owner=self.owner,
+                                    locations=[{"location": self.municipality, "address": "A"}])
+          self.assertFalse(Institute.objects.exists())
+          self.assertFalse(User.objects.filter(email="new@example.com").exists())
+
+
+  class InvitationTests(TestCase):
+      def setUp(self):
+          self.institute, self.owner = make_institute()
+
+      def invite(self, email="new@example.com"):
+          with mock.patch("apps.institutes.services.async_task") as queued, \
+                  self.captureOnCommitCallbacks(execute=True):
+              invitation = services.invite(institute=self.institute, email=email, by=self.owner)
+          return invitation, queued
+
+      def test_only_a_hash_is_stored_and_the_task_is_not_saved(self):
+          invitation, queued = self.invite()
+          token = queued.call_args.args[2]
+          self.assertEqual(invitation.token_hash, hashlib.sha256(token.encode()).hexdigest())
+          self.assertIs(queued.call_args.kwargs["save"], False)
+
+      def test_accept_works_once(self):
+          invitation, queued = self.invite()
+          token = queued.call_args.args[2]
+          user = services.accept_invitation(token=token, full_name="New Staff", password=PASSWORD)
+          self.assertEqual(user.membership.institute, self.institute)
+          with self.assertRaises(ValidationError):
+              services.accept_invitation(token=token, full_name="Again", password=PASSWORD)
+
+      def test_expired_invitation_is_refused(self):
+          invitation, queued = self.invite()
+          InstituteInvitation.objects.filter(pk=invitation.pk).update(expires_at=timezone.now())
+          with self.assertRaises(ValidationError):
+              services.accept_invitation(token=queued.call_args.args[2], full_name="X", password=PASSWORD)
+
+      def test_existing_account_cannot_be_invited(self):
+          with self.assertRaises(ValidationError):
+              self.invite(email=self.owner.email.upper())
+  ```
+
+  Still to write: removing staff (membership gone, user inactive, refresh tokens blacklisted, owner cannot be removed),
+  location switching and deactivation, gallery reorder, document review, a second pending invitation, and re-inviting after expiry.
+
+- [x] **M2 done when:** all service tests pass and the suite is green.
+
+## M3 – Public and admin API
+
+- [x] Wire the URLs. Prefixes live only in `apps/api/v1/urls.py`:
+
+  ```python
+  # apps/api/v1/urls.py
+  urlpatterns = [
+      path("user/", include("apps.users.api.v1.urls.users")),
+      path("locations/", include("apps.catalog.api.v1.urls.locations")),
+      path("institutes/", include("apps.institutes.api.v1.urls.public")),
+      path("institute/", include("apps.institutes.api.v1.urls.portal")),     # added in M4
+      path("admin/", include("apps.institutes.api.v1.urls.admin")),
+  ]
+  ```
+
+- [x] Imports for the two API files (the non-obvious ones; your editor will suggest the rest):
+
+  ```python
+  # apps/institutes/api/v1/serializers.py
+  from django.contrib.auth import get_user_model
+  from django.contrib.auth.password_validation import validate_password
+  from rest_framework import serializers
+  from rest_framework.validators import UniqueValidator
+
+  from apps.catalog.constants import LocationLevel
+  from apps.catalog.models import Location
+  from apps.common.serializers import DynamicFieldsModelSerializer
+  from apps.common.validators import validate_phone_number
+  from apps.institutes import services
+  from apps.institutes.constants import DocumentStatus
+  from apps.institutes.models import (
+      Institute, InstituteDocument, InstituteGalleryImage, InstituteInvitation,
+      InstituteLocation, InstituteMember,
+  )
+
+  # apps/institutes/api/v1/views.py
+  import os
+
+  from django.db.models import Prefetch
+  from django.http import FileResponse
+  from django.shortcuts import get_object_or_404
+  from django_filters.rest_framework import DjangoFilterBackend
+  from rest_framework.decorators import action
+  from rest_framework.filters import SearchFilter
+  from rest_framework.generics import CreateAPIView, GenericAPIView, RetrieveUpdateAPIView
+  from rest_framework.permissions import AllowAny
+  from rest_framework.response import Response
+  from rest_framework.views import APIView
+
+  from apps.common.viewsets import (
+      CreateListDestroyViewSet, CreateListRetrieveUpdateViewSet, CreateListUpdateDestroyViewSet,
+      CreateListViewSet, DestroyViewSet, ListViewSet, ReadOnlyViewSet,
+  )
+  from apps.institutes import services
+  from apps.institutes.constants import InstituteStatus, MemberRole
+  from apps.institutes.models import (
+      Institute, InstituteDocument, InstituteGalleryImage, InstituteInvitation,
+      InstituteLocation, InstituteMember,
+  )
+  from apps.institutes.permissions import IsInstituteMember, IsInstituteOwner, InstituteScopedMixin
+  from apps.users.permissions import HasPlatformPermission
+  ```
+
+- [x] Registration serializer (the owner's email is checked case-insensitively; role and status are never read from the payload):
+
+  ```python
+  # apps/institutes/api/v1/serializers.py (part 1)
+  User = get_user_model()
+
+
+  class OwnerSerializer(serializers.Serializer):
+      email = serializers.EmailField(validators=[UniqueValidator(
+          queryset=User.objects.all(), lookup="iexact", message="A user with that email already exists.")])
+      full_name = serializers.CharField(max_length=150)
+      password = serializers.CharField(write_only=True)
+      phone_number = serializers.CharField(max_length=25, required=False, validators=[validate_phone_number])
+
+      def validate_password(self, value):
+          validate_password(value)
+          return value
+
+
+  class LocationInputSerializer(serializers.Serializer):
+      location = serializers.PrimaryKeyRelatedField(
+          queryset=Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True))
+      address = serializers.CharField(max_length=255)
+      contact_phone = serializers.CharField(max_length=25, required=False, allow_blank=True,
+                                            validators=[validate_phone_number])
+
+
+  class RegisterSerializer(DynamicFieldsModelSerializer):
+      owner = OwnerSerializer(write_only=True)
+      locations = LocationInputSerializer(many=True, write_only=True, required=False)
 
       class Meta:
-          indexes = [models.Index(fields=["institute", "position"], name="institutes_gallery_pos_idx")]
+          model = Institute
+          fields = ("id", "slug", "name", "type", "established_year", "description", "status",
+                    "owner", "locations")
+          read_only_fields = ("id", "slug", "status")
+
+      def create(self, validated_data):
+          return services.register(
+              owner=validated_data.pop("owner"),
+              locations=validated_data.pop("locations", []),
+              institute_data=validated_data,
+          )
   ```
 
-- [ ] Gallery images are public (shown on the institute page), so they use the normal `media/` storage, unlike verification documents. Image upload still needs `ATTACHMENT_MAX_UPLOAD_SIZE` or a size rule of its own.
-- [ ] Public institute page: `prefetch_related("gallery")`; the owner edits the profile through `institute/profile/` and the gallery through `institute/gallery/`.
-
-## 8. API layer (generic views, logic in serializers and services)
-
-| Audience | Endpoint | View | Permission |
-|---|---|---|---|
-| Public | `POST institute/register/` | `CreateAPIView` | public, `institute_register` throttle, captcha later |
-| Public | `POST institute/invitations/accept/` | `CreateAPIView` | public, `invitation_accept` throttle |
-| Public | `GET institutes/`, `institutes/{slug}/` | `ReadOnlyViewSet` | public, only `APPROVED` |
-| Portal | `GET, PATCH institute/profile/` | `RetrieveUpdateAPIView` | member (PATCH: owner) |
-| Portal | `institute/gallery/` (list, create, update, delete, reorder) | `CreateListRetrieveUpdateViewSet` + delete | owner |
-| Portal | `institute/locations/` (list, create, update) + `.../{id}/set-main` | `CreateListRetrieveUpdateViewSet` | member (write: owner) |
-| Portal | `institute/documents/` | `CreateListRetrieveUpdateViewSet` (create, list) | owner |
-| Portal | `institute/staff/`, `institute/invitations/` | list / create / delete | owner |
-| Admin | `admin/institutes/`, `.../{id}/{approve,reject,request-info,suspend,reinstate}` | `ReadOnlyViewSet` + actions | `users.manage_institutes` |
-| Admin | `admin/institutes/{id}/documents/{doc}/` | download + review | `users.manage_institutes` |
-
-- [ ] Public registration serializer: calls the service, never trusts `status` or `role`:
-
   ```python
-  class RegisterSerializer(serializers.Serializer):
-      name = serializers.CharField(max_length=255)
-      # ... type, established_year, description, logo
-      owner = OwnerSerializer()                         # email (iexact unique), full_name, password
-      locations = LocationInputSerializer(many=True, required=False)
-      documents = DocumentInputSerializer(many=True, required=False)
-
-      def create(self, validated):
-          owner = validated.pop("owner")
-          locations = validated.pop("locations", [])
-          documents = validated.pop("documents", [])
-          return services.register(
-              institute_data=validated, owner=owner, locations=locations, documents=documents,
-          )
-
-
+  # apps/institutes/api/v1/views.py (part 1): public registration
   class RegisterView(CreateAPIView):
       serializer_class = RegisterSerializer
       permission_classes = [AllowAny]
@@ -692,93 +1003,518 @@ The institute profile uses plain columns on `Institute` (easy to validate and fi
       throttle_scope = "institute_register"
   ```
 
-- [ ] Public list: no N+1, only approved, stable order, locations prefetched with their municipality, district and province
-  (the ancestors are on the row, so only `select_related("location__district", "location__province")` is needed):
+  It lives in the portal URL module as `institute/register/`, and must come before the router paths there.
+  The owner can log in straight away, while the institute is still `PENDING`, to upload documents and answer requests.
+
+- [x] Public list and detail: only `APPROVED`, stable order, a constant number of queries:
 
   ```python
-  class PublicInstituteViewSet(ReadOnlyViewSet):
-      serializer_class = PublicInstituteSerializer
-      permission_classes = []                    # public
-      lookup_field = "slug"
-      queryset = (
-          Institute.objects.filter(status=InstituteStatus.APPROVED)
-          .prefetch_related(Prefetch(
-              "locations",
-              queryset=InstituteLocation.objects.filter(is_active=True)
-                       .select_related("location", "location__district", "location__province"),
-          ))
-          .order_by("name", "pk")
-      )
+  # apps/institutes/api/v1/serializers.py (part 2)
+  class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
+      location = serializers.SerializerMethodField()
+
+      class Meta:
+          model = Institute
+          fields = ("id", "slug", "name", "type", "logo", "location")
+
+      def get_location(self, obj):
+          main = next((l for l in obj.locations.all() if l.is_main), None)   # prefetched, no query
+          if main is None:
+              return None
+          return {"municipality": main.location.name, "district": main.location.district.name,
+                  "province": main.location.province.name, "address": main.address}
+
+
+  class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
+      locations = serializers.SerializerMethodField()
+      gallery = serializers.SerializerMethodField()
+
+      class Meta(PublicInstituteListSerializer.Meta):
+          fields = PublicInstituteListSerializer.Meta.fields + (
+              "established_year", "description", "ceo_name", "ceo_message", "website", "contact_email",
+              "contact_phone", "facebook_url", "linkedin_url", "locations", "gallery")
+
+      def get_locations(self, obj):
+          return [{"municipality": l.location.name, "district": l.location.district.name,
+                   "province": l.location.province.name, "address": l.address,
+                   "contact_phone": l.contact_phone, "is_main": l.is_main} for l in obj.locations.all()]
+
+      def get_gallery(self, obj):
+          return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
   ```
 
-  The card's city, district and province come from the main location inside the serializer
-  (`next(l for l in prefetched if l.is_main)`), not from a new query.
+  ```python
+  # apps/institutes/api/v1/views.py (part 2)
+  class PublicInstituteViewSet(ReadOnlyViewSet):
+      permission_classes = []                     # public
+      lookup_field = "slug"
+      filter_backends = (DjangoFilterBackend, SearchFilter)
+      filterset_fields = ("type",)
+      search_fields = ("name",)
 
-- [ ] Admin review actions without four copies of the same code:
+      def get_serializer_class(self):
+          return PublicInstituteDetailSerializer if self.action == "retrieve" else PublicInstituteListSerializer
+
+      def get_queryset(self):
+          return (
+              Institute.objects.filter(status=InstituteStatus.APPROVED)
+              .prefetch_related(
+                  Prefetch("locations", queryset=InstituteLocation.objects.filter(is_active=True)
+                           .select_related("location", "location__district", "location__province")),
+                  Prefetch("gallery", queryset=InstituteGalleryImage.objects.order_by("position", "pk")),
+              )
+              .order_by("name", "pk")
+          )
+  ```
 
   ```python
+  # apps/institutes/api/v1/urls/public.py
+  from rest_framework import routers
+
+  from apps.institutes.api.v1 import views
+
+  app_name = "institutes_public"
+
+  router = routers.SimpleRouter()
+  router.register("", views.PublicInstituteViewSet, basename="institute")
+  urlpatterns = router.urls
+  ```
+
+- [x] Admin review API. `users.manage_institutes` is the permission, and the five decisions share one helper:
+
+  ```python
+  # apps/institutes/api/v1/serializers.py (part 3)
+  class ReasonSerializer(serializers.Serializer):
+      reason = serializers.CharField()
+
+
+  class AdminDocumentSerializer(DynamicFieldsModelSerializer):
+      class Meta:
+          model = InstituteDocument
+          fields = ("id", "name", "status", "created_at")          # never the file path or URL
+          read_only_fields = ("id", "name", "created_at")
+
+
+  class DocumentReviewSerializer(serializers.Serializer):
+      status = serializers.ChoiceField(choices=(DocumentStatus.VERIFIED, DocumentStatus.REJECTED))
+
+
+  class AdminInstituteSerializer(DynamicFieldsModelSerializer):
+      documents = AdminDocumentSerializer(many=True, read_only=True)
+      owner_email = serializers.SerializerMethodField()
+
+      class Meta:
+          model = Institute
+          fields = ("id", "slug", "name", "type", "status", "status_reason", "established_year", "description",
+                    "created_at", "owner_email", "documents")
+
+      def get_owner_email(self, obj):
+          owners = getattr(obj, "owner_members", [])               # prefetched below
+          return owners[0].user.email if owners else None
+  ```
+
+  ```python
+  # apps/institutes/api/v1/views.py (part 3)
   class AdminInstituteViewSet(ReadOnlyViewSet):
-      queryset = Institute.objects.prefetch_related("documents").order_by("-created_at", "-pk")
       serializer_class = AdminInstituteSerializer
       permission_classes = [HasPlatformPermission]
       required_permission = "users.manage_institutes"
-      filterset_fields = ["status"]
+      lookup_value_regex = r"[0-9]+"
+      filter_backends = (DjangoFilterBackend, SearchFilter)
+      filterset_fields = ("status", "type")
+      search_fields = ("name",)
+      queryset = (
+          Institute.objects.prefetch_related(
+              "documents",
+              Prefetch("members", queryset=InstituteMember.objects.filter(role=MemberRole.OWNER).select_related("user"),
+                       to_attr="owner_members"),
+          ).order_by("-created_at", "-pk")
+      )
 
-      def _review(self, request, service, *, reason_required=False):
-          serializer = ReviewSerializer(data=request.data, context={"reason_required": reason_required})
-          serializer.is_valid(raise_exception=True)
-          institute = service(self.get_object(), by=request.user, **serializer.validated_data)
-          return Response(self.get_serializer(institute).data)
+      def _review(self, request, service, *, with_reason):
+          kwargs = {}
+          if with_reason:
+              serializer = ReasonSerializer(data=request.data)
+              serializer.is_valid(raise_exception=True)
+              kwargs["reason"] = serializer.validated_data["reason"]
+          institute = service(self.get_object(), by=request.user, **kwargs)
+          return Response(AdminInstituteSerializer(institute, context=self.get_serializer_context()).data)
 
       @action(detail=True, methods=["post"])
       def approve(self, request, pk=None):
-          return self._review(request, services.approve)
+          return self._review(request, services.approve, with_reason=False)
+
+      @action(detail=True, methods=["post"])
+      def reject(self, request, pk=None):
+          return self._review(request, services.reject, with_reason=True)
 
       @action(detail=True, methods=["post"], url_path="request-info")
       def request_info(self, request, pk=None):
-          return self._review(request, services.request_info, reason_required=True)
+          return self._review(request, services.request_info, with_reason=True)
 
-      # reject, suspend, reinstate in the same way
+      @action(detail=True, methods=["post"])
+      def suspend(self, request, pk=None):
+          return self._review(request, services.suspend, with_reason=True)
+
+      @action(detail=True, methods=["post"])
+      def reinstate(self, request, pk=None):
+          return self._review(request, services.reinstate, with_reason=False)
   ```
 
-- [ ] Documents are private: never return `file.url`. Serve through an authorized view that checks admin permission or the
-  owner's membership and streams with `FileResponse` (switch to a signed URL when S3 arrives).
-- [ ] Error handling relies on the existing handler: Django `ValidationError` -> 400, `IntegrityError` -> 409.
+  Documents are private. A reviewer reviews one with a `PATCH` and downloads it through an authorised stream; nothing ever returns `file.url`:
 
-## 9. Tests
+  ```python
+  # apps/institutes/api/v1/views.py (part 4)
+  def private_file_response(document):
+      return FileResponse(document.file.open("rb"), as_attachment=True,
+                          filename=os.path.basename(document.file.name))
 
-### `apps/catalog/tests/`
 
-- [x] Loader: run twice, 7 / 77 / 752 rows, no change on the second run; every municipality's `province_id` matches its district's.
-- [x] Constraints: a province with a parent is rejected, a municipality without a district is rejected, duplicate `(parent, name)` is rejected, duplicate `(level, code)` is rejected.
-- [x] `save()` derives `province` and `district` correctly.
-- [x] Location list has a constant query count (`assertNumQueries`) with the district shown.
+  class AdminDocumentView(GenericAPIView):
+      permission_classes = [HasPlatformPermission]
+      required_permission = "users.manage_institutes"
+      serializer_class = DocumentReviewSerializer
 
-### `apps/institutes/tests/`
+      def patch(self, request, institute_id, pk):
+          document = get_object_or_404(InstituteDocument, pk=pk, institute_id=institute_id)
+          serializer = self.get_serializer(data=request.data)
+          serializer.is_valid(raise_exception=True)
+          document = services.review_document(document, status=serializer.validated_data["status"], by=request.user)
+          return Response(AdminDocumentSerializer(document).data)
 
-- [ ] Constraints: second owner rejected, two active main locations rejected, an inactive main rejected, duplicate pending invite (case-insensitive) rejected, one membership per user.
-- [ ] A province or district (or an inactive municipality) is rejected as an institute location.
-- [ ] A rejected institute can re-apply (`REJECTED` to `PENDING`); a rejected or pending institute is never in the public list.
-- [ ] Workflow: every allowed transition works, every other one raises; reason required for reject / request-info / suspend; approve fails with no active location.
-- [ ] Registration: creates institute + owner + locations + documents atomically; a failing step leaves nothing behind; `role` / `status` in the payload are ignored; duplicate email (any case) -> 400.
-- [ ] Invitation: accept works once; expired or unknown token -> 400; invited email that already has an account -> 400; token not stored in plaintext.
-- [ ] Permissions matrix: public / staff of institute A / staff of institute B (gets 404 on A's rows) / admin without `manage_institutes` (403) / admin with it.
-- [ ] Public list shows only `APPROVED`, hides `SUSPENDED`, and has a constant query count (`assertNumQueries`) with 1 and with 20 institutes.
-- [ ] Concurrency: two simultaneous approvals -> one succeeds, the other gets a clean 400 (`TransactionTestCase`).
-- [ ] Throttle: the 6th registration in an hour gets 429 (clear the cache in `setUp`, as the `users` tests do).
 
-## 10. Docs to update in the same change
+  class AdminDocumentDownloadView(APIView):
+      permission_classes = [HasPlatformPermission]
+      required_permission = "users.manage_institutes"
 
-- [ ] `CLAUDE.md`: move `institutes` and `catalog` out of "Planned apps" into Layout; add the endpoints, the two new throttle scopes, `PRIVATE_MEDIA_ROOT`, `INSTITUTE_INVITATION_TTL_DAYS`, the `load_locations` command and the `apps/catalog/data/` files; add the "documents are private" landmine; update the tests line; remove the answered location line from Open decisions.
-- [ ] `docs/System Design.md`: mark build step 3 done; fix `registered_at` (covered by `created_at`); record the answers to Q4, Q12, Q13, the profile fields, the location level name and the "at least one location before approval" rule; update the `Location` description (`code`, `type`, `is_active`, level `MUNICIPALITY`); correct the "composite FK" wording (Django 5.2 cannot); record the URL convention once confirmed; answer Q5.
-- [ ] `README.md`: layout, the `load_locations` step in setup, and the endpoint table.
-- [ ] Notion review page: update diagrams 4b.2 and 4b.3 (no `registered_at`, `InstituteMember.user` is one-to-one, documents are private, `Location` with `code`, `type`, `is_active`) and section 6.
+      def get(self, request, institute_id, pk):
+          return private_file_response(get_object_or_404(InstituteDocument, pk=pk, institute_id=institute_id))
+  ```
 
-## 11. Definition of done
+  ```python
+  # apps/institutes/api/v1/urls/admin.py
+  from django.urls import path
+  from rest_framework import routers
 
-- [ ] `python manage.py check` and `makemigrations --check --dry-run` clean
-- [ ] All tests pass (`python manage.py test`)
-- [ ] `load_locations` run twice leaves 7 / 77 / 752 rows
-- [ ] No hand-edited migrations
-- [ ] Docs above updated in the same change
-- [ ] Open questions this work answered are removed from System Design.md section 8
+  from apps.institutes.api.v1 import views
+
+  app_name = "institutes_admin"
+
+  router = routers.SimpleRouter()
+  router.register("institutes", views.AdminInstituteViewSet, basename="admin-institute")
+
+  urlpatterns = [
+      path("institutes/<int:institute_id>/documents/<int:pk>/", views.AdminDocumentView.as_view()),
+      path("institutes/<int:institute_id>/documents/<int:pk>/download/", views.AdminDocumentDownloadView.as_view()),
+  ] + router.urls
+  ```
+
+- [x] API tests (`apps/institutes/tests/test_api_public_admin.py`):
+  - Registration: `201` creates institute, owner and locations; `status`, `role` and `slug` in the payload are ignored; a duplicate
+    email in any case gives `400`; a province id as a location gives `400`; the 6th registration in an hour gives `429` (`cache.clear()` in `setUp`).
+  - Public list: only `APPROVED` institutes appear; `SUSPENDED`, `PENDING`, `REJECTED` and `INFO_REQUESTED` do not.
+  - Query count: the same number of queries with 1 and with 20 institutes:
+
+    ```python
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    def queries_for_list(self):
+        with CaptureQueriesContext(connection) as captured:
+            self.assertEqual(self.client.get("/api/v1/institutes/").status_code, 200)
+        return len(captured)
+
+    # create 1 approved institute with a main location, record the count; create 19 more; the count is unchanged
+    ```
+
+  - Admin: anonymous gets `401`, staff `403`, an admin without `manage_institutes` `403`, with it `200`; each review action
+    returns the new status; a missing reason gives `400`; an illegal move gives `400`.
+  - Documents: the admin list shows no file path; the download returns the bytes; a staff user gets `403`.
+
+- [ ] **M3 done when:** suite green (it is), and the public endpoints work from Swagger at `/api/root/`. The schema generates (HTTP 200, all 28 institute paths); trying the endpoints by hand in the Swagger UI is still to do.
+
+## M4 – Portal API (the institute's own staff)
+
+- [x] Permissions and queryset scoping. Other institutes' rows return `404`, not `403`:
+
+  ```python
+  # apps/institutes/permissions.py
+  from rest_framework.permissions import BasePermission
+
+  from apps.institutes.constants import MemberRole
+  from apps.users.constants import Role
+
+
+  class IsInstituteMember(BasePermission):
+      def has_permission(self, request, view):
+          user = request.user
+          return bool(user and user.is_authenticated and user.role == Role.INSTITUTE_STAFF
+                      and hasattr(user, "membership"))        # one query per request, then cached on the user
+
+
+  class IsInstituteOwner(IsInstituteMember):
+      def has_permission(self, request, view):
+          return super().has_permission(request, view) and request.user.membership.role == MemberRole.OWNER
+
+
+  class InstituteScopedMixin:
+      """Limit the queryset to the caller's institute."""
+
+      def get_queryset(self):
+          queryset = super().get_queryset()
+          if getattr(self, "swagger_fake_view", False):
+              return queryset.none()
+          return queryset.filter(institute_id=self.request.user.membership.institute_id)
+  ```
+
+- [x] Serializers for the portal:
+
+  ```python
+  # apps/institutes/api/v1/serializers.py (part 4)
+  class InstituteProfileSerializer(DynamicFieldsModelSerializer):
+      class Meta:
+          model = Institute
+          fields = ("id", "slug", "name", "type", "status", "status_reason", "established_year", "description",
+                    "logo", "ceo_name", "ceo_message", "website", "contact_email", "contact_phone",
+                    "facebook_url", "linkedin_url")
+          read_only_fields = ("id", "slug", "status", "status_reason")
+
+
+  class InstituteLocationSerializer(DynamicFieldsModelSerializer):
+      location = serializers.PrimaryKeyRelatedField(
+          queryset=Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True))
+      municipality_name = serializers.CharField(source="location.name", read_only=True)
+      district_name = serializers.CharField(source="location.district.name", read_only=True)
+      province_name = serializers.CharField(source="location.province.name", read_only=True)
+
+      class Meta:
+          model = InstituteLocation
+          fields = ("id", "location", "municipality_name", "district_name", "province_name", "address",
+                    "contact_phone", "is_main", "is_active")
+          read_only_fields = ("id", "is_main", "is_active")
+
+      def create(self, validated_data):
+          return services.add_location(self.request.user.membership.institute, **validated_data)
+
+      def update(self, instance, validated_data):
+          return services.update_location(instance, **validated_data)
+
+
+  class InstituteDocumentSerializer(DynamicFieldsModelSerializer):
+      class Meta:
+          model = InstituteDocument
+          fields = ("id", "name", "file", "status", "created_at")
+          read_only_fields = ("id", "status", "created_at")
+          extra_kwargs = {"file": {"write_only": True}}          # never echoed back
+
+      def create(self, validated_data):
+          return services.add_document(self.request.user.membership.institute, **validated_data)
+
+
+  class GalleryImageSerializer(DynamicFieldsModelSerializer):
+      class Meta:
+          model = InstituteGalleryImage
+          fields = ("id", "image", "caption", "position")
+          read_only_fields = ("id", "position")
+
+      def create(self, validated_data):
+          return services.add_gallery_image(self.request.user.membership.institute, **validated_data)
+
+
+  class GalleryReorderSerializer(serializers.Serializer):
+      ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+
+
+  class StaffSerializer(DynamicFieldsModelSerializer):
+      email = serializers.EmailField(source="user.email", read_only=True)
+      full_name = serializers.CharField(source="user.full_name", read_only=True)
+
+      class Meta:
+          model = InstituteMember
+          fields = ("id", "email", "full_name", "role", "created_at")
+
+
+  class InvitationSerializer(DynamicFieldsModelSerializer):
+      class Meta:
+          model = InstituteInvitation
+          fields = ("id", "email", "role", "status", "expires_at", "created_at")
+          read_only_fields = ("id", "role", "status", "expires_at", "created_at")      # the token is never returned
+
+      def create(self, validated_data):
+          return services.invite(institute=self.request.user.membership.institute,
+                                 email=validated_data["email"], by=self.request.user)
+
+
+  class AcceptInvitationSerializer(serializers.Serializer):
+      token = serializers.CharField(write_only=True)
+      full_name = serializers.CharField(max_length=150, write_only=True)
+      password = serializers.CharField(write_only=True)
+
+      def validate_password(self, value):
+          validate_password(value)
+          return value
+
+      def create(self, validated_data):
+          return services.accept_invitation(**validated_data)
+
+      def to_representation(self, instance):
+          return {"email": instance.email}
+  ```
+
+- [x] Portal views. Staff can do everything except staff and invitations (decision 2):
+
+  ```python
+  # apps/institutes/api/v1/views.py (part 5)
+  class InstituteProfileView(RetrieveUpdateAPIView):
+      serializer_class = InstituteProfileSerializer
+      permission_classes = [IsInstituteMember]
+      http_method_names = ["get", "patch", "head", "options"]
+
+      def get_object(self):
+          return self.request.user.membership.institute
+
+
+  class ResubmitView(GenericAPIView):
+      """Answer an info request, or re-apply after a rejection."""
+      permission_classes = [IsInstituteMember]
+      serializer_class = InstituteProfileSerializer
+
+      def post(self, request):
+          institute = services.resubmit(request.user.membership.institute)
+          return Response(self.get_serializer(institute).data)
+
+
+  class PortalLocationViewSet(InstituteScopedMixin, CreateListRetrieveUpdateViewSet):
+      serializer_class = InstituteLocationSerializer
+      permission_classes = [IsInstituteMember]
+      lookup_value_regex = r"[0-9]+"
+      http_method_names = ["get", "post", "patch", "head", "options"]
+      queryset = (InstituteLocation.objects
+                  .select_related("location", "location__district", "location__province")
+                  .order_by("-is_main", "pk"))
+
+      @action(detail=True, methods=["post"], url_path="set-main")
+      def set_main(self, request, pk=None):
+          return Response(self.get_serializer(services.set_main_location(self.get_object())).data)
+
+      @action(detail=True, methods=["post"])
+      def deactivate(self, request, pk=None):
+          return Response(self.get_serializer(services.deactivate_location(self.get_object())).data)
+
+
+  class PortalDocumentViewSet(InstituteScopedMixin, CreateListViewSet):
+      serializer_class = InstituteDocumentSerializer
+      permission_classes = [IsInstituteMember]
+      queryset = InstituteDocument.objects.order_by("-created_at", "-pk")
+
+
+  class PortalDocumentDownloadView(APIView):
+      permission_classes = [IsInstituteMember]
+
+      def get(self, request, pk):
+          return private_file_response(get_object_or_404(
+              InstituteDocument, pk=pk, institute_id=request.user.membership.institute_id))
+
+
+  class PortalGalleryViewSet(InstituteScopedMixin, CreateListUpdateDestroyViewSet):
+      serializer_class = GalleryImageSerializer
+      permission_classes = [IsInstituteMember]
+      lookup_value_regex = r"[0-9]+"
+      http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+      queryset = InstituteGalleryImage.objects.order_by("position", "pk")
+
+      @action(detail=False, methods=["post"])
+      def reorder(self, request):
+          serializer = GalleryReorderSerializer(data=request.data)
+          serializer.is_valid(raise_exception=True)
+          services.reorder_gallery(request.user.membership.institute, serializer.validated_data["ids"])
+          return Response(self.get_serializer(self.get_queryset(), many=True).data)
+
+
+  class PortalStaffViewSet(InstituteScopedMixin, ListViewSet, DestroyViewSet):
+      serializer_class = StaffSerializer
+      permission_classes = [IsInstituteOwner]
+      lookup_value_regex = r"[0-9]+"
+      queryset = InstituteMember.objects.select_related("user").order_by("role", "pk")
+
+      def perform_destroy(self, instance):
+          services.remove_staff(instance, by=self.request.user)
+
+
+  class PortalInvitationViewSet(InstituteScopedMixin, CreateListDestroyViewSet):
+      serializer_class = InvitationSerializer
+      permission_classes = [IsInstituteOwner]
+      lookup_value_regex = r"[0-9]+"
+      queryset = InstituteInvitation.objects.order_by("-created_at", "-pk")
+
+      def perform_destroy(self, instance):
+          services.revoke_invitation(instance, by=self.request.user)
+
+
+  class AcceptInvitationView(CreateAPIView):
+      serializer_class = AcceptInvitationSerializer
+      permission_classes = [AllowAny]
+      authentication_classes = []
+      throttle_scope = "invitation_accept"
+  ```
+
+  ```python
+  # apps/institutes/api/v1/urls/portal.py
+  from django.urls import path
+  from rest_framework import routers
+
+  from apps.institutes.api.v1 import views
+
+  app_name = "institutes_portal"
+
+  router = routers.SimpleRouter()
+  router.register("locations", views.PortalLocationViewSet, basename="portal-location")
+  router.register("documents", views.PortalDocumentViewSet, basename="portal-document")
+  router.register("gallery", views.PortalGalleryViewSet, basename="portal-gallery")
+  router.register("staff", views.PortalStaffViewSet, basename="portal-staff")
+  router.register("invitations", views.PortalInvitationViewSet, basename="portal-invitation")
+
+  urlpatterns = [
+      path("register/", views.RegisterView.as_view(), name="register"),
+      path("invitations/accept/", views.AcceptInvitationView.as_view(), name="invitation-accept"),
+      path("profile/", views.InstituteProfileView.as_view(), name="profile"),
+      path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),
+      path("documents/<int:pk>/download/", views.PortalDocumentDownloadView.as_view(), name="document-download"),
+  ] + router.urls
+  ```
+
+  `invitations/accept/` and `register/` come before the router, and the routers use numeric ids, so `accept` is never read as an id.
+
+- [x] Portal tests (`apps/institutes/tests/test_api_portal.py`):
+  - Permission matrix for every endpoint: anonymous `401`; an admin `403`; staff of institute B gets `404` on institute A's rows;
+    staff can use profile, locations, documents and gallery; only the owner can use `staff/` and `invitations/` (staff gets `403`).
+  - Locations: the first becomes main; `set-main` moves it; deactivating the main one gives `400`; a province id gives `400`.
+  - Documents: upload needs multipart; the response has no file path; a `.exe`, or a file over 5 MB, gives `400`; another institute's document download gives `404`.
+  - Gallery: add, rename, delete, and reorder (a missing or extra id gives `400`).
+  - Invitations: create returns no token; accepting works once and the new user can log in; a bad or expired token gives `400`;
+    the 11th accept in an hour gives `429`; removing staff deactivates the user and revokes their tokens.
+  - Resubmit: allowed from `REJECTED` and `INFO_REQUESTED`, refused from `APPROVED` and `PENDING`.
+  - Query counts stay constant for the location, staff and invitation lists.
+
+- [ ] **M4 done when:** (`EndToEndTests` runs this whole journey through the API and passes; a manual run is still to do) the whole flow works end to end by hand with `runserver` and `qcluster`: register, log in, upload a document, add a
+  location, an admin approves, the institute appears at `/api/v1/institutes/`, the owner invites staff (the email shows in the console), the staff member accepts and logs in.
+
+## M5 – Docs and wrap-up
+
+- [x] `CLAUDE.md`: add `institutes` to Layout (and remove it from Planned apps); the endpoints; the settings
+  (`PRIVATE_MEDIA_ROOT`, `INSTITUTE_*`, `FRONTEND_BASE_URL`); the throttle scopes; that invitation emails need `qcluster`; the landmines
+  (documents are private and never get a URL; `BASE_DIR` is `config/`; the storage reads its setting on every use); the tests line.
+- [x] `docs/System Design.md`: build step 3 done; record the answers to decisions 1 to 9 and delete them from the open questions;
+  `registered_at` is `created_at`; documents are uploaded after registration; correct the "composite FK" wording for `Training`; the URL split.
+- [x] `README.md`: the setup step for `private_media/` and `FRONTEND_BASE_URL`, and the new endpoint tables.
+- [x] Notion review page: diagram 4b.2 (documents uploaded after registration, `InstituteGalleryImage`, no `registered_at`) and section 19.
+- [x] Definition of done: `check` clean; `makemigrations --check --dry-run` clean; all tests pass; no hand-edited migrations; docs updated in the same change.
+
+## Known limits and follow-ups (not in this list)
+
+- No `AuditLog` and no `notifications` app yet: `# TODO(audit)` and `# TODO(notify)` markers sit where they will be called.
+  Approval and rejection emails to the owner are part of that later work.
+- No captcha on registration yet (the throttle is the only protection); reCAPTCHA comes with the shared abuse-protection work.
+- Editing an `APPROVED` institute's profile is allowed without re-review. Whether it should need one is an open question, like Q10 for trainings.
+- Upload checks look at the extension and size only.
+- `Training` will point at `InstituteLocation`; "a training's location belongs to the same institute" must be checked in the training service (Django has no composite foreign keys).
