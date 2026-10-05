@@ -12,6 +12,9 @@ an account. The frontend is a separate Next.js project.
   in System Design.md win.
 - `docs/institutes-checklist.md` - the work list `institutes` was built from (decisions assumed, milestones, snippets);
   mirrored in Notion. A record of the plan, not of the code: where they differ, the code wins.
+- `docs/catalog-checklist.md` - the work list categories (`catalog`) and trainings (`training`) were built from: the
+  sixteen decisions, a comparison with the UI, milestones C0 to C6, snippets; mirrored in Notion. A record of the plan,
+  like the one above: where they differ, the code wins.
 - `design/*.html` - three UI prototypes (Training Hub, Institute Portal, Admin Console). Each is a
   bundled single file: the screens live in a base64/gzip `__bundler/template` + `__bundler/manifest`
   script, so grepping the HTML for UI text finds nothing - decode it first.
@@ -34,7 +37,8 @@ or an open question gets answered. Rules:
   `django-filter`, `django-cors-headers`, `drf-yasg`, `django-q2`, `django-redis`, `django-allauth`
   (installed, not in `INSTALLED_APPS`), Pillow, Argon2 password hashing - `requirements/base.txt`.
 - Dev extras in `requirements/dev.txt`: debug toolbar, django-extensions, ipdb, ipython, fabric3, pylint.
-- PostgreSQL. Redis for cache and the django-q2 broker. SMTP email. Google reCAPTCHA (planned).
+- PostgreSQL (`django.contrib.postgres` is installed: `ArrayField`, full-text search). Redis for cache and the django-q2
+  broker. SMTP email. Google reCAPTCHA (planned).
 - Files: local `media/` now, S3 later - use Django's storage API, never hard-code paths.
 
 ## Product decisions that shape the code
@@ -50,7 +54,15 @@ or an open question gets answered. Rules:
   admins limited rights via Django permissions on `User.Meta.permissions` (`users.manage_*`), checked with
   `has_perm`. `GRANTABLE_PERMISSIONS` excludes `manage_admins`.
 - Training mode: `PHYSICAL`, `ONLINE`, `HYBRID`. Single fee, NPR only. All times are NPT, online included.
-  Locations are a managed Nepal province/district/municipality list. Search is PostgreSQL full-text.
+  Locations are a managed Nepal province/district/municipality list. Search is PostgreSQL full-text (`simple`
+  configuration, word-prefix match).
+- Trainings (`apps/training/constants.py`): levels `BEGINNER` / `INTERMEDIATE` / `ADVANCED`; duration is a value plus a
+  unit (days, weeks, months) and the service derives `duration_weeks`; the schedule is a start / end date plus weekly
+  class slots (`TrainingSession.class_days` and times). A training uses a category or a sub-category (two levels).
+  Statuses `DRAFT` → `SUBMITTED` → `APPROVED` / `CHANGES_REQUESTED` / `REJECTED`; then `UNPUBLISHED`, `CANCELLED`, and
+  `EXPIRED` (set by a daily job after `end_date`). Editing an `APPROVED` / `UNPUBLISHED` training sends it back to
+  `SUBMITTED`; only a `DRAFT` can be deleted; only an `APPROVED` institute creates, submits or republishes. Empty
+  `seats` means unlimited.
 - Institute types (fixed list): Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School,
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
@@ -71,8 +83,9 @@ config/
   exception_handlers.py   maps Django ValidationError -> 400 and database IntegrityError -> 409
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
-  api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `institutes/`, `institute/`, `admin/`
-                          (one include per resource group)
+  api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
+                          `institute/trainings/`, `institute/`, `admin/` (one include per resource group;
+                          `admin/` is included once per app)
   common/                 BaseModel (created_at/modified_at), SlugModel, BaseViewSet, DynamicFields
                           serializers, validators, helpers
   users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
@@ -81,7 +94,16 @@ apps/
   catalog/                `Location` (province / district / municipality in one table, denormalised
                           `province` / `district`), management command `load_locations` (data in
                           `catalog/data/`: provinces.json, districts.json, cities.json), public read-only API
-                          under `locations/` (list with filters, detail, cached `tree/`)
+                          under `locations/` (list with filters, detail, cached `tree/`); `Category` (two-level
+                          tree, `services.py`), public cached tree under `categories/`, admin API under
+                          `admin/categories/` (`users.manage_categories`, no DELETE); starter categories in
+                          `catalog/data/categories.json`, loaded by `load_categories`
+  training/               `Training`, `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome`;
+                          `services.py` (create / edit with the review rule, workflow, search vector, expiry),
+                          `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
+                          APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
+                          (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
+                          cover), admin `admin/trainings/` (approve, request-changes, reject)
   institutes/             Institute, members, invitations, documents, locations, gallery; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
@@ -91,10 +113,10 @@ docs/  design/            see "Source of truth"
 ```
 
 Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
-`learners`, `reviews`. `catalog` still needs categories, trainings and sessions.
+`learners`, `reviews`.
 Each app follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
-(`apps/users/api/v1/urls/users.py`, `apps/catalog/api/v1/urls/locations.py` and the three modules in
-`apps/institutes/api/v1/urls/` are the package form: one module per URL group).
+(`apps/users/api/v1/urls/users.py` and the modules in `apps/catalog/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
+`apps/training/api/v1/urls/` are the package form: one module per URL group).
 
 ## Commands
 
@@ -107,9 +129,11 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | check | `python manage.py check` |
 | migrate | `python manage.py makemigrations` then `python manage.py migrate` |
 | load locations | `python manage.py load_locations` (upserts from `apps/catalog/data/`; safe to re-run, never re-activates a retired location) |
+| load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/catalog/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
+| expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
-| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails stay queued |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/catalog/tests/` (Location constraints, loader, locations API) and `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey); needs Postgres where the test DB can be created, and Redis for throttling and the location tree cache |
+| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/catalog/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
@@ -166,9 +190,18 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   case-insensitively. Django's stock `UserAdmin` references the removed fields, so `apps/users/admin.py` is a
   **read-only** `ModelAdmin` (no add / change / delete, password hidden). Manage users through the API or the
   service functions, never the admin site, which would skip token revocation and the role rules.
-- **The location tree is cached in Redis with no expiry** (`catalog:location-tree:v1`). `Location` `post_save` /
-  `post_delete` and `load_locations` clear it; `QuerySet.update()` and `bulk_update()` do not, so delete the key
-  yourself after those.
+- **The location and category trees are cached in Redis with no expiry** (`catalog:location-tree:v1`,
+  `catalog:category-tree:v1`). `post_save` / `post_delete` (and `load_locations`) clear them; `QuerySet.update()` and
+  `bulk_update()` do not, so delete the key yourself after those.
+- **Trainings carry a stored search vector.** Write them through `apps/training/services.py` (it rebuilds the vector and
+  `duration_weeks`); a direct `create()` / `update()` leaves search stale. Renaming an institute, renaming or moving a
+  category and changing a location's municipality refresh the affected trainings through queued tasks, so they need
+  `qcluster`.
+- **Expiry only happens if `expire_trainings` is scheduled** (daily); otherwise past trainings stay `APPROVED` and
+  public.
+- **`select_for_update()` with a nullable `select_related`** fails in Postgres ("FOR UPDATE cannot be applied to the
+  nullable side of an outer join"); the training services lock with `of=("self",)`.
+- An `InstituteLocation` cannot be deactivated while a training that is not `CANCELLED` / `EXPIRED` uses it.
 - **Verification documents are private.** They are stored under `PRIVATE_MEDIA_ROOT` (`private_media/` in the project
   root, gitignored; note `BASE_DIR` is `config/`, so it is `BASE_DIR.parent`), `PrivateStorage` raises on `.url`, and
   they are only served by `private_file_response` after a permission check. `InstituteDocument` is deliberately not
@@ -186,6 +219,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Whether `/admin/` is renamed or restricted at the proxy before production (it is on the default path, no 2FA).
 - The team still has to document where the location data came from.
 - Who edits Nepal locations at runtime (today only `load_locations` writes them; the admin site is read-only).
+- Whether enquirers are told when a training is cancelled, and whether "Instructor name" search is needed.
+- The UI's registration number / contact fields on `Institute`, and the featured flag / view counts for relevance sort.
 
 ## Verification
 

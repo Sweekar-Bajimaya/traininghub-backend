@@ -37,6 +37,7 @@ python manage.py generate_rsa_keys
 # 5. database and first user
 python manage.py migrate
 python manage.py load_locations       # Nepal provinces / districts / municipalities
+python manage.py load_categories      # the 13 starter training categories
 python manage.py createsuperuser      # creates the one and only Super Admin
 
 # 6. run
@@ -52,6 +53,11 @@ staff invitation links).
 Institute verification documents are stored in `private_media/` in the project root (created on first upload,
 gitignored, never served by URL). Staff invitation emails are sent by the background worker, so run
 `python manage.py qcluster` (needs Redis); with the default console email backend the email appears in that terminal.
+The worker also refreshes training search data after an institute, category or location is renamed.
+
+Trainings expire after their end date only if `expire_trainings` runs daily: in the Django admin, add a Django Q
+"Scheduled task" for `apps.training.tasks.expire_trainings` with schedule type Daily (or run
+`python manage.py expire_trainings` from cron).
 
 ## Everyday commands
 
@@ -62,6 +68,8 @@ gitignored, never served by URL). Staff invitation emails are sent by the backgr
 | Create migrations       | `python manage.py makemigrations` then `python manage.py migrate`                |
 | Background worker       | `python manage.py qcluster`                                                      |
 | Reload location data    | `python manage.py load_locations` (safe to re-run)                               |
+| Load starter categories | `python manage.py load_categories` (safe to re-run)                              |
+| Expire past trainings   | `python manage.py expire_trainings` (safe to re-run)                             |
 
 Tests create their own test database, so the PostgreSQL user needs permission to create databases.
 Redis must be running (throttling uses it).
@@ -74,13 +82,14 @@ apps/
   api/v1/     mounts each app's URLs under /api/v1/
   common/     base models, base viewsets, shared serializers and validators
   users/      User model, roles and permissions, JWT auth, admin management
-  catalog/    Nepal locations (province / district / municipality), loader and locations API
+  catalog/    Nepal locations (province / district / municipality) and training categories; loaders and APIs
+  training/   trainings, weekly class slots, curriculum, search; public, portal and admin review APIs
   institutes/ institutes, staff and invitations, documents, locations, gallery; public, portal and admin APIs
 docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
 
-Planned apps: `enquiries`, `notifications`, `analytics`. `catalog` will also hold categories and trainings.
+Planned apps: `enquiries`, `notifications`, `analytics`.
 
 ## Users API (`/api/v1/user/`)
 
@@ -116,6 +125,19 @@ All are public and read-only. Example for a district dropdown: `GET /api/v1/loca
 | `/api/v1/admin/institutes/` | `manage_institutes` | review: `approve`, `reject`, `request-info`, `suspend`, `reinstate`; document review and download |
 
 An institute becomes public only when an admin approves it, which needs at least one active location and one document.
+
+## Categories and trainings API
+
+| Prefix | Who | What |
+| --- | --- | --- |
+| `/api/v1/categories/` | public | category > sub-category tree (cached), with icon and hue |
+| `/api/v1/admin/categories/` | `manage_categories` | list, create, rename, move, deactivate (no delete) |
+| `/api/v1/trainings/` | public | approved trainings: list and `{slug}/`; filters `category`, `sub_category`, `mode`, `level`, `province`, `district`, `municipality`, `fee_min`, `fee_max`, `start_from`, `start_to`, `duration` (`short`, `mid`, `long`), `institute`, `registration_open`; `search`; `ordering` (`published_at`, `start_date`, `fee_npr`) |
+| `/api/v1/institute/trainings/` | institute staff | create and edit (with `sessions`, `modules`, `outcomes`), `submit`, `withdraw`, `unpublish`, `republish`, `cancel`, `cover`; delete a draft |
+| `/api/v1/admin/trainings/` | `manage_trainings` | review queue (`?status=SUBMITTED`): `approve`, `request-changes`, `reject` |
+
+A training starts as `DRAFT`, becomes `SUBMITTED` (shown as "Pending Review") when the institute submits it, and is
+public once an admin approves it. Editing an approved training sends it back to review.
 
 ## Working on the code
 

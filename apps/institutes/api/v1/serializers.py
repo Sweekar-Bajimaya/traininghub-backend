@@ -60,6 +60,7 @@ class OwnerSerializer(serializers.Serializer):
 class LocationInputSerializer(serializers.Serializer):
     location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
     address = serializers.CharField(max_length=255)
+    map_url = serializers.URLField(required=False, allow_blank=True)
     contact_phone = serializers.CharField(
         max_length=25,
         required=False,
@@ -117,6 +118,7 @@ class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
             "district": main.location.district.name,
             "province": main.location.province.name,
             "address": main.address,
+            "map_url": main.map_url,
         }
 
 
@@ -146,6 +148,7 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
                 "district": l.location.district.name,
                 "province": l.location.province.name,
                 "address": l.address,
+                "map_url": l.map_url,
                 "contact_phone": l.contact_phone,
                 "is_main": l.is_main,
             }
@@ -227,6 +230,9 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
         )
         read_only_fields = ("id", "slug", "status", "status_reason")
 
+    def update(self, instance, validated_data):
+        return services.update_profile(instance, **validated_data)
+
 
 class InstituteLocationSerializer(DynamicFieldsModelSerializer):
     location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
@@ -243,6 +249,7 @@ class InstituteLocationSerializer(DynamicFieldsModelSerializer):
             "district_name",
             "province_name",
             "address",
+            "map_url",
             "contact_phone",
             "is_main",
             "is_active",

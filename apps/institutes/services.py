@@ -24,6 +24,7 @@ from apps.institutes.models import (
     InstituteMember,
 )
 from apps.institutes.validators import validate_institute_location
+from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
 from apps.users.constants import Role
 
@@ -90,6 +91,23 @@ def resubmit(institute):
     return _transition(institute, InstituteStatus.PENDING)
 
 
+@transaction.atomic
+def update_profile(institute, **fields):
+    institute = Institute.objects.select_for_update().get(pk=institute.pk)
+    renamed = "name" in fields and fields["name"] != institute.name
+    for name, value in fields.items():
+        setattr(institute, name, value)
+    institute.save(update_fields=[*fields, "modified_at"])
+    if renamed:
+        # the institute name is part of every training's search vector
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.training.tasks.refresh_institute_trainings", institute.pk, save=False
+            )
+        )
+    return institute
+
+
 # ---------------------------------------------------------------- registration and locations
 
 
@@ -120,7 +138,7 @@ def register(*, institute_data, owner, locations=()):
 
 
 @transaction.atomic
-def add_location(institute, *, location, address, contact_phone=""):
+def add_location(institute, *, location, address, contact_phone="", map_url=""):
     validate_institute_location(location)
     Institute.objects.select_for_update().get(pk=institute.pk)  # serialise per institute
     first = not institute.locations.filter(is_active=True).exists()
@@ -129,6 +147,7 @@ def add_location(institute, *, location, address, contact_phone=""):
         location=location,
         address=address,
         contact_phone=contact_phone,
+        map_url=map_url,
         is_main=first,
     )
 
@@ -141,6 +160,13 @@ def update_location(instance, **fields):
     for name, value in fields.items():
         setattr(instance, name, value)
     instance.save(update_fields=[*fields, "modified_at"])
+    if "location" in fields:
+        # the municipality and district are part of the search vector of trainings held here
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.training.tasks.refresh_location_trainings", instance.pk, save=False
+            )
+        )
     return instance
 
 
@@ -164,7 +190,8 @@ def deactivate_location(location):
     location = InstituteLocation.objects.get(pk=location.pk)
     if location.is_main:
         raise ValidationError("Choose another main office first.")
-    # TODO(catalog): refuse while non-terminal trainings use it (409)
+    if location.trainings.exclude(status__in=TrainingStatus.FINISHED).exists():
+        raise ValidationError("Move or cancel the trainings held at this location first.")
     location.is_active = False
     location.save(update_fields=["is_active", "modified_at"])
     return location

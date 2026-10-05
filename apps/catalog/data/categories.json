@@ -1,0 +1,80 @@
+[
+  {
+    "name": "IT & Computer",
+    "icon": "ri-computer-line",
+    "hue": 235,
+    "children": ["Web development", "Office skills", "Data"]
+  },
+  {
+    "name": "Digital Marketing",
+    "icon": "ri-megaphone-line",
+    "hue": 300,
+    "children": ["Social media"]
+  },
+  {
+    "name": "Accounting & Finance",
+    "icon": "ri-calculator-line",
+    "hue": 155,
+    "children": ["Accounting software", "Taxation"]
+  },
+  {
+    "name": "Hospitality",
+    "icon": "ri-cup-line",
+    "hue": 50,
+    "children": ["Coffee & Barista", "Hotel operations", "Culinary"]
+  },
+  {
+    "name": "Beauty & Wellness",
+    "icon": "ri-sparkling-2-line",
+    "hue": 350,
+    "children": ["Makeup"]
+  },
+  {
+    "name": "Language Training",
+    "icon": "ri-translate-2",
+    "hue": 270,
+    "children": ["English tests", "Japanese"]
+  },
+  {
+    "name": "Professional Skills",
+    "icon": "ri-briefcase-4-line",
+    "hue": 205,
+    "children": ["Excel", "Soft skills"]
+  },
+  {
+    "name": "Technical & Vocational",
+    "icon": "ri-tools-line",
+    "hue": 75,
+    "children": ["Equipment maintenance", "Electrical"]
+  },
+  {
+    "name": "Healthcare",
+    "icon": "ri-heart-pulse-line",
+    "hue": 20,
+    "children": ["Caregiving"]
+  },
+  {
+    "name": "Driving & Automobile",
+    "icon": "ri-steering-2-line",
+    "hue": 110,
+    "children": ["Car driving", "Scooter & bike"]
+  },
+  {
+    "name": "Graphic Design",
+    "icon": "ri-palette-line",
+    "hue": 325,
+    "children": ["Graphic design", "UI/UX"]
+  },
+  {
+    "name": "Entrepreneurship",
+    "icon": "ri-lightbulb-flash-line",
+    "hue": 90,
+    "children": ["Startup basics"]
+  },
+  {
+    "name": "Other Skills",
+    "icon": "ri-apps-2-line",
+    "hue": 250,
+    "children": []
+  }
+]

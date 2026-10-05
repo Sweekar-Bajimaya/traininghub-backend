@@ -133,6 +133,7 @@ class InstituteLocation(BaseModel):
         "catalog.Location", on_delete=models.PROTECT, related_name="+"
     )
     address = models.CharField(max_length=255)
+    map_url = models.URLField(blank=True)  # "Google Map location" link
     contact_phone = models.CharField(
         max_length=25, blank=True, validators=[validate_phone_number]
     )

@@ -1,5 +1,7 @@
 from rest_framework.permissions import BasePermission
 
+from apps.users.constants import Role
+
 
 class IsPlatformAdmin(BasePermission):
     def has_permission(self, request, view):
