@@ -57,6 +57,7 @@ LOCAL_APPS = [
     "apps.catalog",
     "apps.institutes",
     "apps.training",
+    "apps.app_key",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -281,3 +282,6 @@ INSTITUTE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 INSTITUTE_DOCUMENT_EXTENSIONS = ("pdf", "jpg", "jpeg", "png")
 INSTITUTE_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png")
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+
+# Image file
+ATTACHMENT_MAX_UPLOAD_SIZE = 5 * 1024 * 1024

@@ -53,6 +53,7 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "slug", "created_at")
+        extra_kwargs = {"hue": {"max_value": 360}}  # the database constraint says the same
 
     def get_parent_name(self, obj):
         return obj.parent.name if obj.parent_id else None

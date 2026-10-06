@@ -25,9 +25,8 @@ def active_municipalities():
     return Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True)
 
 
-# ---------------------------------------------------------------- registration (public)
 
-
+# registration (public)
 class OwnerSerializer(serializers.Serializer):
     email = serializers.EmailField(
         validators=[
@@ -73,7 +72,7 @@ class RegisterSerializer(DynamicFieldsModelSerializer):
     """Public registration. Role and status are never read from the payload."""
 
     owner = OwnerSerializer(write_only=True)
-    locations = LocationInputSerializer(many=True, write_only=True, required=False)
+    locations = LocationInputSerializer(many=True, write_only=True, required=True, allow_empty=False)
 
     class Meta:
         model = Institute
@@ -98,9 +97,8 @@ class RegisterSerializer(DynamicFieldsModelSerializer):
         )
 
 
-# ---------------------------------------------------------------- public pages
 
-
+# public pages
 class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
     location = serializers.SerializerMethodField()
 

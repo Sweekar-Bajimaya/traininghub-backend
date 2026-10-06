@@ -161,6 +161,12 @@ class AdminCategoryApiTests(APITestCase):
         res = self.client.post(ADMIN_URL, {"name": "Deep", "parent": sub.pk}, format="json")
         self.assertEqual(res.status_code, 400)
 
+    def test_a_hue_above_360_is_400_not_a_database_error(self):
+        self.client.force_authenticate(self.reviewer)
+        res = self.client.post(ADMIN_URL, {"name": "Colourful", "hue": 361}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("hue", res.data)
+
     def test_there_is_no_delete(self):
         self.client.force_authenticate(self.reviewer)
         category = make_category()
