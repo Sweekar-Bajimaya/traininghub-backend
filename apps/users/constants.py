@@ -1,10 +1,11 @@
-MALE, FEMALE, OTHER = 'Male', 'Female', 'Other'
+MALE, FEMALE, OTHER = "Male", "Female", "Other"
 
 GENDER_CHOICES = (
     (MALE, "Male"),
     (FEMALE, "Female"),
     (OTHER, "Other"),
 )
+
 
 class Role:
     SUPER_ADMIN = "SUPER_ADMIN"
@@ -25,3 +26,13 @@ GRANTABLE_PERMISSIONS = (
     "manage_trainings",
     "manage_categories",
 )
+
+SOCIAL_PLATFORM_CHOICES = [
+    ("facebook", "Facebook"),
+    ("linkedin", "LinkedIn"),
+    ("twitter", "X (Twitter)"),
+    ("instagram", "Instagram"),
+    ("youtube", "YouTube"),
+    ("website", "Website"),
+    ("other", "Other"),
+]

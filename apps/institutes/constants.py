@@ -56,3 +56,4 @@ class DocumentStatus:
 class InvitationStatus:
     PENDING, ACCEPTED, REVOKED = "PENDING", "ACCEPTED", "REVOKED"
     CHOICES = ((PENDING, "Pending"), (ACCEPTED, "Accepted"), (REVOKED, "Revoked"))
+

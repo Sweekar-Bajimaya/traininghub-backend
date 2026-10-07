@@ -17,11 +17,14 @@ from apps.institutes.constants import (
 )
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
     InstituteMember,
+    InstituteSocialLink,
 )
 from apps.institutes.validators import validate_institute_location
 from apps.training.constants import TrainingStatus  # constants only, so no import cycle
@@ -31,9 +34,7 @@ from apps.users.constants import Role
 User = get_user_model()
 
 
-# ---------------------------------------------------------------- status workflow
-
-
+# status workflow
 def _transition(institute, to, *, reason="", check=None):
     """Move an institute to a new status. Caller must be inside transaction.atomic()."""
     institute = Institute.objects.select_for_update().get(pk=institute.pk)
@@ -92,55 +93,81 @@ def resubmit(institute):
 
 
 @transaction.atomic
-def update_profile(institute, **fields):
-    institute = Institute.objects.select_for_update().get(pk=institute.pk)
-    renamed = "name" in fields and fields["name"] != institute.name
-    for name, value in fields.items():
-        setattr(institute, name, value)
-    institute.save(update_fields=[*fields, "modified_at"])
-    if renamed:
-        # the institute name is part of every training's search vector
-        transaction.on_commit(
-            lambda: async_task(
-                "apps.training.tasks.refresh_institute_trainings", institute.pk, save=False
-            )
-        )
+def update_profile(institute: Institute, data: dict, user) -> Institute:
+    """Update institute profile with nested contact/ceo/social."""
+    with transaction.atomic():
+        contact_data = data.pop("contact", None)
+        ceo_data = data.pop("ceo", None)
+        social_data = data.pop("social_links", None)
+
+        # Update base fields
+        for k, v in data.items():
+            setattr(institute, k, v)
+        institute.save()
+
+        if contact_data:
+            contact, _ = InstituteContact.objects.get_or_create(institute=institute)
+            for k, v in contact_data.items():
+                setattr(contact, k, v)
+            contact.save()
+
+        if ceo_data is not None:
+            if ceo_data:
+                ceo, _ = InstituteCEO.objects.get_or_create(institute=institute)
+                for k, v in ceo_data.items():
+                    setattr(ceo, k, v)
+                ceo.save()
+            else:
+                InstituteCEO.objects.filter(institute=institute).delete()
+
+        if social_data is not None:
+            InstituteSocialLink.objects.filter(institute=institute).delete()
+            for sd in social_data:
+                InstituteSocialLink.objects.create(institute=institute, **sd)
+
     return institute
 
 
-# ---------------------------------------------------------------- registration and locations
-
-
+# registration and locations
 @transaction.atomic
-def register(*, institute_data, owner, locations=()):
+def register(data: dict) -> Institute:
     """Create an institute, its owner account and its locations in one transaction.
 
     owner = {"email", "password", "full_name", optional "phone_number"}; the owner is always
     INSTITUTE_STAFF. Documents are uploaded afterwards through the portal.
     """
-    for item in locations:
-        validate_institute_location(item["location"])  # bulk_create skips model validation
-    institute = Institute.objects.create(**institute_data)
-    owner_user = User.objects.create_user(role=Role.INSTITUTE_STAFF, **owner)
-    InstituteMember.objects.create(
-        user=owner_user, institute=institute, role=MemberRole.OWNER
-    )
-    InstituteLocation.objects.bulk_create(
-        [
-            InstituteLocation(
-                institute=institute, is_main=(i == 0), **item
-            )  # the first one is the main office
-            for i, item in enumerate(locations)
-        ]
-    )
-    # TODO(notify): admins with manage_institutes
-    return institute
+    with transaction.atomic():
+        owner_data = data.pop("owner")
+        locations_data = data.pop("locations")
+        contact_data = data.pop("contact")  # Required
+        ceo_data = data.pop("ceo", None)
+        social_data = data.pop("social_links", [])
+
+        institute = Institute.objects.create(**data)
+
+        # Create contact (required)
+        InstituteContact.objects.create(institute=institute, **contact_data)
+
+        if ceo_data:
+            InstituteCEO.objects.create(institute=institute, **ceo_data)
+
+        for sd in social_data:
+            InstituteSocialLink.objects.create(institute=institute, **sd)
+
+        # Create owner + locations (existing logic)
+        owner = create_owner(institute, owner_data)
+        for loc in locations_data:
+            create_location(institute, loc)
+
+        return institute
 
 
 @transaction.atomic
 def add_location(institute, *, location, address, contact_phone="", map_url=""):
     validate_institute_location(location)
-    Institute.objects.select_for_update().get(pk=institute.pk)  # serialise per institute
+    Institute.objects.select_for_update().get(
+        pk=institute.pk
+    )  # serialise per institute
     first = not institute.locations.filter(is_active=True).exists()
     return InstituteLocation.objects.create(
         institute=institute,
@@ -164,7 +191,9 @@ def update_location(instance, **fields):
         # the municipality and district are part of the search vector of trainings held here
         transaction.on_commit(
             lambda: async_task(
-                "apps.training.tasks.refresh_location_trainings", instance.pk, save=False
+                "apps.training.tasks.refresh_location_trainings",
+                instance.pk,
+                save=False,
             )
         )
     return instance
@@ -178,7 +207,9 @@ def set_main_location(location):
         raise ValidationError("An inactive location cannot be the main office.")
     InstituteLocation.objects.filter(
         institute_id=location.institute_id, is_main=True
-    ).exclude(pk=location.pk).update(is_main=False)  # clear first, then set (partial unique index)
+    ).exclude(pk=location.pk).update(
+        is_main=False
+    )  # clear first, then set (partial unique index)
     location.is_main = True
     location.save(update_fields=["is_main", "modified_at"])
     return location
@@ -191,15 +222,15 @@ def deactivate_location(location):
     if location.is_main:
         raise ValidationError("Choose another main office first.")
     if location.trainings.exclude(status__in=TrainingStatus.FINISHED).exists():
-        raise ValidationError("Move or cancel the trainings held at this location first.")
+        raise ValidationError(
+            "Move or cancel the trainings held at this location first."
+        )
     location.is_active = False
     location.save(update_fields=["is_active", "modified_at"])
     return location
 
 
-# ---------------------------------------------------------------- documents and gallery
-
-
+# documents and gallery
 @transaction.atomic
 def add_document(institute, *, name, file):
     return InstituteDocument.objects.create(institute=institute, name=name, file=file)

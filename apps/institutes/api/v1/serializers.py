@@ -11,11 +11,14 @@ from apps.institutes import services
 from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
     InstituteMember,
+    InstituteSocialLink,
 )
 
 User = get_user_model()
@@ -25,9 +28,106 @@ def active_municipalities():
     return Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True)
 
 
+class InstituteContactSerializer(DynamicFieldsModelSerializer):
+    class Meta:
+        modal = InstituteContact
+        fields = ("contact_person", "contact_phone", "contact_email")
+        extra_kwargs = {
+            "contact_person": {"required": True},
+            "contact_phone": {"required": True},
+            "contact_email": {"required": True},
+        }
+
+
+class InstituteCEOSerializer(DynamicFieldsModelSerializer):
+    class Meta:
+        model = InstituteCEO
+        fields = ("name", "message", "photo", "linkedin_url")
+        read_only_fields = ("institute",)
+
+
+class InstituteSocialLinkSerializer(DynamicFieldsModelSerializer):
+    class Meta:
+        model = InstituteSocialLink
+        fields = ("id", "platform", "url", "label")
+        read_only_fields = ("institute",)
+
+
+class InstituteSerializer(DynamicFieldsModelSerializer):
+    contact = InstituteContactSerializer(required=False)
+    ceo = InstituteCEOSerializer(required=False)
+    social_links = InstituteSocialLinkSerializer(many=True, required=False)
+
+    class Meta:
+        model = Institute
+        fields = (
+            "id",
+            "name",
+            "registration_number",
+            "type",
+            "established_year",
+            "description",
+            "logo",
+            "website",
+            "status",
+            "status_reason",
+            "slug",
+            "created_at",
+            "contact",
+            "ceo",
+            "social_links",
+        )
+        read_only_fields = ("id", "slug", "status", "status_reason", "created_at")
+
+    def create(self, validated_data):
+        contact_data = validated_data.pop("contact", None)
+        ceo_data = validated_data.pop("ceo", None)
+        social_data = validated_data.pop("social_links", [])
+
+        institute = super().create(validated_data)
+
+        if contact_data:
+            InstituteContact.objects.create(institute=institute, **contact_data)
+        if ceo_data:
+            InstituteCEO.objects.create(institute=institute, **ceo_data)
+        for sd in social_data:
+            InstituteSocialLink.objects.create(institute=institute, **sd)
+
+        return institute
+
+    def update(self, instance, validated_data):
+        contact_data = validated_data.pop("contact", None)
+        ceo_data = validated_data.pop("ceo", None)
+        social_data = validated_data.pop("social_links", None)
+
+        instance = super().update(instance, validated_data)
+
+        if contact_data:
+            contact, _ = InstituteContact.objects.get_or_create(institute=instance)
+            for k, v in contact_data.items():
+                setattr(contact, k, v)
+            contact.save()
+
+        if ceo_data is not None:  # Allow clearing CEO
+            if ceo_data:
+                ceo, _ = InstituteCEO.objects.get_or_create(institute=instance)
+                for k, v in ceo_data.items():
+                    setattr(ceo, k, v)
+                ceo.save()
+            else:
+                InstituteCEO.objects.filter(institute=instance).delete()
+
+        if social_data is not None:
+            # Replace all social links
+            InstituteSocialLink.objects.filter(institute=instance).delete()
+            for sd in social_data:
+                InstituteSocialLink.objects.create(institute=instance, **sd)
+
+        return instance
+
 
 # registration (public)
-class OwnerSerializer(serializers.Serializer):
+class UserRegistrationSerializer(serializers.Serializer):
     email = serializers.EmailField(
         validators=[
             UniqueValidator(
@@ -68,34 +168,32 @@ class LocationInputSerializer(serializers.Serializer):
     )
 
 
-class RegisterSerializer(DynamicFieldsModelSerializer):
-    """Public registration. Role and status are never read from the payload."""
+class InstituteRegistrationSerializer(InstituteSerializer):
+    """Registration requires contact person + phone."""
 
-    owner = OwnerSerializer(write_only=True)
-    locations = LocationInputSerializer(many=True, write_only=True, required=True, allow_empty=False)
+    owner = UserRegistrationSerializer()
+    locations = LocationInputSerializer(
+        many=True, write_only=True, required=True, allow_empty=False
+    )
 
-    class Meta:
-        model = Institute
-        fields = (
-            "id",
-            "slug",
-            "name",
-            "type",
-            "established_year",
-            "description",
-            "status",
-            "owner",
-            "locations",
-        )
-        read_only_fields = ("id", "slug", "status")
+    class Meta(InstituteSerializer.Meta):
+        fields = InstituteSerializer.Meta.fields + ("owner", "locations")
+        extra_kwargs = {
+            **InstituteSerializer.Meta.extra_kwargs,
+            "contact": {"required": True},
+        }
 
-    def create(self, validated_data):
-        return services.register(
-            owner=validated_data.pop("owner"),
-            locations=validated_data.pop("locations", []),
-            institute_data=validated_data,
-        )
+    def validate_contact(self, value):
+        if not value.get("contact_person"):
+            raise serializers.ValidationError({"contact_person": "Required."})
+        if not value.get("contact_phone"):
+            raise serializers.ValidationError({"contact_phone": "Required."})
+        return value
 
+    def validate_locations(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one location required.")
+        return value
 
 
 # public pages
@@ -157,9 +255,7 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
         return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
 
 
-# ---------------------------------------------------------------- admin review
-
-
+# admin review
 class ReasonSerializer(serializers.Serializer):
     reason = serializers.CharField()
 
@@ -202,9 +298,7 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
         return owners[0].user.email if owners else None
 
 
-# ---------------------------------------------------------------- portal (the institute's own staff)
-
-
+# portal (the institute's own staff)
 class InstituteProfileSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = Institute
@@ -235,8 +329,12 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
 class InstituteLocationSerializer(DynamicFieldsModelSerializer):
     location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
     municipality_name = serializers.CharField(source="location.name", read_only=True)
-    district_name = serializers.CharField(source="location.district.name", read_only=True)
-    province_name = serializers.CharField(source="location.province.name", read_only=True)
+    district_name = serializers.CharField(
+        source="location.district.name", read_only=True
+    )
+    province_name = serializers.CharField(
+        source="location.province.name", read_only=True
+    )
 
     class Meta:
         model = InstituteLocation

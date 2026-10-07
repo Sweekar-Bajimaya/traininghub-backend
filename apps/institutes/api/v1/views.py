@@ -72,7 +72,7 @@ def private_file_response(document):
 
 
 class RegisterView(CreateAPIView):
-    serializer_class = RegisterSerializer
+    serializer_class = UserRegisterSerializer
     permission_classes = [AllowAny]
     authentication_classes = []
     throttle_scope = "institute_register"
