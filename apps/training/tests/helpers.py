@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from apps.catalog.tests.helpers import make_category  # noqa: F401  (re-exported)
+from apps.common.tests.helpers import make_category  # noqa: F401  (re-exported)
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.tests.helpers import (  # noqa: F401  (re-exported for the training tests)
     PASSWORD,

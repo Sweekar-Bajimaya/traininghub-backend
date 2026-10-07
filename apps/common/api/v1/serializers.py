@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
-from apps.catalog import services
-from apps.catalog.models import Category, Location
+from apps.common import services
+from apps.common.models.category import Category
+from apps.common.models.location import Location
 from apps.common.serializers import DynamicFieldsModelSerializer
 
 
@@ -53,7 +54,9 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "slug", "created_at")
-        extra_kwargs = {"hue": {"max_value": 360}}  # the database constraint says the same
+        extra_kwargs = {
+            "hue": {"max_value": 360}
+        }  # the database constraint says the same
 
     def get_parent_name(self, obj):
         return obj.parent.name if obj.parent_id else None

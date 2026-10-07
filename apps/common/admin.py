@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from apps.catalog.models import Category, Location
+from apps.common.models.category import Category
+from apps.common.models.location import Location
 
 
 @admin.register(Location)

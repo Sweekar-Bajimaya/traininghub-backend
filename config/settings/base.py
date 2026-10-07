@@ -53,11 +53,11 @@ if DEBUG:
 
 
 LOCAL_APPS = [
-    "apps.users",
-    "apps.catalog",
+    "apps.app_key",
+    "apps.common",
     "apps.institutes",
     "apps.training",
-    "apps.app_key",
+    "apps.users",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

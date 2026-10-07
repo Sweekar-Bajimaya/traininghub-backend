@@ -77,11 +77,19 @@ class RegistrationApiTests(APITestCase):
         self.assertEqual(owner.role, Role.INSTITUTE_STAFF)
         self.assertFalse(owner.is_staff)
 
-    def test_locations_are_optional(self):
+    def test_locations_are_required(self):
         payload = self.payload()
         del payload["locations"]
         res = self.client.post(REGISTER_URL, payload, format="json")
-        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("locations", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_an_empty_locations_list_is_refused(self):
+        res = self.post(locations=[])
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("locations", res.data)
+        self.assertFalse(Institute.objects.exists())
 
     def test_duplicate_email_is_a_400_in_any_case(self):
         User.objects.create_user("Owner@Example.com", PASSWORD)

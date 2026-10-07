@@ -5,8 +5,8 @@ from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.catalog.constants import TREE_CACHE_KEY, LocationLevel
-from apps.catalog.models import Location
+from apps.common.constants import TREE_CACHE_KEY, LocationLevel
+from apps.common.models.location import Location
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 

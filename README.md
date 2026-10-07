@@ -80,9 +80,9 @@ Redis must be running (throttling uses it).
 config/       settings (base.py + your local env.py), urls, exception handler
 apps/
   api/v1/     mounts each app's URLs under /api/v1/
-  common/     base models, base viewsets, shared serializers and validators
+  common/     base models, base viewsets, shared serializers and validators; Nepal locations (province / district /
+              municipality) and training categories, with their loaders and APIs
   users/      User model, roles and permissions, JWT auth, admin management
-  catalog/    Nepal locations (province / district / municipality) and training categories; loaders and APIs
   training/   trainings, weekly class slots, curriculum, search; public, portal and admin review APIs
   institutes/ institutes, staff and invitations, documents, locations, gallery; public, portal and admin APIs
 docs/         PRD and system design

@@ -9,7 +9,7 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from PIL import Image
 
-from apps.catalog.models import Location
+from apps.common.models.location import Location
 from apps.institutes.constants import InstituteStatus, InstituteType, MemberRole
 from apps.institutes.models import Institute, InstituteLocation, InstituteMember
 from apps.users.constants import Role

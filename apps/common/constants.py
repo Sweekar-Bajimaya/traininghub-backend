@@ -19,5 +19,5 @@ class MunicipalityType:
     )
 
 
-TREE_CACHE_KEY = "catalog:location-tree:v1"
-CATEGORY_TREE_CACHE_KEY = "catalog:category-tree:v1"
+TREE_CACHE_KEY = "common:location-tree:v1"
+CATEGORY_TREE_CACHE_KEY = "common:category-tree:v1"

@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django_q.tasks import async_task
 
-from apps.catalog.models import Category
+from apps.common.models.category import Category
 
 
 def _check_parent(category, parent):

@@ -1,8 +1,11 @@
 from django.db.models import Q
 from rest_framework import serializers
 
-from apps.catalog.models import Category
-from apps.common.serializers import DynamicFieldsModelSerializer, DynamicFieldsSerializer
+from apps.common.models.category import Category
+from apps.common.serializers import (
+    DynamicFieldsModelSerializer,
+    DynamicFieldsSerializer,
+)
 from apps.institutes.models import InstituteLocation
 from apps.institutes.validators import validate_image_file
 from apps.training import services
@@ -32,9 +35,7 @@ def duration_text(obj):
     return f"{obj.duration_value} {unit[:-1] if obj.duration_value == 1 else unit}"
 
 
-# ---------------------------------------------------------------- public
-
-
+# public
 class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
     """Everything here comes from select_related rows: no per-row queries."""
 
@@ -134,7 +135,9 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
         ]
 
     def get_modules(self, obj):
-        return [{"title": m.title, "description": m.description} for m in obj.modules.all()]
+        return [
+            {"title": m.title, "description": m.description} for m in obj.modules.all()
+        ]
 
     def get_outcomes(self, obj):
         return [o.text for o in obj.outcomes.all()]
@@ -142,14 +145,13 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
     def get_contact(self, obj):
         return {
             "person": obj.contact_person,
-            "phone": obj.contact_phone or obj.institute.contact_phone,  # falls back to the institute
+            "phone": obj.contact_phone
+            or obj.institute.contact_phone,  # falls back to the institute
             "email": obj.contact_email or obj.institute.contact_email,
         }
 
 
-# ---------------------------------------------------------------- portal (the institute's own staff)
-
-
+# portal (the institute's own staff)
 class TrainingSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingSession
@@ -278,16 +280,16 @@ class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
         )
 
     def get_municipality(self, obj):
-        return obj.institute_location.location.name if obj.institute_location_id else None
+        return (
+            obj.institute_location.location.name if obj.institute_location_id else None
+        )
 
 
 class CoverSerializer(DynamicFieldsSerializer):
     cover_image = serializers.ImageField(validators=[validate_image_file])
 
 
-# ---------------------------------------------------------------- admin review
-
-
+# admin review
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
 
@@ -311,7 +313,11 @@ class AdminTrainingSerializer(DynamicFieldsModelSerializer):
         read_only_fields = fields
 
     def get_institute(self, obj):
-        return {"id": obj.institute_id, "name": obj.institute.name, "status": obj.institute.status}
+        return {
+            "id": obj.institute_id,
+            "name": obj.institute.name,
+            "status": obj.institute.status,
+        }
 
     def get_category(self, obj):
         parent = obj.category.parent
@@ -325,7 +331,11 @@ class AdminTrainingSerializer(DynamicFieldsModelSerializer):
         place = obj.institute_location
         if place is None:
             return None
-        return {"id": place.id, "municipality": place.location.name, "address": place.address}
+        return {
+            "id": place.id,
+            "municipality": place.location.name,
+            "address": place.address,
+        }
 
 
 class TrainingReasonSerializer(DynamicFieldsSerializer):

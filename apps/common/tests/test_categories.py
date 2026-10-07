@@ -8,10 +8,10 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from apps.catalog import services
-from apps.catalog.constants import CATEGORY_TREE_CACHE_KEY
-from apps.catalog.models import Category
-from apps.catalog.tests.helpers import make_category
+from apps.common import services
+from apps.common.constants import CATEGORY_TREE_CACHE_KEY
+from apps.common.models.category import Category
+from apps.common.tests.helpers import make_category
 from apps.institutes.tests.helpers import PASSWORD, User, make_institute
 from apps.users import services as user_services
 
@@ -72,7 +72,7 @@ class CategoryServiceTests(TestCase):
         other = services.create_category(name="Healthcare")
         for fields in ({"name": "Cooking"}, {"parent": other}):
             with self.subTest(fields=fields), mock.patch(
-                "apps.catalog.services.async_task"
+                "apps.common.services.async_task"
             ) as task, self.captureOnCommitCallbacks(execute=True):
                 services.update_category(self.sub, **fields)
             task.assert_called_once_with(
@@ -80,7 +80,7 @@ class CategoryServiceTests(TestCase):
             )
 
     def test_deactivating_does_not_queue_a_refresh(self):
-        with mock.patch("apps.catalog.services.async_task") as task, self.captureOnCommitCallbacks(
+        with mock.patch("apps.common.services.async_task") as task, self.captureOnCommitCallbacks(
             execute=True
         ):
             services.update_category(self.sub, is_active=False)

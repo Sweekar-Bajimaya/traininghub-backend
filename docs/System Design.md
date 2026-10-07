@@ -32,7 +32,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Training mode | `PHYSICAL`, `ONLINE`, `HYBRID` |
 | Reviews & ratings | **Out of MVP** (needs learner login). `reviews` app deferred |
 | "My enquiries" | Tracked by a browser-stored device token; lost if browser data is cleared. A device sees its enquiries for **90 days**. Revisit when learner login is added |
-| Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/catalog/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
+| Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/common/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
 | Enquiry statuses | `NEW`, `CONTACTED`, `CONVERTED`, `CLOSED`. Kept easy to change later |
 | Location | Managed list of Nepal provinces / districts / **municipalities**. The third level is called Municipality in code and UI and includes rural municipalities. Names are kept exactly as they appear in the data (no normalising of "Province" / "Pradesh") |
 | API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`, `categories/`, `trainings/`, `institutes/` public, `institute/trainings/` and `institute/` portal, `admin/` console, included once per app); an app's URL module is relative to its prefix |
@@ -40,7 +40,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Institute visibility | Only `APPROVED` institutes, and their approved trainings, appear on the public site. Pending, info-requested, rejected and suspended institutes are not visible |
 | Institute type | A fixed list, required at registration: Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School, Company, NGO/INGO, Government |
 | Institute profile | Plain columns on `Institute` (option A), not a generic items table. The gallery is a small separate table |
-| Institute registration | One JSON request creates the institute (`PENDING`), its owner and optional locations. The owner can log in at once and uploads verification documents afterwards. Approval needs at least one active location and one document |
+| Institute registration | One JSON request creates the institute (`PENDING`), its owner and at least one location. The owner can log in at once and uploads verification documents afterwards. Approval needs at least one active location and one document |
 | Verification documents | pdf, jpg or png, max 5 MB, stored privately (never a URL), streamed only to the owning institute and to admins with `manage_institutes`. Which documents are required is not enforced beyond "at least one" |
 | Staff powers | Staff do everything except manage staff and invitations (owner only). No ownership transfer. Removing staff deactivates the account and revokes its refresh tokens |
 | Suspended institutes | Staff keep their accounts and can log in; the institute is hidden from the public site |
@@ -66,10 +66,9 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 
 | App | Responsibility | State |
 | :---- | :---- | :---- |
-| `common` | BaseModel, SlugModel, shared serializers / viewsets / validators | exists |
+| `common` | BaseModel, SlugModel, shared serializers / viewsets / validators; reference data: Location (managed Nepal list) and Category (two-level tree), with their loaders and public / admin APIs | built |
 | `users` | User, roles, permissions, auth endpoints, admin team | in progress |
 | `institutes` | Institute, locations, staff membership and invitations, verification documents, profile columns, gallery, status workflow | built (on defaults, see section 8) |
-| `catalog` | Location (managed Nepal list), Category (two-level tree) | built |
 | `training` | Training, weekly sessions, curriculum modules, learning outcomes, search, review workflow, expiry | built (on defaults, see section 1) |
 | `enquiries` | Enquiry, status workflow, device tracking | planned |
 | `notifications` | In-app notifications + email dispatch (django-q2 tasks) | planned |
@@ -153,7 +152,7 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 
 | Endpoint | Who | Notes |
 | :---- | :---- | :---- |
-| `POST institute/register/` | public | Throttled (`institute_register`, 5/hour). Creates the institute (`PENDING`), its owner and optional locations in one transaction. `status`, `role` and `slug` in the payload are ignored |
+| `POST institute/register/` | public | Throttled (`institute_register`, 5/hour). Creates the institute (`PENDING`), its owner and its locations (at least one is required) in one transaction. `status`, `role` and `slug` in the payload are ignored |
 | `POST institute/invitations/accept/` | public | Throttled (`invitation_accept`, 10/hour). Creates a staff account from a valid, unexpired, unused token |
 | `GET institutes/`, `institutes/{slug}/` | public | `APPROVED` only; filter `type`, search `name`; constant number of queries; the card shows the main location with district and province |
 | `GET, PATCH institute/profile/`, `POST institute/resubmit/` | institute staff | `resubmit` moves `INFO_REQUESTED` or `REJECTED` back to `PENDING` |
@@ -178,7 +177,7 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 
 ## 4. Key workflows
 
-1. **Institute onboarding**: register (one JSON request: institute, owner, optional locations; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
+1. **Institute onboarding**: register (one JSON request: institute, owner, at least one location; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
 2. **Training lifecycle**: institute drafts → submits (`SUBMITTED`, can withdraw) → admin approves / requests changes / rejects (with a reason) → `APPROVED` (public) → an edit sends it back to review; the institute can unpublish / republish (no review) or cancel; a daily job expires it after `end_date`. `CANCELLED` and `EXPIRED` are final.
 3. **Enquiry**: public submit (captcha + throttle) → institute notified (email + dashboard) → institute updates status → admin sees conversion stats. The visitor's device sees it under "My enquiries" for 90 days.
 3a. **Staff invitation**: institute owner invites by email → invitee accepts and sets a password → becomes `INSTITUTE_STAFF` of that institute.
@@ -252,3 +251,5 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 - Locations built (2026-10-02): one `Location` table, loaded by `load_locations` (7 provinces, 77 districts, 752 municipalities), public read-only API under `locations/`. URL prefixes are declared only in `apps/api/v1/urls.py`.
 - Institutes built (2026-10-02): models and constraints, services, public / admin / portal APIs, 131 tests. The nine defaults it was built on (staff powers, suspended staff login, locations at registration, documents, invitation email and expiry, unique name, profile columns, URL split) were confirmed on 2026-10-02 by ticking "Confirm the nine decisions" in the Notion work list; they are in the decisions table above.
 - Categories and trainings built (2026-10-05): the UI prototypes were decoded and compared with the plan; the sixteen defaults in `docs/catalog-checklist.md` (version 2) were confirmed ("use the defaults"). Trainings live in their own `training` app; `django.contrib.postgres` is installed. Answered: category depth (two levels, a training may use either), levels (three), duration (value + unit, derived weeks), schedule (weekly slots), completion (automatic `EXPIRED`), editing an approved training (back to review), unlimited seats (empty = unlimited), search configuration (`simple`, prefix).
+- `catalog` merged into `common` (2026-10-07): one installed app (label `common`) now holds the shared base classes and the reference data (`Location`, `Category`), so earlier entries and `docs/*-checklist.md` that say `catalog` mean `apps/common`. Tables are `common_location` / `common_category`, the cache keys are `common:location-tree:v1` / `common:category-tree:v1`, and the API URLs did not change. Rule: `common` holds base classes and reference data that several apps point to; anything with its own workflow gets its own app. The migrations of `common`, `institutes` and `training` were regenerated from scratch (no production data yet), so a database built before this change has to be recreated.
+- Locations are required at registration (2026-10-07): `POST institute/register/` answers 400 when `locations` is missing or empty, so every new institute starts with at least one location. This replaces the 2026-10-02 default of optional locations at registration; approval still needs at least one active location and one document. The serializer enforces it; `services.register` itself accepts none.

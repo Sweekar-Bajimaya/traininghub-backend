@@ -1,6 +1,7 @@
 import django_filters
 
-from apps.catalog.models import Category, Location
+from apps.common.models.category import Category
+from apps.common.models.location import Location
 
 
 class LocationFilter(django_filters.FilterSet):

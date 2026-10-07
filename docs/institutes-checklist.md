@@ -4,6 +4,9 @@ Ordered work list for the `institutes` app, with code snippets. Follow it top to
 with `python manage.py check`, `makemigrations --check --dry-run` and the full test suite green before you move on.
 Notion copy: "Institutes App – Todo List (M0–M5)" under the System Design Review page.
 
+> **Note (2026-10-07):** the `catalog` app was merged into `common`. Where the snippets below say `apps.catalog` or
+> `"catalog.Location"`, read `apps.common` and `"common.Location"`. The code wins.
+
 The snippets follow `docs/System Design.md` and the project skills (services for writes, DRF generics, locking, no N+1).
 They were checked against the repo as of 2026-10-02 (43 tests passing, `catalog` locations loaded).
 
@@ -30,7 +33,7 @@ confirmed on 2026-10-02 (ticked in the Notion work list). To change one later, e
 |---|---|---|---|
 | 1 | Can a suspended institute's staff log in? | Yes. They cannot publish, and the institute is hidden from the public site | M2 |
 | 2 | Staff powers | Staff can do everything except manage staff and invitations (owner only). No ownership transfer | M2, M4 |
-| 3 | Locations at registration | Optional at registration; at least one active location before approval | M2 |
+| 3 | Locations at registration | Optional at registration; at least one active location before approval. **Changed 2026-10-07: now required at registration (at least one), see `docs/System Design.md` decision log** | M2 |
 | 4 | Documents | pdf / jpg / png, max 5 MB. Uploaded **after** registration, by the owner, in the portal; at least one before approval | M1, M2 |
 | 5 | Invitation expiry | 7 days | M2 |
 | 6 | Unique institute name | No (the slug is unique) | M1 |

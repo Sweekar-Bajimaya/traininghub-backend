@@ -3,7 +3,7 @@ import os
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
-from apps.catalog.constants import LocationLevel
+from apps.common.constants import LocationLevel
 
 
 def validate_institute_location(location):

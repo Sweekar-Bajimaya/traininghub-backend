@@ -3,8 +3,8 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from apps.catalog.constants import LocationLevel
-from apps.catalog.models import Location
+from apps.common.constants import LocationLevel
+from apps.common.models.location import Location
 from apps.common.serializers import DynamicFieldsModelSerializer
 from apps.common.validators import validate_phone_number
 from apps.institutes import services

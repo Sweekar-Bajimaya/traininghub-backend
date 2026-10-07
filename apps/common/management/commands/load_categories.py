@@ -4,7 +4,8 @@ from pathlib import Path
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.catalog.models import Category
+from apps.common.models.category import Category
+
 
 DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "categories.json"
 

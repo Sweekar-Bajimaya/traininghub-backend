@@ -3,8 +3,8 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 
-from apps.catalog.models import Category
-from apps.common.models import BaseModel, SlugModel
+from apps.common.models.base import BaseModel, SlugModel
+from apps.common.models.category import Category
 from apps.common.utils.helpers import get_upload_path
 from apps.common.validators import validate_phone_number
 from apps.institutes.models import Institute, InstituteLocation

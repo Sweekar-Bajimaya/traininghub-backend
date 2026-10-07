@@ -5,10 +5,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.catalog.api.v1.filters import AdminCategoryFilter, LocationFilter
-from apps.catalog.api.v1.serializers import AdminCategorySerializer, LocationSerializer
-from apps.catalog.constants import CATEGORY_TREE_CACHE_KEY, TREE_CACHE_KEY
-from apps.catalog.models import Category, Location
+from apps.common.api.v1.filters import AdminCategoryFilter, LocationFilter
+from apps.common.api.v1.serializers import AdminCategorySerializer, LocationSerializer
+from apps.common.constants import CATEGORY_TREE_CACHE_KEY, TREE_CACHE_KEY
+from apps.common.models.category import Category
+from apps.common.models.location import Location
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
 from apps.users.permissions import HasPlatformPermission
 

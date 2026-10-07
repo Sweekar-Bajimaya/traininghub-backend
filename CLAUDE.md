@@ -12,7 +12,8 @@ an account. The frontend is a separate Next.js project.
   in System Design.md win.
 - `docs/institutes-checklist.md` - the work list `institutes` was built from (decisions assumed, milestones, snippets);
   mirrored in Notion. A record of the plan, not of the code: where they differ, the code wins.
-- `docs/catalog-checklist.md` - the work list categories (`catalog`) and trainings (`training`) were built from: the
+- `docs/catalog-checklist.md` - the work list categories (built as the `catalog` app, since merged into `common`) and
+  trainings (`training`) were built from: the
   sixteen decisions, a comparison with the UI, milestones C0 to C6, snippets; mirrored in Notion. A record of the plan,
   like the one above: where they differ, the code wins.
 - `design/*.html` - three UI prototypes (Training Hub, Institute Portal, Admin Console). Each is a
@@ -67,7 +68,7 @@ or an open question gets answered. Rules:
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
   (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute, owner,
-  optional locations); the owner then logs in (even while `PENDING`) and uploads verification documents. Approval needs at
+  at least one location); the owner then logs in (even while `PENDING`) and uploads verification documents. Approval needs at
   least one active location and one document. A suspended institute's staff keep their accounts.
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
@@ -86,18 +87,21 @@ apps/
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
                           `institute/trainings/`, `institute/`, `admin/` (one include per resource group;
                           `admin/` is included once per app)
-  common/                 BaseModel (created_at/modified_at), SlugModel, BaseViewSet, DynamicFields
-                          serializers, validators, helpers
-  users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
-                          create/update, suspend, password change), API under `user/` (auth/, me/,
-                          admins/, users/{id}/status/), management command `generate_rsa_keys`
-  catalog/                `Location` (province / district / municipality in one table, denormalised
+  common/                 the one shared app (installed, label `common`): base classes and reference data.
+                          `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
+                          `category.py`; `BaseViewSet` + mixin viewsets, DynamicFields serializers,
+                          validators, `utils/` (plain helpers, no models).
+                          `Location` (province / district / municipality in one table, denormalised
                           `province` / `district`), management command `load_locations` (data in
-                          `catalog/data/`: provinces.json, districts.json, cities.json), public read-only API
+                          `common/data/`: provinces.json, districts.json, cities.json), public read-only API
                           under `locations/` (list with filters, detail, cached `tree/`); `Category` (two-level
                           tree, `services.py`), public cached tree under `categories/`, admin API under
                           `admin/categories/` (`users.manage_categories`, no DELETE); starter categories in
-                          `catalog/data/categories.json`, loaded by `load_categories`
+                          `common/data/categories.json`, loaded by `load_categories`; `signals.py` clears the
+                          tree caches
+  users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
+                          create/update, suspend, password change), API under `user/` (auth/, me/,
+                          admins/, users/{id}/status/), management command `generate_rsa_keys`
   training/               `Training`, `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome`;
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
@@ -115,8 +119,10 @@ docs/  design/            see "Source of truth"
 Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
 `learners`, `reviews`.
 Each app follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
-(`apps/users/api/v1/urls/users.py` and the modules in `apps/catalog/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
-`apps/training/api/v1/urls/` are the package form: one module per URL group).
+(`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
+`apps/training/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
+module per model group, its `__init__.py` imports them all so every model registers, and callers import by module path,
+e.g. `apps.common.models.location`).
 
 ## Commands
 
@@ -128,17 +134,22 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | JWT keys (once per checkout) | `python manage.py generate_rsa_keys` (writes `keys/`, gitignored) |
 | check | `python manage.py check` |
 | migrate | `python manage.py makemigrations` then `python manage.py migrate` |
-| load locations | `python manage.py load_locations` (upserts from `apps/catalog/data/`; safe to re-run, never re-activates a retired location) |
-| load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/catalog/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
+| load locations | `python manage.py load_locations` (upserts from `apps/common/data/`; safe to re-run, never re-activates a retired location) |
+| load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/common/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/catalog/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
 
-- Models extend `apps.common.models.BaseModel`; add `SlugModel` for public-URL objects (needs `name` or `title`).
+- Models extend `apps.common.models.base.BaseModel`; add `SlugModel` (same module) for public-URL objects (needs `name`
+  or `title`). Import `Location` and `Category` from `apps.common.models.location` / `.category`.
+- `common` holds base classes and reference data that several apps point to (today the locations and categories).
+  Anything with its own workflow (enquiries, notifications, analytics) gets its own app. `common/models/`,
+  `constants.py`, `utils/` and `validators.py` never import another domain app (every app imports them, so it would be a
+  cycle); only `common/api/` and `common/tests/` reach into `users` and `institutes`.
 - Viewsets extend `apps.common.viewsets.BaseViewSet`. Per-action permissions go in `permission_class_mapper`
   (`{"create": [...]}`); an empty list means public. Plural `permission_classes` elsewhere - the singular
   is silently ignored by DRF.
@@ -190,8 +201,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   case-insensitively. Django's stock `UserAdmin` references the removed fields, so `apps/users/admin.py` is a
   **read-only** `ModelAdmin` (no add / change / delete, password hidden). Manage users through the API or the
   service functions, never the admin site, which would skip token revocation and the role rules.
-- **The location and category trees are cached in Redis with no expiry** (`catalog:location-tree:v1`,
-  `catalog:category-tree:v1`). `post_save` / `post_delete` (and `load_locations`) clear them; `QuerySet.update()` and
+- **The location and category trees are cached in Redis with no expiry** (`common:location-tree:v1`,
+  `common:category-tree:v1`). `post_save` / `post_delete` (and `load_locations`) clear them; `QuerySet.update()` and
   `bulk_update()` do not, so delete the key yourself after those.
 - **Trainings carry a stored search vector.** Write them through `apps/training/services.py` (it rebuilds the vector and
   `duration_weeks`); a direct `create()` / `update()` leaves search stale. Renaming an institute, renaming or moving a

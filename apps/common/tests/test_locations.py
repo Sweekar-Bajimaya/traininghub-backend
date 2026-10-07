@@ -7,8 +7,8 @@ from django.db.models import F
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from apps.catalog.constants import TREE_CACHE_KEY, LocationLevel, MunicipalityType
-from apps.catalog.models import Location
+from apps.common.constants import TREE_CACHE_KEY, LocationLevel, MunicipalityType
+from apps.common.models.location import Location
 
 P, D, M = LocationLevel.PROVINCE, LocationLevel.DISTRICT, LocationLevel.MUNICIPALITY
 LOADED = {P: 7, D: 77, M: 752}

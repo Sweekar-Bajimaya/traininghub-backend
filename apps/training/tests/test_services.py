@@ -10,7 +10,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.catalog import services as catalog_services
+from apps.common import services as common_services
 from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.training import services, tasks
@@ -352,8 +352,8 @@ class SearchVectorTests(TrainingTestCase):
 
     def test_follows_a_category_rename_or_move(self):
         make_training(self.institute, category=self.category)
-        with mock.patch("apps.catalog.services.async_task"):
-            catalog_services.update_category(self.category.parent, name="Computing")
+        with mock.patch("apps.common.services.async_task"):
+            common_services.update_category(self.category.parent, name="Computing")
         tasks.refresh_category_trainings(self.category.parent_id)
         self.assertEqual(found("computing"), ["Python Bootcamp"])
 

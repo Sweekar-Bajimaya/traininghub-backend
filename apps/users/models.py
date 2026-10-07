@@ -5,7 +5,7 @@ from django.db import models
 from django.db.models.functions import Lower
 from django.utils.translation import gettext as _
 
-from apps.common.models import BaseModel
+from apps.common.models.base import BaseModel
 from apps.common.utils.helpers import get_upload_path
 from apps.common.validators import validate_phone_number
 from apps.users.constants import GENDER_CHOICES, Role

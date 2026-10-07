@@ -1,5 +1,8 @@
 # Catalog and Training – Todo List (version 2, checked against the UI; built)
 
+> **Note (2026-10-07):** the `catalog` app was merged into `common`. Where this list says `apps/catalog` or `catalog`, read
+> `apps/common` (tables `common_location` / `common_category`, cache keys `common:*`). The code wins.
+
 Ordered work list for **categories** (in `apps/catalog`) and **trainings** (in the new `apps/training` app): sessions,
 curriculum, search and filters, the institute portal and the admin review. Follow it top to bottom: each milestone is its
 own commit, with `python manage.py check`, `makemigrations --check --dry-run` and the full test suite green before you

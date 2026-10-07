@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.catalog.models import Location
+from apps.common.models.location import Location
 from apps.institutes import services, tasks
 from apps.institutes.constants import (
     DocumentStatus,

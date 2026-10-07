@@ -1,4 +1,4 @@
-from apps.catalog.models import Category
+from apps.common.models.category import Category
 
 
 def make_category(name="Python", parent="Technology"):

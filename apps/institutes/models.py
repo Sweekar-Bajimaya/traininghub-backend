@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
 
-from apps.common.models import BaseModel, SlugModel
+from apps.common.models.base import BaseModel, SlugModel
 from apps.common.utils.helpers import get_upload_path
 from apps.common.validators import validate_phone_number
 from apps.institutes.constants import (
@@ -130,7 +130,7 @@ class InstituteLocation(BaseModel):
     )
     # must be an active MUNICIPALITY-level Location; checked by validate_institute_location
     location = models.ForeignKey(
-        "catalog.Location", on_delete=models.PROTECT, related_name="+"
+        "common.Location", on_delete=models.PROTECT, related_name="+"
     )
     address = models.CharField(max_length=255)
     map_url = models.URLField(blank=True)  # "Google Map location" link
