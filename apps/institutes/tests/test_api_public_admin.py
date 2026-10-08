@@ -1,23 +1,39 @@
+from unittest import mock
+
+from django.core import mail
+from django.utils.module_loading import import_string
 from rest_framework.test import APITestCase
 
 from apps.institutes import services
 from apps.institutes.constants import InstituteStatus
-from apps.institutes.models import Institute, InstituteLocation
+from apps.institutes.models import (
+    Institute,
+    InstituteCEO,
+    InstituteContact,
+    InstituteLocation,
+    InstituteSocialLink,
+)
 from apps.institutes.tests.helpers import (
+    OWNER_EMAIL,
     PASSWORD,
     TempMediaMixin,
     User,
     add_location,
     count_queries,
+    issue_registration_otp,
     make_institute,
     make_municipality,
     pdf,
+    png,
+    reset_otps,
     reset_throttles,
 )
 from apps.users import services as user_services
-from apps.users.constants import Role
+from apps.users.constants import OTPPurpose, Role
 
 REGISTER_URL = "/api/v1/institute/register/"
+SEND_OTP_URL = REGISTER_URL + "send-otp/"
+VERIFY_OTP_URL = REGISTER_URL + "verify-otp/"
 PUBLIC_URL = "/api/v1/institutes/"
 ADMIN_URL = "/api/v1/admin/institutes/"
 
@@ -25,16 +41,32 @@ ADMIN_URL = "/api/v1/admin/institutes/"
 class RegistrationApiTests(APITestCase):
     def setUp(self):
         reset_throttles()
+        reset_otps()
         self.municipality = make_municipality()
 
+    def owner(self, email=OWNER_EMAIL, **extra):
+        return {
+            "email": email,
+            "password": PASSWORD,
+            "confirm_password": PASSWORD,
+            **extra,
+        }
+
     def payload(self, **overrides):
+        """A valid registration. Unless the test passes its own `otp`, a code is requested for the
+        owner's email first, the way the form does."""
+        owner = overrides.pop("owner", None) or self.owner()
+        otp = overrides.pop("otp", None) or issue_registration_otp(owner["email"])
         data = {
             "name": "New Institute",
+            "registration_number": "REG-123",
             "type": "COMPANY",
-            "owner": {
-                "email": "owner@example.com",
-                "full_name": "Owner",
-                "password": PASSWORD,
+            "otp": otp,
+            "owner": owner,
+            "contact": {
+                "contact_person": "Contact Person",
+                "contact_phone": "9811111111",
+                "contact_email": "contact@example.com",
             },
             "locations": [{"location": self.municipality.pk, "address": "Main Road"}],
         }
@@ -49,25 +81,20 @@ class RegistrationApiTests(APITestCase):
         self.assertEqual(res.status_code, 201, res.data)
         institute = Institute.objects.get(slug=res.data["slug"])
         self.assertEqual(institute.status, InstituteStatus.PENDING)
-        self.assertEqual(institute.members.get().user.email, "owner@example.com")
+        self.assertEqual(institute.members.get().user.email, OWNER_EMAIL)
         self.assertTrue(institute.locations.get().is_main)
 
     def test_the_response_never_echoes_credentials(self):
         res = self.post()
         self.assertNotIn("owner", res.data)
         self.assertNotIn("password", str(res.data))
+        self.assertNotIn("otp", res.data)
 
     def test_status_slug_and_role_in_the_payload_are_ignored(self):
         res = self.post(
             status="APPROVED",
             slug="hacked",
-            owner={
-                "email": "owner@example.com",
-                "full_name": "Owner",
-                "password": PASSWORD,
-                "role": "SUPER_ADMIN",
-                "is_staff": True,
-            },
+            owner=self.owner(role="SUPER_ADMIN", is_staff=True),
         )
         self.assertEqual(res.status_code, 201, res.data)
         institute = Institute.objects.get(slug=res.data["slug"])
@@ -92,8 +119,12 @@ class RegistrationApiTests(APITestCase):
         self.assertFalse(Institute.objects.exists())
 
     def test_duplicate_email_is_a_400_in_any_case(self):
+        payload = self.payload()  # the code is requested while the address is still free
         User.objects.create_user("Owner@Example.com", PASSWORD)
-        self.assertEqual(self.post().status_code, 400)
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("email", res.data["owner"])
+        self.assertFalse(Institute.objects.exists())
 
     def test_a_province_is_not_a_valid_location(self):
         province_id = self.municipality.province_id
@@ -102,7 +133,7 @@ class RegistrationApiTests(APITestCase):
         self.assertFalse(Institute.objects.exists())
 
     def test_weak_password_unknown_type_and_missing_owner_are_400(self):
-        weak = {"email": "o@example.com", "full_name": "O", "password": "123"}
+        weak = {"email": "o@example.com", "password": "123", "confirm_password": "123"}
         self.assertEqual(self.post(owner=weak).status_code, 400)
         self.assertEqual(self.post(type="SCHOOL").status_code, 400)
         payload = self.payload()
@@ -115,21 +146,248 @@ class RegistrationApiTests(APITestCase):
         self.post()
         res = self.client.post(
             "/api/v1/user/auth/login/",
-            {"email": "owner@example.com", "password": PASSWORD},
+            {"email": OWNER_EMAIL, "password": PASSWORD},
         )
         self.assertEqual(res.status_code, 200)
         self.assertIn("access", res.data)
 
     def test_the_sixth_registration_in_an_hour_is_throttled(self):
         for i in range(5):
-            owner = {
-                "email": f"owner{i}@example.com",
-                "full_name": "Owner",
-                "password": PASSWORD,
-            }
-            self.assertEqual(self.post(name=f"Institute {i}", owner=owner).status_code, 201)
-        owner = {"email": "owner9@example.com", "full_name": "Owner", "password": PASSWORD}
-        self.assertEqual(self.post(name="One more", owner=owner).status_code, 429)
+            res = self.post(name=f"Institute {i}", owner=self.owner(f"owner{i}@example.com"))
+            self.assertEqual(res.status_code, 201)
+        res = self.post(name="One more", owner=self.owner("owner9@example.com"))
+        self.assertEqual(res.status_code, 429)
+
+    # password confirmation
+    def test_mismatched_passwords_are_refused_and_nothing_is_created(self):
+        res = self.post(owner=self.owner(confirm_password="Different-pass-123!"))
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(
+            res.data["owner"]["confirm_password"], ["Passwords do not match."]
+        )
+        self.assertFalse(Institute.objects.exists())
+        self.assertFalse(User.objects.exists())
+
+    def test_the_confirmation_is_required(self):
+        payload = self.payload()
+        del payload["owner"]["confirm_password"]
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("confirm_password", res.data["owner"])
+        self.assertFalse(Institute.objects.exists())
+
+    def test_the_comparison_is_case_sensitive(self):
+        res = self.post(owner=self.owner(confirm_password=PASSWORD.swapcase()))
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("confirm_password", res.data["owner"])
+
+    def test_a_mismatch_keeps_the_code_so_the_form_can_be_corrected(self):
+        payload = self.payload()
+        payload["owner"]["confirm_password"] = "Different-pass-123!"
+        self.assertEqual(
+            self.client.post(REGISTER_URL, payload, format="json").status_code, 400
+        )
+        payload["owner"]["confirm_password"] = PASSWORD  # same code, fixed typo
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_the_confirmation_is_never_stored(self):
+        res = self.post()
+        owner = Institute.objects.get(slug=res.data["slug"]).members.get().user
+        self.assertTrue(owner.check_password(PASSWORD))
+        self.assertFalse(hasattr(owner, "confirm_password"))
+
+    # email verification
+    def test_the_owner_email_and_the_code_are_required(self):
+        payload = self.payload()
+        del payload["owner"]["email"]
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("email", res.data["owner"])
+        payload = self.payload()
+        del payload["otp"]
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_a_wrong_code_is_refused_and_nothing_is_created(self):
+        right = issue_registration_otp(OWNER_EMAIL)
+        wrong = "000000" if right != "000000" else "111111"
+        res = self.post(otp=wrong)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+        self.assertFalse(Institute.objects.exists())
+        self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
+
+    def test_registering_without_asking_for_a_code_is_refused(self):
+        payload = self.payload()
+        reset_otps()  # no code was ever sent for this address
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_a_code_works_only_once(self):
+        payload = self.payload()
+        self.assertEqual(
+            self.client.post(REGISTER_URL, payload, format="json").status_code, 201
+        )
+        res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": payload["otp"]})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+
+    def test_a_code_for_one_address_does_not_work_for_another(self):
+        code = issue_registration_otp("first@example.com")
+        res = self.post(owner=self.owner("third@example.com"), otp=code)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_a_password_reset_code_is_not_a_registration_code(self):
+        with mock.patch("apps.users.services.async_task"):
+            User.objects.create_user("existing@example.com", PASSWORD)
+            user_services.send_password_reset_otp("existing@example.com")
+        reset_code = user_services.get_otp(
+            "existing@example.com", purpose=OTPPurpose.PASSWORD_RESET
+        )
+        res = self.client.post(
+            VERIFY_OTP_URL, {"email": "existing@example.com", "otp": reset_code}
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_the_owner_email_is_matched_ignoring_case(self):
+        code = issue_registration_otp("owner@example.com")
+        res = self.post(owner=self.owner("Owner@Example.com"), otp=code)
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertTrue(User.objects.filter(email__iexact="owner@example.com").exists())
+
+    def test_five_wrong_codes_lock_the_code_even_for_the_right_one(self):
+        right = issue_registration_otp(OWNER_EMAIL)
+        wrong = "000000" if right != "000000" else "111111"
+        for _ in range(5):
+            res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": wrong})
+            self.assertEqual(res.status_code, 400)
+        res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": right})
+        self.assertEqual(res.status_code, 429)
+        self.assertIn("Retry-After", res)
+        self.assertEqual(self.post(otp=right).status_code, 429)
+        self.assertFalse(Institute.objects.exists())
+
+
+class RegistrationOtpApiTests(APITestCase):
+    def setUp(self):
+        reset_throttles()
+        reset_otps()
+
+    def send(self, email=OWNER_EMAIL):
+        return self.client.post(SEND_OTP_URL, {"email": email}, format="json")
+
+    def test_send_stores_a_code_and_queues_the_email_task_for_the_address(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            res = self.send()
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data, {"message": "Verification code sent to your email."})
+        queued.assert_called_once_with(
+            "apps.users.tasks.send_registration_otp_email_task", OWNER_EMAIL
+        )
+        code = user_services.get_otp(OWNER_EMAIL, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+        self.assertRegex(code, r"^\d{6}$")
+        self.assertNotIn(code, str(queued.call_args))  # the code never enters the queue
+
+    def test_the_code_is_emailed_to_the_address_given_and_nobody_else(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.send()
+        task_path, address = queued.call_args.args
+        import_string(task_path)(address)  # what the qcluster worker does
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, [OWNER_EMAIL])
+        self.assertEqual(message.cc + message.bcc, [])
+        code = user_services.get_otp(OWNER_EMAIL, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+        self.assertIn(code, message.body)
+        self.assertIn(code, message.alternatives[0][0])  # the HTML version
+
+    def test_an_expired_code_sends_no_email(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.send()
+        reset_otps()  # as if it expired before the worker picked the task up
+        task_path, address = queued.call_args.args
+        import_string(task_path)(address)
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_second_request_within_a_minute_is_a_429_with_retry_after(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.assertEqual(self.send().status_code, 200)
+            res = self.send()
+        self.assertEqual(res.status_code, 429)
+        self.assertEqual(queued.call_count, 1)
+        self.assertTrue(0 < int(res["Retry-After"]) <= 60)
+
+    def test_another_address_is_not_held_back_by_the_cooldown(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.assertEqual(self.send().status_code, 200)
+            self.assertEqual(self.send("other@example.com").status_code, 200)
+        self.assertEqual(queued.call_count, 2)
+
+    def test_an_address_in_any_case_shares_one_cooldown(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.assertEqual(self.send().status_code, 200)
+            self.assertEqual(self.send(OWNER_EMAIL.upper()).status_code, 429)
+
+    def test_an_email_that_already_has_an_account_gets_no_code(self):
+        User.objects.create_user(OWNER_EMAIL, PASSWORD)
+        with mock.patch("apps.users.services.async_task") as queued:
+            res = self.send(OWNER_EMAIL.upper())
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("email", res.data)
+        queued.assert_not_called()
+
+    def test_a_missing_or_malformed_email_is_a_400(self):
+        for body in ({}, {"email": "not-an-email"}, {"email": ""}):
+            with self.subTest(body=body):
+                res = self.client.post(SEND_OTP_URL, body, format="json")
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("email", res.data)
+
+    def test_only_post_is_allowed(self):
+        self.assertEqual(self.client.get(SEND_OTP_URL).status_code, 405)
+
+    def test_verify_accepts_the_right_code_and_does_not_use_it_up(self):
+        code = issue_registration_otp(OWNER_EMAIL)
+        for _ in range(2):
+            res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": code})
+            self.assertEqual(res.status_code, 200, res.data)
+            self.assertEqual(res.data, {"message": "Email verified."})
+
+    def test_verify_refuses_a_wrong_code(self):
+        code = issue_registration_otp(OWNER_EMAIL)
+        wrong = "000000" if code != "000000" else "111111"
+        res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": wrong})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+
+    def test_verify_without_a_sent_code_is_a_400(self):
+        res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": "123456"})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+
+    def test_a_code_of_the_wrong_length_is_a_400_and_does_not_count_as_a_guess(self):
+        code = issue_registration_otp(OWNER_EMAIL)
+        for _ in range(10):
+            res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": "12"})
+            self.assertEqual(res.status_code, 400)
+        res = self.client.post(VERIFY_OTP_URL, {"email": OWNER_EMAIL, "otp": code})
+        self.assertEqual(res.status_code, 200)
+
+    def test_a_logged_in_token_is_not_needed_and_a_stale_one_does_not_matter(self):
+        code = issue_registration_otp(OWNER_EMAIL)
+        res = self.client.post(
+            VERIFY_OTP_URL,
+            {"email": OWNER_EMAIL, "otp": code},
+            HTTP_AUTHORIZATION="Bearer not-a-real-token",
+        )
+        self.assertEqual(res.status_code, 200)
 
 
 class PublicInstituteApiTests(TempMediaMixin, APITestCase):
@@ -228,6 +486,51 @@ class PublicInstituteApiTests(TempMediaMixin, APITestCase):
         self.assertLessEqual(
             count_queries(lambda: self.client.get(f"{PUBLIC_URL}{first.slug}/")), 4
         )
+
+    def test_the_detail_stays_at_four_queries_with_every_section_filled(self):
+        institute = self.approved("Alpha", "alpha@example.com")
+        InstituteContact.objects.create(
+            institute=institute, contact_person="Ram",
+            contact_phone="9811111111", contact_email="ram@example.com",
+        )
+        InstituteCEO.objects.create(institute=institute, name="Sita")
+        for i, platform in enumerate(("facebook", "linkedin", "youtube")):
+            InstituteSocialLink.objects.create(
+                institute=institute, platform=platform, url=f"https://{platform}.example/{i}"
+            )
+        for i in range(3):
+            add_location(institute, self.municipality)
+            institute.gallery.create(image=png(f"{i}.png"), position=i)
+        self.assertLessEqual(
+            count_queries(lambda: self.client.get(f"{PUBLIC_URL}{institute.slug}/")), 4
+        )
+
+    def test_the_detail_shows_contact_ceo_social_links_locations_and_gallery(self):
+        institute = self.approved("Alpha", "alpha@example.com")
+        InstituteContact.objects.create(
+            institute=institute, contact_person="Ram",
+            contact_phone="9811111111", contact_email="ram@example.com",
+        )
+        InstituteCEO.objects.create(institute=institute, name="Sita", message="Welcome")
+        InstituteSocialLink.objects.create(
+            institute=institute, platform="facebook", url="https://facebook.com/alpha"
+        )
+        institute.gallery.create(image=png("g.png"), caption="Lab")
+        data = self.client.get(f"{PUBLIC_URL}{institute.slug}/").data
+        self.assertEqual(data["contact"]["contact_email"], "ram@example.com")
+        self.assertEqual(data["ceo"]["name"], "Sita")
+        self.assertEqual(data["social_links"][0]["platform"], "facebook")
+        self.assertEqual(data["locations"][0]["municipality"], "Kathmandu")
+        self.assertTrue(data["locations"][0]["is_main"])
+        self.assertEqual(data["gallery"][0]["caption"], "Lab")
+        self.assertNotIn("owner_email", data)  # the owner's login is never public
+
+    def test_the_detail_of_an_institute_with_no_contact_or_ceo_is_not_a_500(self):
+        institute = self.approved("Alpha", "alpha@example.com")
+        data = self.client.get(f"{PUBLIC_URL}{institute.slug}/").data
+        self.assertIsNone(data["contact"])
+        self.assertIsNone(data["ceo"])
+        self.assertEqual(data["social_links"], [])
 
     def test_writes_are_not_allowed(self):
         self.assertEqual(self.client.post(PUBLIC_URL, {}).status_code, 405)

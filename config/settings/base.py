@@ -162,10 +162,14 @@ REST_FRAMEWORK = {
         # Password guessing.
         "login": "5/min",
         "token_refresh": "10/min",
+        "otp": "50/min",
         "password_reset": "5/min",
         # Anonymous enquiry submission (also limited per phone number in the view).
         "enquiry": "10/hour",
         "institute_register": "5/hour",
+        # Registration email codes, per submitted address (the cache also allows one code a minute).
+        "register_otp": "5/hour",
+        "register_otp_verify": "30/hour",
         "invitation_accept": "10/hour",
     },
 }

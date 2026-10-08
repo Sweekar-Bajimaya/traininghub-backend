@@ -16,7 +16,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.throttling import IdentityScopedRateThrottle
 from apps.common.viewsets import (
+    ActionAPIView,
     CreateListDestroyViewSet,
     CreateListRetrieveUpdateViewSet,
     CreateListUpdateDestroyViewSet,
@@ -64,6 +66,10 @@ from apps.institutes.permissions import (
     IsInstituteOwner,
 )
 from apps.users.permissions import HasPlatformPermission
+from apps.users.api.v1.serializers import (
+    RegistrationOTPSerializer,
+    RegistrationOTPVerifySerializer,
+)
 
 
 def private_file_response(document):
@@ -78,6 +84,30 @@ def private_file_response(document):
 # public
 class RegisterView(CreateAPIView):
     serializer_class = InstituteRegistrationSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "institute_register"
+
+
+class RegisterSendOTPView(ActionAPIView):
+    """Step 1: email a verification code to the institute's own address."""
+
+    serializer_class = RegistrationOTPSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [IdentityScopedRateThrottle]
+    throttle_scope = "register_otp"
+
+
+class RegisterVerifyOTPView(ActionAPIView):
+    """Optional step 2: check the code before the form is submitted (it is checked again, and
+    used up, by RegisterView)."""
+
+    serializer_class = RegistrationOTPVerifySerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [IdentityScopedRateThrottle]
+    throttle_scope = "register_otp_verify"
 
 
 class AcceptInvitationView(CreateAPIView):
@@ -102,7 +132,7 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
         return PublicInstituteListSerializer
 
     def get_queryset(self):
-        return (
+        queryset = (
             Institute.objects.filter(status=InstituteStatus.APPROVED)
             .prefetch_related(
                 Prefetch(
@@ -120,6 +150,11 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
             )
             .order_by("name", "pk")
         )
+        if self.action == "retrieve":  # only the detail page shows these
+            queryset = queryset.select_related("contact", "ceo").prefetch_related(
+                "social_links"
+            )
+        return queryset
 
 
 # ---------------------------------------------------------------- admin console

@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.institutes.constants import InstituteStatus
+from apps.institutes.models import InstituteContact
 from apps.training import services
 from apps.training.constants import TrainingStatus
 from apps.training.models import Training, TrainingSession
@@ -165,9 +166,12 @@ class SearchTests(PublicTrainingTestCase):
 
 class DetailTests(PublicTrainingTestCase):
     def test_detail_shape(self):
-        self.institute.contact_phone = "9800000000"
-        self.institute.contact_email = "info@alpha.example"
-        self.institute.save()
+        InstituteContact.objects.create(
+            institute=self.institute,
+            contact_person="Front desk",
+            contact_phone="9800000000",
+            contact_email="info@alpha.example",
+        )
         self.location.map_url = "https://maps.example/alpha"
         self.location.save()
         training = make_training(self.institute, location=self.location, contact_person="Ram")

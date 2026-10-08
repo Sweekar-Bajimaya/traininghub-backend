@@ -39,8 +39,9 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Institute re-application | A rejected institute can re-apply for verification (`REJECTED` → `PENDING`) |
 | Institute visibility | Only `APPROVED` institutes, and their approved trainings, appear on the public site. Pending, info-requested, rejected and suspended institutes are not visible |
 | Institute type | A fixed list, required at registration: Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School, Company, NGO/INGO, Government |
-| Institute profile | Plain columns on `Institute` (option A), not a generic items table. The gallery is a small separate table |
-| Institute registration | One JSON request creates the institute (`PENDING`), its owner and at least one location. The owner can log in at once and uploads verification documents afterwards. Approval needs at least one active location and one document |
+| Institute profile | The institute's own details are columns on `Institute` (name, type, registration number, established year, description, logo). The required contact person, the optional CEO profile and the social links are small tables of their own (`InstituteContact`, `InstituteCEO`, `InstituteSocialLink`), edited through their own portal endpoints, as is the gallery. Not a generic items table |
+| Institute registration | One JSON request creates the institute (`PENDING`), its owner, its contact person and at least one location. The owner's email and password are the institute's login, and the email must be verified first with a one-time code (next row). The owner can log in at once and uploads verification documents afterwards. Approval needs at least one active location and one document |
+| One-time codes (OTP) | Six digits from `secrets`, valid 5 minutes, kept only in the Redis cache (never in the database or in a queued task's arguments). One code per address per 60 seconds; 5 wrong guesses lock a code; a right code does not count as a guess. A code is bound to its purpose (`password_reset`, `institute_registration`) and its address, which is lower-cased. Sent by email through a django-q task that gets only the address and reads the code when it runs (needs `qcluster`). Registration checks the code before it writes anything and uses it up in the same transaction |
 | Verification documents | pdf, jpg or png, max 5 MB, stored privately (never a URL), streamed only to the owning institute and to admins with `manage_institutes`. Which documents are required is not enforced beyond "at least one" |
 | Staff powers | Staff do everything except manage staff and invitations (owner only). No ownership transfer. Removing staff deactivates the account and revokes its refresh tokens |
 | Suspended institutes | Staff keep their accounts and can log in; the institute is hidden from the public site |
@@ -68,7 +69,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | :---- | :---- | :---- |
 | `common` | BaseModel, SlugModel, shared serializers / viewsets / validators; reference data: Location (managed Nepal list) and Category (two-level tree), with their loaders and public / admin APIs | built |
 | `users` | User, roles, permissions, auth endpoints, admin team | in progress |
-| `institutes` | Institute, locations, staff membership and invitations, verification documents, profile columns, gallery, status workflow | built (on defaults, see section 8) |
+| `institutes` | Institute, locations, staff membership and invitations, verification documents, contact person / CEO / social links, gallery, status workflow | built (on defaults, see section 8) |
 | `training` | Training, weekly sessions, curriculum modules, learning outcomes, search, review workflow, expiry | built (on defaults, see section 1) |
 | `enquiries` | Enquiry, status workflow, device tracking | planned |
 | `notifications` | In-app notifications + email dispatch (django-q2 tasks) | planned |
@@ -81,7 +82,8 @@ Phase 2: `applications` (reuses Training capacity fields), `learners`.
 ## 3. Core entities (first pass)
 
 - **User**: email (login, unique case-insensitively), UUID `username`, full_name, phone_number (optional, unique), gender, profile_picture, role, `is_active` (account status). `first_name` / `last_name` are removed.
-- **Institute**: name, type, established year, description, logo, status (`PENDING`, `APPROVED`, `REJECTED`, `INFO_REQUESTED`, `SUSPENDED`), status_reason, profile columns (about, CEO name and message, website, contact email / phone, social links; exact list to be confirmed). `registered_at` is `created_at`. A gallery table holds the images.
+- **Institute**: name, type, established year, description, logo, status (`PENDING`, `APPROVED`, `REJECTED`, `INFO_REQUESTED`, `SUSPENDED`), status_reason, `registration_number` (required, not checked for uniqueness). `registered_at` is `created_at`. A gallery table holds the images.
+- **InstituteContact**: institute (one-to-one, required at registration), contact person, phone, email. **InstituteCEO**: institute (one-to-one, optional), name, message, photo, LinkedIn URL. **InstituteSocialLink**: institute, platform (Facebook, LinkedIn, X, Instagram, YouTube, website, other), url, label; a platform may be added once per institute, `other` any number of times.
 - **InstituteLocation**: institute, location (managed Nepal list), address, optional contact phone and `map_url` (Google Maps link), `is_main` (at most one main office per institute), is_active.
 - **InstituteMember**: user (unique: one institute per user), institute, role (`OWNER`, `STAFF`). One `OWNER` per institute (derived, to confirm).
 - **InstituteInvitation**: institute, email, role, token, status, expires_at (owner invites staff; the invite email is sent via `notifications`).
@@ -124,12 +126,14 @@ All models extend `BaseModel`. Public listings return only `APPROVED` trainings 
 | `POST auth/login/` | public | Throttled (`login` scope). Returns access, refresh and the user's profile |
 | `POST auth/refresh/` | public | Throttled (`token_refresh` scope) |
 | `POST auth/logout/` | authenticated | Blacklists the refresh token |
+| `POST auth/otp/send/` | public | Emails a one-time code to an address that has an account (password reset). Throttled (`otp`, per submitted email). `429` with `Retry-After` inside the 60-second cooldown; `400` for an unknown address |
+| `POST auth/otp/verify/` | public | Checks `{email, otp}` without using the code up. `400` for a wrong or expired code, `429` after 5 wrong guesses. Nothing consumes a verified password-reset code yet |
 | `GET/PATCH me/` | authenticated | Own profile. `email` and `role` are read-only |
 | `PUT me/password/` | authenticated | Old password required; Django password validators applied |
 | `admins/` (CRUD) | `manage_admins` | Create / edit admins, set the initial password and the permissions granted. Role forced to `ADMIN` |
 | `PATCH users/{id}/status/` | `manage_account_status` | Suspend / activate. Not yourself, never the Super Admin; only the Super Admin may change an admin's status. Suspending revokes the user's refresh tokens |
 
-Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH admins/{id}/` edits name, phone, gender, picture and the granted permissions, but not `email` or `password`. Changing your own password revokes your refresh tokens, and the new password must differ from the old one. Throttling uses the `login` and `token_refresh` scopes.
+Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH admins/{id}/` edits name, phone, gender, picture and the granted permissions, but not `email` or `password`. Changing your own password revokes your refresh tokens, and the new password must differ from the old one. Throttling uses the `login`, `token_refresh` and `otp` scopes.
 
 ### 3.3 Institute locations
 
@@ -152,10 +156,15 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 
 | Endpoint | Who | Notes |
 | :---- | :---- | :---- |
-| `POST institute/register/` | public | Throttled (`institute_register`, 5/hour). Creates the institute (`PENDING`), its owner and its locations (at least one is required) in one transaction. `status`, `role` and `slug` in the payload are ignored |
+| `POST institute/register/send-otp/` | public | Body `{email}`: the address that will be the owner's login. Emails a six-digit code to that address only (not the CEO or the contact person). Throttled (`register_otp`, 5/hour per address); `429` with `Retry-After` inside the 60-second cooldown; `400` if a user already has the address |
+| `POST institute/register/verify-otp/` | public | Optional: checks `{email, otp}` so the form can confirm the address before it is submitted. Does not use the code up. Throttled (`register_otp_verify`, 30/hour per address) |
+| `POST institute/register/` | public | Throttled (`institute_register`, 5/hour). Needs `owner` (`email`, `password`, `confirm_password`, optional `phone_number`; the email is the institute's login and `confirm_password` must equal `password`), `otp` (the code sent to `owner.email` by `send-otp/`), `contact` and at least one location. Checks the code first, then creates the institute (`PENDING`), its owner, contact and locations in one transaction and uses the code up; a failed registration keeps the code. `status`, `role` and `slug` in the payload are ignored |
 | `POST institute/invitations/accept/` | public | Throttled (`invitation_accept`, 10/hour). Creates a staff account from a valid, unexpired, unused token |
-| `GET institutes/`, `institutes/{slug}/` | public | `APPROVED` only; filter `type`, search `name`; constant number of queries; the card shows the main location with district and province |
-| `GET, PATCH institute/profile/`, `POST institute/resubmit/` | institute staff | `resubmit` moves `INFO_REQUESTED` or `REJECTED` back to `PENDING` |
+| `GET institutes/`, `institutes/{slug}/` | public | `APPROVED` only; filter `type`, search `name`; constant number of queries (four for the detail); the detail also shows the contact person, CEO, social links, every active location and the gallery, but never the owner's login; the card shows the main location with district and province |
+| `GET, PATCH institute/profile/`, `POST institute/resubmit/` | institute staff | `PATCH` edits the institute's own columns only (name, type, description, established year, logo); `registration_number`, `status` and `slug` are read-only and the nested contact, CEO and social links cannot be written here. Renaming queues a search refresh of the institute's trainings. `resubmit` moves `INFO_REQUESTED` or `REJECTED` back to `PENDING` |
+| `GET, PUT, PATCH institute/contact/` | institute staff | The contact person; `PUT` needs every field. `404` if the institute has none (registration always creates one) |
+| `GET, PUT, DELETE institute/ceo/` | institute staff | `PUT` creates or updates, through `services.save_ceo` (serialised per institute); an omitted photo stays. `404` until one exists |
+| `institute/social-links/` (list, create, patch, delete) | institute staff | A platform once per institute (`other` repeats); another institute's link is a 404 |
 | `institute/locations/` (list, create, patch) and `.../{id}/set-main/`, `.../deactivate/` | institute staff | Only active municipalities; the first location is main; the main one cannot be deactivated |
 | `institute/documents/` (list, upload) and `.../{id}/download/` | institute staff | Multipart; the response never contains the file path; downloads are streamed after a membership check |
 | `institute/gallery/` (list, create, patch, delete) and `.../reorder/` | institute staff | Public images; reorder takes every id exactly once |
@@ -177,7 +186,7 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 
 ## 4. Key workflows
 
-1. **Institute onboarding**: register (one JSON request: institute, owner, at least one location; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
+1. **Institute onboarding**: request a code for the login email (`register/send-otp/`) → register (one JSON request: institute, owner with that email and the code, contact, at least one location; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
 2. **Training lifecycle**: institute drafts → submits (`SUBMITTED`, can withdraw) → admin approves / requests changes / rejects (with a reason) → `APPROVED` (public) → an edit sends it back to review; the institute can unpublish / republish (no review) or cancel; a daily job expires it after `end_date`. `CANCELLED` and `EXPIRED` are final.
 3. **Enquiry**: public submit (captcha + throttle) → institute notified (email + dashboard) → institute updates status → admin sees conversion stats. The visitor's device sees it under "My enquiries" for 90 days.
 3a. **Staff invitation**: institute owner invites by email → invitee accepts and sets a password → becomes `INSTITUTE_STAFF` of that institute.
@@ -195,6 +204,7 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 ## 6. Non-functional
 
 - DRF throttling by scope, backed by Redis; captcha verification server-side. Because the browser calls the API directly, throttling can key on client IP (and phone for enquiries); the deployment proxy must pass the real client IP.
+- One-time codes, their attempt counters and cooldowns live in the Redis cache with a 5-minute expiry; the OTP throttles are keyed on the submitted email, not on the client IP. The email is sent by a django-q task, so OTP mail is delivered only while `qcluster` runs, and `qcluster` does not reload code: restart it after a deploy.
 - Caching: the location and category trees are cached in Redis with no expiry and cleared when a `Location` / `Category` is saved or deleted (and by `load_locations`). `QuerySet.update()` skips the signals.
 - Scheduled job: `apps.training.tasks.expire_trainings` must run daily (a django-q `Schedule`, or `manage.py expire_trainings` from cron), with `qcluster` running for the queued search refreshes.
 - CORS is an explicit allow-list of frontend origins (not allow-all) outside development.
@@ -210,6 +220,7 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 1. [x] Repo hygiene, settings (Redis cache + django-q2, SMTP, reCAPTCHA setting, throttle scopes), exception handler, JWT auth class.
 2. [x] `users`: model, manager, permission classes, services, serializers, views and URLs, migration, tests. The Django admin site for users is read-only.
 2a. [x] `users` hardening: single Super Admin constraint, case-insensitive unique email, `blank=True` on `phone_number`.
+2b. [x] One-time codes by email: `users` services / tasks / `auth/otp/` endpoints, and email verification at institute registration (`register/send-otp/`, `register/verify-otp/`, the code goes with `owner.email` in `register/`).
 3. [x] `institutes`: models and constraints, services, public / admin / portal APIs (132 tests). The decisions it was built on were confirmed on 2026-10-02.
 4. [x] `catalog` (locations, categories) and `training` (trainings, weekly sessions, curriculum, search and filters, institute portal, admin review, expiry): built from `docs/catalog-checklist.md` on its defaults (confirmed 2026-10-05). The whole suite is 266 tests (users 26, catalog 36, institutes 132, training 72).
 5. [ ] `enquiries`, `notifications`, `analytics`.
@@ -233,8 +244,9 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 13. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
 14. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
 15. **Editing an approved institute**: today an institute's staff can change the profile of an `APPROVED` institute without re-review (an edited training does go back to review). Should some fields (name, type) need re-approval?
-16. **Institute registration fields**: the UI's registration form asks for a registration number (required), a contact person and a mobile, which `Institute` does not have.
+16. **Public contact details**: the institute detail page shows the contact person's name, phone and email, and the CEO profile (a comment in `PublicInstituteDetailSerializer` shows how to hide the name). Keep all of it public? And should `registration_number` be unique or validated?
 17. **Featured and views**: the UI's relevance sort uses a featured flag and view counts; neither exists yet.
+18. **Password reset**: `auth/otp/send/` and `auth/otp/verify/` exist, but no endpoint takes a verified code and sets a new password. Build it (`consume_otp` is ready), and should it also cover admins (see 12)?
 
 ## 9. Decision log (answered questions)
 
@@ -253,3 +265,5 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 - Categories and trainings built (2026-10-05): the UI prototypes were decoded and compared with the plan; the sixteen defaults in `docs/catalog-checklist.md` (version 2) were confirmed ("use the defaults"). Trainings live in their own `training` app; `django.contrib.postgres` is installed. Answered: category depth (two levels, a training may use either), levels (three), duration (value + unit, derived weeks), schedule (weekly slots), completion (automatic `EXPIRED`), editing an approved training (back to review), unlimited seats (empty = unlimited), search configuration (`simple`, prefix).
 - `catalog` merged into `common` (2026-10-07): one installed app (label `common`) now holds the shared base classes and the reference data (`Location`, `Category`), so earlier entries and `docs/*-checklist.md` that say `catalog` mean `apps/common`. Tables are `common_location` / `common_category`, the cache keys are `common:location-tree:v1` / `common:category-tree:v1`, and the API URLs did not change. Rule: `common` holds base classes and reference data that several apps point to; anything with its own workflow gets its own app. The migrations of `common`, `institutes` and `training` were regenerated from scratch (no production data yet), so a database built before this change has to be recreated.
 - Locations are required at registration (2026-10-07): `POST institute/register/` answers 400 when `locations` is missing or empty, so every new institute starts with at least one location. This replaces the 2026-10-02 default of optional locations at registration; approval still needs at least one active location and one document. The serializer enforces it; `services.register` itself accepts none.
+- Email verification at institute registration (2026-10-08): the institute's login is `owner.email` with `owner.password`, so that is the address verified; `Institute` has no separate email column. `POST institute/register/send-otp/` emails the code to it, and `POST institute/register/` takes the code as `otp`. The send endpoint refuses an address a user already has. Assumed defaults, easy to change in `apps/users/constants.py`: six digits, 5 minutes, 60-second resend, 5 wrong guesses. The send / verify endpoints answer 200 (not 201); too many requests is a 429 from `TooManyRequests`, which the exception handler maps. `POST institute/register/` lost its `AllowAny`, `authentication_classes = []` and `institute_register` throttle in an earlier refactor, so it answered 401; they are back.
+- Institute profile split (2026-10-08, built in the registration refactor): registration now takes a required `registration_number` and contact person (name, phone, email), plus an optional CEO and social links; the contact, CEO and social links live in their own tables with portal endpoints (see 3.5). This answers the old question about the UI's registration number, contact person and mobile. A follow-up repaired what that refactor broke: `PATCH institute/profile/` crashed (`update_profile` had a new signature) and lost the search refresh on rename, the public detail returned location ids instead of objects, `save_ceo` was never called, and tests still used removed columns.

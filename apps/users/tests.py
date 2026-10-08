@@ -58,12 +58,17 @@ class UserConstraintTests(TestCase):
         self.assertEqual(user.email, "Name@example.com")
 
 
+from unittest import mock
+
+from django.core import mail
 from django.core.cache import cache
+from django.utils.module_loading import import_string
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users import services
+from apps.users.constants import OTPPurpose
 
 PASSWORD = "Str0ng-pass-123!"
 ADMIN_PAYLOAD = {
@@ -240,3 +245,124 @@ class StatusApiTests(UsersApiTestCase):
     def test_admin_without_permission_gets_403(self):
         self.client.force_authenticate(User.objects.get(pk=self.admin.pk))
         self.assertEqual(self.client.patch(self.url(self.staff), {"is_active": False}).status_code, 403)
+
+
+SEND_OTP_URL = "/api/v1/user/auth/otp/send/"
+VERIFY_OTP_URL = "/api/v1/user/auth/otp/verify/"
+
+
+class OtpApiTests(UsersApiTestCase):
+    def setUp(self):
+        super().setUp()
+        cache.delete_pattern("*_otp_*")  # codes, attempt counters and cooldowns only
+
+    def send(self, email="staff@example.com"):
+        return self.client.post(SEND_OTP_URL, {"email": email}, format="json")
+
+    def verify(self, otp, email="staff@example.com"):
+        return self.client.post(VERIFY_OTP_URL, {"email": email, "otp": otp}, format="json")
+
+    def code(self, email="staff@example.com"):
+        return services.get_otp(email, purpose=OTPPurpose.PASSWORD_RESET)
+
+    def wrong(self, email="staff@example.com"):
+        return "000000" if self.code(email) != "000000" else "111111"
+
+    def test_send_queues_the_email_for_an_existing_account_in_any_case(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            res = self.send("Staff@Example.com")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data, {"message": "OTP sent to your email."})
+        queued.assert_called_once_with(
+            "apps.users.tasks.send_otp_email_task", "staff@example.com"
+        )
+        self.assertRegex(self.code(), r"^\d{6}$")
+        self.assertNotIn(self.code(), str(queued.call_args))  # the code never enters the queue
+
+    def test_the_task_emails_the_code_to_that_account(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.send()
+        task_path, address = queued.call_args.args
+        import_string(task_path)(address)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["staff@example.com"])
+        self.assertIn(self.code(), mail.outbox[0].body)
+        self.assertIn(self.code(), mail.outbox[0].alternatives[0][0])
+
+    def test_an_unknown_address_gets_a_400_and_no_email(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            res = self.send("nobody@example.com")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("email", res.data)
+        queued.assert_not_called()
+
+    def test_a_second_request_within_a_minute_is_a_429_with_retry_after(self):
+        with mock.patch("apps.users.services.async_task") as queued:
+            self.assertEqual(self.send().status_code, 200)
+            res = self.send()
+        self.assertEqual(res.status_code, 429)
+        self.assertTrue(0 < int(res["Retry-After"]) <= 60)
+        self.assertEqual(queued.call_count, 1)
+
+    def test_an_unknown_address_still_burns_the_cooldown(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.assertEqual(self.send("nobody@example.com").status_code, 400)
+            self.assertEqual(self.send("nobody@example.com").status_code, 429)
+
+    def test_verify_accepts_the_right_code_and_refuses_a_wrong_one(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.send()
+        res = self.verify(self.wrong())
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+        res = self.verify(self.code())
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data, {"message": "OTP verified successfully."})
+
+    def test_verify_without_a_code_is_a_400(self):
+        res = self.verify("123456")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("otp", res.data)
+
+    def test_five_wrong_codes_lock_the_code(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.send()
+        wrong, right = self.wrong(), self.code()
+        for _ in range(5):
+            self.assertEqual(self.verify(wrong).status_code, 400)
+        self.assertEqual(self.verify(right).status_code, 429)
+
+    def test_a_new_code_resets_the_attempt_count(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.send()
+            for _ in range(5):
+                self.verify(self.wrong())
+            cache.delete_pattern("*_otp_cooldown_*")  # skip the one-minute wait
+            self.send()
+        self.assertEqual(self.verify(self.code()).status_code, 200)
+
+    def test_a_right_code_does_not_count_as_a_guess(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.send()
+        for _ in range(8):
+            self.assertEqual(self.verify(self.code()).status_code, 200)
+
+    def test_a_malformed_code_is_a_400_and_not_counted(self):
+        with mock.patch("apps.users.services.async_task"):
+            self.send()
+        for bad in ("1", "1234567", ""):
+            self.assertEqual(self.verify(bad).status_code, 400)
+        self.assertEqual(self.verify(self.code()).status_code, 200)
+
+    def test_a_registration_code_does_not_verify_a_password_reset(self):
+        with mock.patch("apps.users.services.async_task"):
+            services.send_otp("staff@example.com", purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+        registration_code = services.get_otp(
+            "staff@example.com", purpose=OTPPurpose.INSTITUTE_REGISTRATION
+        )
+        self.assertEqual(self.verify(registration_code).status_code, 400)  # no reset code exists
+
+    def test_the_routes_are_public(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-real-token")
+        with mock.patch("apps.users.services.async_task"):
+            self.assertEqual(self.send().status_code, 200)

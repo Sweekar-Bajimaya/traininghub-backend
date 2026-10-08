@@ -29,7 +29,7 @@ from apps.institutes.models import (
 from apps.institutes.validators import validate_institute_location
 from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
-from apps.users.constants import Role, SocialPlatform
+from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
 User = get_user_model()
 
@@ -93,46 +93,74 @@ def resubmit(institute):
 
 
 @transaction.atomic
-def update_profile(institute: Institute, data: dict, user) -> Institute:
-    """Update institute profile with nested contact/ceo/social."""
-    with transaction.atomic():
-        contact_data = data.pop("contact", None)
-        ceo_data = data.pop("ceo", None)
-        social_data = data.pop("social_links", None)
-
-        # Update base fields
-        for k, v in data.items():
-            setattr(institute, k, v)
-        institute.save()
-
-        if contact_data:
-            contact, _ = InstituteContact.objects.get_or_create(institute=institute)
-            for k, v in contact_data.items():
-                setattr(contact, k, v)
-            contact.save()
-
-        if ceo_data is not None:
-            if ceo_data:
-                ceo, _ = InstituteCEO.objects.get_or_create(institute=institute)
-                for k, v in ceo_data.items():
-                    setattr(ceo, k, v)
-                ceo.save()
-            else:
-                InstituteCEO.objects.filter(institute=institute).delete()
-
-        if social_data is not None:
-            InstituteSocialLink.objects.filter(institute=institute).delete()
-            for sd in social_data:
-                InstituteSocialLink.objects.create(institute=institute, **sd)
-
+def update_profile(institute, **fields):
+    """Change the institute's own columns. The contact person, the CEO and the social links have
+    their own endpoints and services (`save_ceo`, `add_social_link`, ...)."""
+    institute = Institute.objects.select_for_update().get(pk=institute.pk)
+    renamed = "name" in fields and fields["name"] != institute.name
+    for name, value in fields.items():
+        setattr(institute, name, value)
+    institute.save(update_fields=[*fields, "modified_at"])
+    if renamed:
+        # the institute name is part of every training's search vector
+        transaction.on_commit(
+            lambda: async_task(
+                "apps.training.tasks.refresh_institute_trainings",
+                institute.pk,
+                save=False,
+            )
+        )
     return institute
 
 
 # registration and locations
-@transaction.atomic
+def send_registration_otp(email):
+    """Email a verification code to the address that will be the owner's login, before the
+    institute registers."""
+    email = user_services.normalize_email(email)
+
+    def not_taken():
+        # Revealed on purpose: the registration itself would fail with the same message.
+        if User.objects.filter(email__iexact=email).exists():
+            raise ValidationError({"email": "A user with this email already exists."})
+
+    user_services.send_otp(
+        email, purpose=OTPPurpose.INSTITUTE_REGISTRATION, check=not_taken
+    )
+
+
+def verify_registration_otp(email, otp):
+    """Check a code without using it up, so a form can confirm the email before it is submitted."""
+    user_services.verify_otp(email, otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+
+
 def register(
-    *, institute_data, owner, contact, locations=(), ceo=None, social_links=()
+    *, institute_data, owner, contact, otp, locations=(), ceo=None, social_links=()
 ):
+    """Create an institute with its owner, contact, locations and links.
+
+    The owner's email is the institute's login, and `otp` is the code emailed to it by
+    send_registration_otp. The code is checked before anything is written and used up at the end,
+    inside the transaction, so a failed registration rolls back and a code works only once.
+    """
+    email = user_services.normalize_email(owner["email"])
+    user_services.verify_otp(email, otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+    with transaction.atomic():
+        institute = _create_registration(
+            institute_data=institute_data,
+            owner=owner,
+            contact=contact,
+            locations=locations,
+            ceo=ceo,
+            social_links=social_links,
+        )
+        # Last, so that of two parallel requests with the same code only one gets through; the
+        # other raises here and its writes are rolled back.
+        user_services.consume_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+    return institute
+
+
+def _create_registration(*, institute_data, owner, contact, locations, ceo, social_links):
     for item in locations:
         validate_institute_location(
             item["location"]

@@ -67,9 +67,18 @@ or an open question gets answered. Rules:
 - Institute types (fixed list): Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School,
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
-  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute, owner,
-  at least one location); the owner then logs in (even while `PENDING`) and uploads verification documents. Approval needs at
-  least one active location and one document. A suspended institute's staff keep their accounts.
+  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute, owner
+  with a verified email, contact person, at least one location); the owner then logs in (even while `PENDING`) and
+  uploads verification documents. Approval needs at least one active location and one document. A suspended institute's staff keep their accounts.
+- Registration email: the institute's login is `owner.email` + `owner.password` (there is no separate institute email
+  column). It is verified with a one-time code: `POST institute/register/send-otp/` emails the code to that address (400 if
+  a user already has it), then the code goes in `POST institute/register/` as `otp` (`verify-otp/` is an optional check in
+  between). Codes are six digits, valid 5 minutes, one per address per minute, 5 wrong guesses lock a code (limits in
+  `apps/users/constants.py`).
+- Institute profile: the institute's own columns (name, type, registration number, established year, description, logo) are
+  edited with `PATCH institute/profile/`; the required contact person, the optional CEO and the social links (one per
+  platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
+  `institute/social-links/`. The public detail shows them, the locations and the gallery, never the owner's login.
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
   on client IP.
@@ -81,7 +90,7 @@ config/
   settings/__init__.py    `from .base import *` then `from .env import *`
   settings/base.py        shared settings; reads secrets/toggles from os.environ
   settings/env.sample.py  template -> copy to env.py (gitignored): DB, SECRET_KEY, JWT key loading
-  exception_handlers.py   maps Django ValidationError -> 400 and database IntegrityError -> 409
+  exception_handlers.py   maps Django ValidationError -> 400, database IntegrityError -> 409 and `TooManyRequests` -> 429
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
@@ -89,8 +98,9 @@ apps/
                           `admin/` is included once per app)
   common/                 the one shared app (installed, label `common`): base classes and reference data.
                           `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
-                          `category.py`; `BaseViewSet` + mixin viewsets, DynamicFields serializers,
-                          validators, `utils/` (plain helpers, no models).
+                          `category.py`; `BaseViewSet` + mixin viewsets, `ActionAPIView` (POST that answers 200),
+                          DynamicFields serializers, validators, `exceptions.py` (`TooManyRequests`), `throttling.py`
+                          (`IdentityScopedRateThrottle`: keyed on the submitted email), `utils/` (plain helpers, no models).
                           `Location` (province / district / municipality in one table, denormalised
                           `province` / `district`), management command `load_locations` (data in
                           `common/data/`: provinces.json, districts.json, cities.json), public read-only API
@@ -100,24 +110,30 @@ apps/
                           `common/data/categories.json`, loaded by `load_categories`; `signals.py` clears the
                           tree caches
   users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
-                          create/update, suspend, password change), API under `user/` (auth/, me/,
-                          admins/, users/{id}/status/), management command `generate_rsa_keys`
+                          create/update, suspend, password change, one-time codes: `send_otp`, `verify_otp`,
+                          `consume_otp`, cache only), `tasks.py` (OTP emails), API under `user/` (auth/, me/,
+                          admins/, users/{id}/status/, auth/otp/{send,verify}/ for password reset), management
+                          command `generate_rsa_keys`
   training/               `Training`, `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome`;
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
                           APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
                           cover), admin `admin/trainings/` (approve, request-changes, reject)
-  institutes/             Institute, members, invitations, documents, locations, gallery; `services.py` (status
+  institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
-                          (register, profile, locations, documents, gallery, staff, invitations, resubmit), admin
-                          `admin/institutes/` (review actions, document review and download)
+                          (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
+                          social-links, locations, documents, gallery, staff, invitations, resubmit), admin `admin/institutes/` (review actions,
+                          document review and download)
+  templates/email/        HTML email templates (`base_email`, `otp_email`, `registration_otp_email`);
+                          `TEMPLATES["DIRS"]` points at `apps/templates`
 docs/  design/            see "Source of truth"
 ```
 
 Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
-`learners`, `reviews`.
+`learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
+code (send and verify exist; nothing sets the new password yet).
 Each app follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
 (`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
 `apps/training/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
@@ -138,8 +154,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/common/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
-| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
+| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
@@ -155,8 +171,13 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   is silently ignored by DRF.
 - Serializers extend `DynamicFieldsModelSerializer`; `Meta.create_only_fields` makes model fields read-only on
   update (declared fields such as `password` are not affected). Serializers read the request from `self.request`.
-- Views are DRF generics (`RetrieveUpdateAPIView`, `UpdateAPIView`, the `apps.common.viewsets` mixins) with only
-  attributes set; no hand-written `post()` / `patch()`. Business rules and state changes live in each app's
+- Serializer ownership follows the model/domain: `common/api/v1/serializers.py` owns shared reference-data inputs
+  (including active-municipality selection and `LocationInputSerializer`); `users` owns identity, registration and
+  OTP serializers; `institutes` owns institute-model and institute-workflow serializers. Import a serializer directly
+  from its owning app—never route a `users` import through `institutes`. The dependency direction for serializers is
+  `institutes` → `users` + `common`, `users` → `common`, and `common` → no domain app.
+- Views are DRF generics (`RetrieveUpdateAPIView`, `UpdateAPIView`, `ActionAPIView` for a POST that does something and
+  answers 200, the `apps.common.viewsets` mixins) with only attributes set; no hand-written `post()` / `patch()`. Business rules and state changes live in each app's
   `services.py` (`transaction.atomic()`, `select_for_update()` before check-then-write), called from serializer
   `create()` / `update()`. Admin lists use `prefetch_related` and a deterministic `order_by(..., "-pk")`.
 - URL prefixes live only in `apps/api/v1/urls.py`; an app's URL module is relative to its prefix. A router
@@ -174,7 +195,11 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Public vs authenticated: `ActiveAccountJWTAuthentication` (default auth class) treats a deactivated
   user's token as anonymous on public views and rejects it elsewhere. Suspending = `is_active=False`.
 - Public listings return only `APPROVED` trainings of `APPROVED` institutes.
-- Throttle by scope (`throttle_scope` on the view); rates are in `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`.
+- Throttle by scope (`throttle_scope` on the view); rates are in `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`. A scope
+  with no rate there makes every request to that view a 500 (`ImproperlyConfigured`). The OTP views use
+  `IdentityScopedRateThrottle` (scopes `otp`, `register_otp`, `register_otp_verify`).
+- A service that needs the caller to wait raises `TooManyRequests(message, wait=seconds)`; the exception handler answers
+  429 with `Retry-After`.
 
 ## Do not touch
 
@@ -219,6 +244,14 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   registered in the admin site. Upload validators check extension and size only (`INSTITUTE_UPLOAD_MAX_BYTES`, 5 MB).
 - **Staff invitation tokens** are stored as a sha256 hash only; the raw token goes into the queued email task with
   `save=False`, so django-q does not keep it in its results table. The link uses `FRONTEND_BASE_URL`.
+- **One-time codes live only in the Redis cache** (`<purpose>_otp_<email>`, `..._attempts_...`, `..._cooldown_...`, 5-minute
+  expiry). The email task is queued with the address only and reads the code when it runs, so django-q's results table
+  never holds a code and an expired code sends no email. Keys are built in `users/services._otp_keys` from the lower-cased
+  address; build them nowhere else. Each purpose (`OTPPurpose`) has its own keys, so a code works only for the flow it was
+  sent for. In tests mock `apps.users.services.async_task`: a real one lands in the Redis queue that a running `qcluster`
+  also reads, and it would send real mail.
+- **Registration checks the code before writing and uses it up inside the transaction** (`institutes/services.register`), so
+  a failed registration keeps the code and a code works once. Every caller of `register` must pass the code.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
   uploads raise `AttributeError` until it is added to `base.py`.
 
@@ -231,7 +264,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - The team still has to document where the location data came from.
 - Who edits Nepal locations at runtime (today only `load_locations` writes them; the admin site is read-only).
 - Whether enquirers are told when a training is cancelled, and whether "Instructor name" search is needed.
-- The UI's registration number / contact fields on `Institute`, and the featured flag / view counts for relevance sort.
+- Whether the contact person's name and the CEO profile stay public, whether `registration_number` must be unique, and the
+  featured flag / view counts for relevance sort.
 
 ## Verification
 

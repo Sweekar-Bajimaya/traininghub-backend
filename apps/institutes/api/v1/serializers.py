@@ -1,12 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from rest_framework.validators import UniqueValidator
 
-from apps.common.constants import LocationLevel
-from apps.common.models.location import Location
+from apps.common.api.v1.serializers import (
+    LocationInputSerializer,
+    active_municipalities,
+)
 from apps.common.serializers import DynamicFieldsModelSerializer
-from apps.common.validators import validate_phone_number
 from apps.institutes import services
 from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import (
@@ -20,13 +20,13 @@ from apps.institutes.models import (
     InstituteMember,
     InstituteSocialLink,
 )
+from apps.users.api.v1.serializers import (
+    OTPField,
+    UserRegistrationSerializer,
+)
 from apps.users.constants import SocialPlatform
 
 User = get_user_model()
-
-
-def active_municipalities():
-    return Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True)
 
 
 class InstituteContactSerializer(DynamicFieldsModelSerializer):
@@ -40,11 +40,11 @@ class InstituteCEOSerializer(DynamicFieldsModelSerializer):
         model = InstituteCEO
         fields = ("name", "message", "photo", "linkedin_url")
 
-        # used by PUT institute/ceo/ (create or replace)
-        def update(self, instance, validated_data):
-            return services.save_ceo(
-                self.request.user.membership.institute, **validated_data
-            )
+    def update(self, instance, validated_data):
+        # used by PUT institute/ceo/ (create or replace); the instance may not be saved yet
+        return services.save_ceo(
+            self.request.user.membership.institute, **validated_data
+        )
 
 
 class InstituteSocialLinkSerializer(DynamicFieldsModelSerializer):
@@ -62,51 +62,12 @@ class InstituteSocialLinkSerializer(DynamicFieldsModelSerializer):
         return services.update_social_link(instance, **validated_data)
 
 
-# registration (public)
-class UserRegistrationSerializer(serializers.Serializer):
-    email = serializers.EmailField(
-        validators=[
-            UniqueValidator(
-                queryset=User.objects.all(),
-                lookup="iexact",
-                message="A user with that email already exists.",
-            )
-        ]
-    )
-    full_name = serializers.CharField(max_length=150)
-    password = serializers.CharField(write_only=True)
-    phone_number = serializers.CharField(
-        max_length=25,
-        required=False,
-        validators=[
-            validate_phone_number,
-            UniqueValidator(
-                queryset=User.objects.all(),
-                message="A user with that phone number already exists.",
-            ),
-        ],
-    )
-
-    def validate_password(self, value):
-        validate_password(value)
-        return value
-
-
-class LocationInputSerializer(serializers.Serializer):
-    location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
-    address = serializers.CharField(max_length=255)
-    map_url = serializers.URLField(required=False, allow_blank=True)
-    contact_phone = serializers.CharField(
-        max_length=25,
-        required=False,
-        allow_blank=True,
-        validators=[validate_phone_number],
-    )
-
-
 class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
-    """Registration requires contact person + phone."""
+    """Registration requires contact person + phone. `owner.email` and `owner.password` are the
+    institute's login; the email is verified with `otp`, the code sent to it by
+    RegistrationOTPSerializer."""
 
+    otp = OTPField()
     owner = UserRegistrationSerializer(write_only=True)
     locations = LocationInputSerializer(
         many=True, write_only=True, required=True, allow_empty=False
@@ -128,6 +89,7 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
             "name",
             "registration_number",
             "type",
+            "otp",
             "established_year",
             "description",
             "owner",
@@ -157,6 +119,7 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
             contact=validated_data.pop("contact"),
             ceo=validated_data.pop("ceo", None),
             social_links=validated_data.pop("social_links", []),
+            otp=validated_data.pop("otp"),
             institute_data=validated_data,
         )
 
@@ -188,8 +151,10 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
     # to hide the person's name publicly: InstituteContactSerializer(read_only=True, allow_null=True, exclude_fields=("contact_person",))
     ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
-    class Meta(PublicInstituteListSerializer.Meta):
+    locations = serializers.SerializerMethodField()
+    gallery = serializers.SerializerMethodField()
 
+    class Meta(PublicInstituteListSerializer.Meta):
         fields = PublicInstituteListSerializer.Meta.fields + (
             "established_year",
             "description",
@@ -199,6 +164,24 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
             "locations",
             "gallery",
         )
+
+    def get_locations(self, obj):
+        # prefetched: active only, with municipality / district / province, main office first
+        return [
+            {
+                "municipality": l.location.name,
+                "district": l.location.district.name,
+                "province": l.location.province.name,
+                "address": l.address,
+                "map_url": l.map_url,
+                "contact_phone": l.contact_phone,
+                "is_main": l.is_main,
+            }
+            for l in obj.locations.all()
+        ]
+
+    def get_gallery(self, obj):
+        return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
 
 
 # admin review
@@ -245,7 +228,8 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
 
 
 class InstituteProfileSerializer(DynamicFieldsModelSerializer):
-    """Institute Profile used for registration and profile view through portal."""
+    """The institute's own profile in the portal. Only its own columns are edited here; the
+    contact person, CEO and social links are shown and edited through their own endpoints."""
 
     contact = InstituteContactSerializer(read_only=True, allow_null=True)
     ceo = InstituteCEOSerializer(

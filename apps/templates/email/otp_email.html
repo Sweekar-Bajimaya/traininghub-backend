@@ -1,0 +1,81 @@
+{% extends "email/base_email.html" %} 
+{% block title %}Your OTP Code - TrainingHub{% endblock %} {% block icon %}🔑{% endblock %} 
+{% block heading %}Your one-time password{% endblock %} 
+{% block content %}
+<p
+  style="margin: 0 0 24px 0; font-size: 15px; color: #5a6478; line-height: 1.6"
+>
+  Use the code below to complete your sign-in. It is valid for
+  <strong style="color: #0f1b35">5 minutes</strong> and can only be used once.
+</p>
+{% endblock %} {% block extra %}
+<table
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin-bottom: 24px"
+>
+  <tr>
+    <td
+      style="
+        background-color: #f5f6fa;
+        border: 1px solid #e4e7ed;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+      "
+    >
+      <p
+        style="
+          margin: 0 0 6px 0;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #8891a5;
+        "
+      >
+        One-Time Password
+      </p>
+      <p
+        style="
+          margin: 0;
+          font-size: 38px;
+          font-weight: 800;
+          letter-spacing: 0.18em;
+          color: #00a9d5;
+          font-variant-numeric: tabular-nums;
+        "
+      >
+        {{ otp }}
+      </p>
+    </td>
+  </tr>
+</table>
+
+<table
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin-bottom: 28px"
+>
+  <tr>
+    <td
+      style="
+        background-color: #fff8ed;
+        border: 1px solid #ffd791;
+        border-radius: 8px;
+        padding: 12px 16px;
+      "
+    >
+      <p style="margin: 0; font-size: 13px; color: #7a4f00; line-height: 1.5">
+        <strong>Did not request this?</strong> Ignore this email - your account
+        is safe. If you keep receiving codes you did not ask for, contact our
+        support team.
+      </p>
+    </td>
+  </tr>
+</table>
+{% endblock %}

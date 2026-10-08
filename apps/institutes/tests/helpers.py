@@ -1,5 +1,6 @@
 import io
 import tempfile
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -10,12 +11,15 @@ from django.test.utils import CaptureQueriesContext
 from PIL import Image
 
 from apps.common.models.location import Location
+from apps.institutes import services
 from apps.institutes.constants import InstituteStatus, InstituteType, MemberRole
 from apps.institutes.models import Institute, InstituteLocation, InstituteMember
-from apps.users.constants import Role
+from apps.users import services as user_services
+from apps.users.constants import OTPPurpose, Role
 
 User = get_user_model()
 PASSWORD = "Str0ng-pass-123!"
+OWNER_EMAIL = "owner@example.com"  # the owner's login, which is the institute's email
 
 
 def make_municipality(code=1, name="Municipality"):
@@ -31,7 +35,9 @@ def make_municipality(code=1, name="Municipality"):
 
 
 def make_institute(
-    name="Alpha Institute", status=InstituteStatus.PENDING, email="owner@example.com"
+    name="Alpha Institute",
+    status=InstituteStatus.PENDING,
+    email=OWNER_EMAIL,
 ):
     institute = Institute.objects.create(
         name=name, type=InstituteType.COMPANY, status=status
@@ -87,3 +93,18 @@ def count_queries(call):
     with CaptureQueriesContext(connection) as captured:
         call()
     return len(captured)
+
+
+def reset_otps():
+    """Clear the one-time codes, attempt counters and cooldowns (and nothing else in Redis)."""
+    cache.delete_pattern("*_otp_*")
+
+
+def issue_registration_otp(email):
+    """Send a registration code to `email` the way the API does, with the email task mocked
+    (a real task would be picked up by a running qcluster), and return the code."""
+    keys = user_services._otp_keys(email, OTPPurpose.INSTITUTE_REGISTRATION)
+    cache.delete(keys["cooldown"])  # tests ask for several codes for one address
+    with mock.patch("apps.users.services.async_task"):
+        services.send_registration_otp(email)
+    return user_services.get_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)

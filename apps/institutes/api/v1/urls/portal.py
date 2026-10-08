@@ -22,6 +22,16 @@ router.register(
 urlpatterns = [
     path("register/", views.RegisterView.as_view(), name="register"),
     path(
+        "register/send-otp/",
+        views.RegisterSendOTPView.as_view(),
+        name="register-send-otp",
+    ),
+    path(
+        "register/verify-otp/",
+        views.RegisterVerifyOTPView.as_view(),
+        name="register-verify-otp",
+    ),
+    path(
         "invitations/accept/",
         views.AcceptInvitationView.as_view(),
         name="invitation-accept",
@@ -33,7 +43,6 @@ urlpatterns = [
         views.PortalDocumentDownloadView.as_view(),
         name="document-download",
     ),
-    path("profile/", views.InstituteProfileView.as_view(), name="profile"),
     path("contact/", views.PortalContactView.as_view(), name="contact"),
     path("ceo/", views.PortalCEOView.as_view(), name="ceo"),
 ] + router.urls

@@ -6,11 +6,49 @@ from rest_framework.validators import UniqueValidator
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.common.serializers import DynamicFieldsModelSerializer
-from apps.common.validators import validate_attachment
+from apps.common.validators import validate_attachment, validate_phone_number
 from apps.users import services
-from apps.users.constants import GRANTABLE_PERMISSIONS
+from apps.users.constants import GRANTABLE_PERMISSIONS, OTP_LENGTH, OTPPurpose
 
 User = get_user_model()
+
+
+class UserRegistrationSerializer(serializers.Serializer):
+    email = serializers.EmailField(
+        validators=[
+            UniqueValidator(
+                queryset=User.objects.all(),
+                lookup="iexact",
+                message="A user with that email already exists.",
+            )
+        ]
+    )
+    password = serializers.CharField(write_only=True)
+    confirm_password = serializers.CharField(write_only=True)
+    phone_number = serializers.CharField(
+        max_length=25,
+        required=False,
+        validators=[
+            validate_phone_number,
+            UniqueValidator(
+                queryset=User.objects.all(),
+                message="A user with that phone number already exists.",
+            ),
+        ],
+    )
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
+
+    def validate(self, attrs):
+        # confirm_password only guards against a typo: it is dropped here, so it never reaches the
+        # service and then User.objects.create_user(**owner)
+        if attrs["password"] != attrs.pop("confirm_password"):
+            raise serializers.ValidationError(
+                {"confirm_password": "Passwords do not match."}
+            )
+        return attrs
 
 
 class ProfileSerializer(DynamicFieldsModelSerializer):
@@ -144,3 +182,81 @@ class LoginSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         data["user"] = ProfileSerializer(self.user, context=self.context).data
         return data
+
+
+class NormalizedEmailSerializer(serializers.Serializer):
+    """Base for the OTP serializers: every one takes an email and normalises it the same way
+    (services.normalize_email), so the cache keys built from it never drift between requests.
+
+    The serializers answer with a fixed message, never with the input (see to_representation),
+    so a code can never be echoed back.
+    """
+
+    email = serializers.EmailField()
+    message = None  # what the 200 response says; set by subclasses
+
+    def validate_email(self, value):
+        return services.normalize_email(value)
+
+    def create(self, validated_data):
+        raise NotImplementedError
+
+    def to_representation(self, instance):
+        return {"message": self.message}
+
+
+class OTPField(serializers.CharField):
+    """A six-digit code. Rejected here, before it can count as a wrong guess."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("min_length", OTP_LENGTH)
+        kwargs.setdefault("max_length", OTP_LENGTH)
+        kwargs.setdefault("write_only", True)
+        super().__init__(**kwargs)
+
+
+class SendOTPSerializer(NormalizedEmailSerializer):
+    """Password reset: only an address that has an account gets a code."""
+
+    message = "OTP sent to your email."
+
+    def create(self, validated_data):
+        services.send_password_reset_otp(validated_data["email"])
+        return validated_data
+
+
+class VerifyOTPSerializer(NormalizedEmailSerializer):
+    """Checks a password-reset code without using it up."""
+
+    otp = OTPField()
+    message = "OTP verified successfully."
+
+    def create(self, validated_data):
+        services.verify_otp(
+            validated_data["email"],
+            validated_data["otp"],
+            purpose=OTPPurpose.PASSWORD_RESET,
+        )
+        return validated_data
+
+
+class RegistrationOTPSerializer(NormalizedEmailSerializer):
+    """Step 1 of registration: email a code to the address that will be the owner's login."""
+
+    message = "Verification code sent to your email."
+
+    def create(self, validated_data):
+        services.send_registration_otp(validated_data["email"])
+        return validated_data
+
+
+class RegistrationOTPVerifySerializer(NormalizedEmailSerializer):
+    """Optional step 2: confirm the code before the rest of the form is submitted. The code is
+    checked again, and used up, by the registration itself."""
+
+    otp = OTPField()
+    message = "Email verified."
+
+    def create(self, validated_data):
+        services.verify_registration_otp(validated_data["email"], validated_data["otp"])
+        return validated_data
