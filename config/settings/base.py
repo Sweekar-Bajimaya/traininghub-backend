@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -240,10 +241,20 @@ PASSWORD_HASHERS = [
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# The tests clear one-time codes and throttle counters (cache.delete_pattern), so `manage.py test`
+# gets its own Redis database for the cache. Sharing REDIS_URL's would wipe the codes someone just
+# requested from the dev server. Only the cache moves: the django-q broker stays on REDIS_URL.
+if "test" in sys.argv:
+    CACHE_REDIS_URL = os.environ.get("REDIS_TEST_URL") or (
+        urlsplit(REDIS_URL)._replace(path="/15").geturl()
+    )
+else:
+    CACHE_REDIS_URL = REDIS_URL
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
+        "LOCATION": CACHE_REDIS_URL,
         "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
     }
 }

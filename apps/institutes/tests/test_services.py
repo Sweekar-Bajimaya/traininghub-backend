@@ -250,9 +250,9 @@ class RegistrationOtpServiceTests(TestCase):
         User.objects.create_user(OWNER_EMAIL, PASSWORD)
         with mock.patch("apps.users.services.async_task") as queued:
             with self.assertRaises(ValidationError):
-                services.send_registration_otp(OWNER_EMAIL)
+                user_services.send_registration_otp(OWNER_EMAIL)
             with self.assertRaises(TooManyRequests):  # the cooldown was claimed first
-                services.send_registration_otp(OWNER_EMAIL)
+                user_services.send_registration_otp(OWNER_EMAIL)
         queued.assert_not_called()
 
     def test_codes_are_six_digits_and_may_start_with_zero(self):

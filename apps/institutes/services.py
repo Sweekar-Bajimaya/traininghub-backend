@@ -114,33 +114,13 @@ def update_profile(institute, **fields):
 
 
 # registration and locations
-def send_registration_otp(email):
-    """Email a verification code to the address that will be the owner's login, before the
-    institute registers."""
-    email = user_services.normalize_email(email)
-
-    def not_taken():
-        # Revealed on purpose: the registration itself would fail with the same message.
-        if User.objects.filter(email__iexact=email).exists():
-            raise ValidationError({"email": "A user with this email already exists."})
-
-    user_services.send_otp(
-        email, purpose=OTPPurpose.INSTITUTE_REGISTRATION, check=not_taken
-    )
-
-
-def verify_registration_otp(email, otp):
-    """Check a code without using it up, so a form can confirm the email before it is submitted."""
-    user_services.verify_otp(email, otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
-
-
 def register(
     *, institute_data, owner, contact, otp, locations=(), ceo=None, social_links=()
 ):
     """Create an institute with its owner, contact, locations and links.
 
     The owner's email is the institute's login, and `otp` is the code emailed to it by
-    send_registration_otp. The code is checked before anything is written and used up at the end,
+    users.services.send_registration_otp. The code is checked before anything is written and used up at the end,
     inside the transaction, so a failed registration rolls back and a code works only once.
     """
     email = user_services.normalize_email(owner["email"])

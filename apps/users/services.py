@@ -149,7 +149,9 @@ def send_otp(email, *, purpose, check=None):
         check()
     otp = f"{secrets.randbelow(10**OTP_LENGTH):0{OTP_LENGTH}d}"
     cache.set(keys["otp"], otp, timeout=OTP_TTL_SECONDS)
-    cache.set(keys["attempts"], 0, timeout=OTP_TTL_SECONDS)  # a new code starts a new count
+    cache.set(
+        keys["attempts"], 0, timeout=OTP_TTL_SECONDS
+    )  # a new code starts a new count
     async_task(OTP_EMAIL_TASKS[purpose], email)
 
 
@@ -164,6 +166,25 @@ def send_password_reset_otp(email):
             )
 
     send_otp(email, purpose=OTPPurpose.PASSWORD_RESET, check=account_exists)
+
+
+def send_registration_otp(email):
+    """Email a verification code to the address that will be an institute owner's login, before
+    the institute registers."""
+    email = normalize_email(email)
+
+    def not_taken():
+        # Revealed on purpose: the registration itself would fail with the same message.
+        if User.objects.filter(email__iexact=email).exists():
+            raise ValidationError({"email": "A user with this email already exists."})
+
+    send_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION, check=not_taken)
+
+
+def verify_registration_otp(email, otp):
+    """Check a registration code without using it up, so a form can confirm the email before it
+    is submitted. The registration itself checks it again and uses it up."""
+    verify_otp(email, otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
 
 
 def get_otp(email, *, purpose):

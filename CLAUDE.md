@@ -111,9 +111,11 @@ apps/
                           tree caches
   users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
                           create/update, suspend, password change, one-time codes: `send_otp`, `verify_otp`,
-                          `consume_otp`, cache only), `tasks.py` (OTP emails), API under `user/` (auth/, me/,
-                          admins/, users/{id}/status/, auth/otp/{send,verify}/ for password reset), management
-                          command `generate_rsa_keys`
+                          `consume_otp`, plus `send_password_reset_otp` and the institute-registration pair
+                          `send_registration_otp` / `verify_registration_otp`; cache only), `tasks.py` (OTP
+                          emails), API under `user/` (auth/, me/, admins/, users/{id}/status/,
+                          auth/otp/{send,verify}/ for password reset), management command `generate_rsa_keys`;
+                          also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use
   training/               `Training`, `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome`;
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
@@ -155,7 +157,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
@@ -188,8 +190,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   (`apps/institutes/permissions.py`): the queryset is filtered to the caller's institute, so another institute's row is a
   404, not a 403. Staff can do everything except manage staff and invitations (owner only).
 - Read settings with `from django.conf import settings`, never `from config import settings` (the raw module ignores
-  `override_settings`). In tests clear throttles with `cache.delete_pattern("throttle_*")`, never `cache.clear()`: the
-  same Redis database holds the django-q broker.
+  `override_settings`). In tests clear throttles with `cache.delete_pattern("throttle_*")`, never `cache.clear()`: if
+  `REDIS_TEST_URL` points at the dev database, that would also wipe the django-q broker.
 - Project skills `backend-best-practices` and `drf-generics` are in `.claude/skills/` (that folder is gitignored,
   so they are local to this checkout).
 - Public vs authenticated: `ActiveAccountJWTAuthentication` (default auth class) treats a deactivated
@@ -218,6 +220,11 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   `timezone.now()` (gives the UTC day); use `timezone.localdate()` / `localtime()`.
 - **Redis must be running** for `CACHES` (django-redis), throttling and `qcluster`.
   The default `REDIS_URL` is `redis://localhost:6379/0`.
+- **`manage.py test` uses its own Redis database for the cache** (`/15` on the `REDIS_URL` host; set `REDIS_TEST_URL` to
+  change it), chosen in `base.py` by `"test" in sys.argv`. The tests delete one-time codes and throttle counters
+  (`reset_otps`, `reset_throttles`); on the dev database that wiped codes the developer had just requested, so a code
+  "expired" with its 5 minutes still running. The django-q broker stays on `REDIS_URL`. Needs a Redis with at least 16
+  databases (the default).
 - **User constraints live in the database**: a partial unique index allows one `SUPER_ADMIN`, email is unique on `Lower(email)`,
   `User.save()` stores a blank `phone_number` as NULL (it is unique) and derives `is_superuser` / `is_staff` from `role`
   (check constraints back this up), so never set those flags directly. Migration `0002` also moves `username` from a

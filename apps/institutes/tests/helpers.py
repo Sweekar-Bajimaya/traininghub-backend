@@ -11,7 +11,6 @@ from django.test.utils import CaptureQueriesContext
 from PIL import Image
 
 from apps.common.models.location import Location
-from apps.institutes import services
 from apps.institutes.constants import InstituteStatus, InstituteType, MemberRole
 from apps.institutes.models import Institute, InstituteLocation, InstituteMember
 from apps.users import services as user_services
@@ -106,5 +105,5 @@ def issue_registration_otp(email):
     keys = user_services._otp_keys(email, OTPPurpose.INSTITUTE_REGISTRATION)
     cache.delete(keys["cooldown"])  # tests ask for several codes for one address
     with mock.patch("apps.users.services.async_task"):
-        services.send_registration_otp(email)
+        user_services.send_registration_otp(email)
     return user_services.get_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
