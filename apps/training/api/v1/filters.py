@@ -85,9 +85,4 @@ class TrainingFilter(django_filters.FilterSet):
         )
 
 
-class AdminTrainingFilter(django_filters.FilterSet):
-    institute = django_filters.NumberFilter(field_name="institute_id")
 
-    class Meta:
-        model = Training
-        fields = ("status", "mode", "institute")

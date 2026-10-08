@@ -8,16 +8,13 @@ from apps.common.viewsets import CustomModelViewSet, ReadOnlyViewSet
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.permissions import InstituteScopedMixin, IsInstituteMember
 from apps.training import services
-from apps.training.api.v1.filters import AdminTrainingFilter, TrainingFilter
+from apps.training.api.v1.filters import TrainingFilter
 from apps.training.api.v1.serializers import (
-    AdminTrainingListSerializer,
-    AdminTrainingSerializer,
     CoverSerializer,
     PortalTrainingListSerializer,
     PortalTrainingSerializer,
     PublicTrainingDetailSerializer,
     PublicTrainingListSerializer,
-    TrainingReasonSerializer,
 )
 from apps.training.constants import TrainingStatus
 from apps.training.models import Training
@@ -137,57 +134,4 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
         )
 
 
-# ---------------------------------------------------------------- admin console
 
-
-class AdminTrainingViewSet(ReadOnlyViewSet):
-    """Review queue: ?status=SUBMITTED."""
-
-    permission_classes = [HasPlatformPermission]
-    required_permission = "users.manage_trainings"
-    lookup_value_regex = r"[0-9]+"
-    filter_backends = (DjangoFilterBackend, SearchFilter)
-    filterset_class = AdminTrainingFilter
-    search_fields = ("title", "institute__name")
-    queryset = Training.objects.select_related(
-        "institute", "category__parent", "institute_location__location"
-    ).order_by("-created_at", "-pk")
-
-    def get_serializer_class(self):
-        if self.action == "list":
-            return AdminTrainingListSerializer
-        if self.action in ("request_changes", "reject"):
-            return TrainingReasonSerializer
-        return AdminTrainingSerializer
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        if self.action == "list":
-            return queryset
-        return queryset.prefetch_related(*CHILDREN)
-
-    def _review(self, request, service, *, with_reason):
-        kwargs = {}
-        if with_reason:
-            serializer = TrainingReasonSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            kwargs["reason"] = serializer.validated_data["reason"]
-        training = service(self.get_object(), by=request.user, **kwargs)
-        return Response(
-            AdminTrainingSerializer(
-                self.get_queryset().get(pk=training.pk),
-                context=self.get_serializer_context(),
-            ).data
-        )
-
-    @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
-        return self._review(request, services.approve, with_reason=False)
-
-    @action(detail=True, methods=["post"], url_path="request-changes")
-    def request_changes(self, request, pk=None):
-        return self._review(request, services.request_changes, with_reason=True)
-
-    @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
-        return self._review(request, services.reject, with_reason=True)

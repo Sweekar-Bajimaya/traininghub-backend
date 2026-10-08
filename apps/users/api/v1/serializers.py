@@ -8,7 +8,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.common.serializers import DynamicFieldsModelSerializer
 from apps.common.validators import validate_attachment, validate_phone_number
 from apps.users import services
-from apps.users.constants import GRANTABLE_PERMISSIONS, OTP_LENGTH, OTPPurpose
+from apps.users.constants import OTP_LENGTH, OTPPurpose
 
 User = get_user_model()
 
@@ -86,56 +86,6 @@ class ProfileSerializer(DynamicFieldsModelSerializer):
     def get_permissions(self, obj):
         # codename list; relies on prefetch_related("user_permissions") in list views
         return sorted(p.codename for p in obj.user_permissions.all())
-
-
-class AdminSerializer(ProfileSerializer):
-    """Admin serializer class for admin related work"""
-
-    password = serializers.CharField(write_only=True, required=False)
-    permissions = serializers.ListField(
-        child=serializers.ChoiceField(choices=GRANTABLE_PERMISSIONS), required=False
-    )
-
-    class Meta(ProfileSerializer.Meta):
-        fields = ProfileSerializer.Meta.fields + ("password", "is_active")
-        read_only_fields = ("id", "role", "created_at", "last_login", "is_active")
-        create_only_fields = ("email", "password")  # read-only after password creation
-        extra_kwargs = {
-            **ProfileSerializer.Meta.extra_kwargs,
-            "email": {
-                "validators": [
-                    UniqueValidator(
-                        queryset=User.objects.all(),
-                        lookup="iexact",
-                        message="A user with that email already exists.",
-                    )
-                ]
-            },
-        }
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["permissions"] = self.get_permissions(instance)
-        return data
-
-    def validate_password(self, value):
-        validate_password(value)
-        return value
-
-    def validate(self, attrs):
-        if self.instance is None and "password" not in attrs:
-            raise serializers.ValidationError({"password": "This field is required."})
-        if self.instance is not None and "password" in attrs:
-            raise serializers.ValidationError(
-                {"password": "The password cannot be changed here."}
-            )
-        return attrs
-
-    def create(self, validated_data):
-        return services.create_admin(**validated_data)
-
-    def update(self, instance, validated_data):
-        return services.update_admin(instance, **validated_data)
 
 
 class PasswordChangeSerializer(serializers.Serializer):

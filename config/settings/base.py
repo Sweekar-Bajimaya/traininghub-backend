@@ -56,6 +56,7 @@ if DEBUG:
 LOCAL_APPS = [
     "apps.app_key",
     "apps.common",
+    "apps.control_panel",
     "apps.institutes",
     "apps.training",
     "apps.users",
