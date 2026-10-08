@@ -27,12 +27,21 @@ GRANTABLE_PERMISSIONS = (
     "manage_categories",
 )
 
-SOCIAL_PLATFORM_CHOICES = [
-    ("facebook", "Facebook"),
-    ("linkedin", "LinkedIn"),
-    ("twitter", "X (Twitter)"),
-    ("instagram", "Instagram"),
-    ("youtube", "YouTube"),
-    ("website", "Website"),
-    ("other", "Other"),
-]
+
+class SocialPlatform:
+    FACEBOOK, LINKEDIN, TWITTER, INSTAGRAM = (
+        "facebook",
+        "linkedin",
+        "twitter",
+        "instagram",
+    )
+    YOUTUBE, WEBSITE, OTHER = "youtube", "website", "other"
+    CHOICES = (
+        (FACEBOOK, "Facebook"),
+        (LINKEDIN, "LinkedIn"),
+        (TWITTER, "X (Twitter)"),
+        (INSTAGRAM, "Instagram"),
+        (YOUTUBE, "YouTube"),
+        (WEBSITE, "Website"),
+        (OTHER, "Other"),
+    )

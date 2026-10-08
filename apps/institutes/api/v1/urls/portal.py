@@ -10,13 +10,22 @@ router.register("locations", views.PortalLocationViewSet, basename="portal-locat
 router.register("documents", views.PortalDocumentViewSet, basename="portal-document")
 router.register("gallery", views.PortalGalleryViewSet, basename="portal-gallery")
 router.register("staff", views.PortalStaffViewSet, basename="portal-staff")
-router.register("invitations", views.PortalInvitationViewSet, basename="portal-invitation")
+router.register(
+    "invitations", views.PortalInvitationViewSet, basename="portal-invitation"
+)
+router.register(
+    "social-links", views.PortalSocialLinkViewSet, basename="portal-social-link"
+)
 
 # register/ and invitations/accept/ come before the router; the routers use numeric ids, so
 # "accept" is never read as an id.
 urlpatterns = [
     path("register/", views.RegisterView.as_view(), name="register"),
-    path("invitations/accept/", views.AcceptInvitationView.as_view(), name="invitation-accept"),
+    path(
+        "invitations/accept/",
+        views.AcceptInvitationView.as_view(),
+        name="invitation-accept",
+    ),
     path("profile/", views.InstituteProfileView.as_view(), name="profile"),
     path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),
     path(
@@ -24,4 +33,7 @@ urlpatterns = [
         views.PortalDocumentDownloadView.as_view(),
         name="document-download",
     ),
+    path("profile/", views.InstituteProfileView.as_view(), name="profile"),
+    path("contact/", views.PortalContactView.as_view(), name="contact"),
+    path("ceo/", views.PortalCEOView.as_view(), name="ceo"),
 ] + router.urls

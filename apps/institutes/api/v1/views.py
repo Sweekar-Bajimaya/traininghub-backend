@@ -10,6 +10,7 @@ from rest_framework.generics import (
     CreateAPIView,
     GenericAPIView,
     RetrieveUpdateAPIView,
+    RetrieveUpdateDestroyAPIView,
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -32,24 +33,30 @@ from apps.institutes.api.v1.serializers import (
     DocumentReviewSerializer,
     GalleryImageSerializer,
     GalleryReorderSerializer,
+    InstituteCEOSerializer,
+    InstituteContactSerializer,
     InstituteDocumentSerializer,
     InstituteLocationSerializer,
     InstituteProfileSerializer,
+    InstituteRegistrationSerializer,
+    InstituteSocialLinkSerializer,
     InvitationSerializer,
     PublicInstituteDetailSerializer,
     PublicInstituteListSerializer,
     ReasonSerializer,
-    RegisterSerializer,
     StaffSerializer,
 )
 from apps.institutes.constants import InstituteStatus, MemberRole
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
     InstituteMember,
+    InstituteSocialLink,
 )
 from apps.institutes.permissions import (
     InstituteScopedMixin,
@@ -68,14 +75,9 @@ def private_file_response(document):
     )
 
 
-# ---------------------------------------------------------------- public
-
-
+# public
 class RegisterView(CreateAPIView):
-    serializer_class = UserRegisterSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
-    throttle_scope = "institute_register"
+    serializer_class = InstituteRegistrationSerializer
 
 
 class AcceptInvitationView(CreateAPIView):
@@ -106,7 +108,9 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
                 Prefetch(
                     "locations",
                     queryset=InstituteLocation.objects.filter(is_active=True)
-                    .select_related("location", "location__district", "location__province")
+                    .select_related(
+                        "location", "location__district", "location__province"
+                    )
                     .order_by("-is_main", "pk"),
                 ),
                 Prefetch(
@@ -133,7 +137,9 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
         "documents",
         Prefetch(
             "members",
-            queryset=InstituteMember.objects.filter(role=MemberRole.OWNER).select_related("user"),
+            queryset=InstituteMember.objects.filter(
+                role=MemberRole.OWNER
+            ).select_related("user"),
             to_attr="owner_members",
         ),
     ).order_by("-created_at", "-pk")
@@ -146,7 +152,9 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
             kwargs["reason"] = serializer.validated_data["reason"]
         institute = service(self.get_object(), by=request.user, **kwargs)
         # re-read through the viewset queryset so documents and owner are prefetched
-        return Response(self.get_serializer(self.get_queryset().get(pk=institute.pk)).data)
+        return Response(
+            self.get_serializer(self.get_queryset().get(pk=institute.pk)).data
+        )
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
@@ -173,10 +181,14 @@ class AdminDocumentView(GenericAPIView):
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_institutes"
     serializer_class = DocumentReviewSerializer
-    queryset = InstituteDocument.objects.none()  # only for schema generation; patch() looks the row up itself
+    queryset = (
+        InstituteDocument.objects.none()
+    )  # only for schema generation; patch() looks the row up itself
 
     def patch(self, request, institute_id, pk):
-        document = get_object_or_404(InstituteDocument, pk=pk, institute_id=institute_id)
+        document = get_object_or_404(
+            InstituteDocument, pk=pk, institute_id=institute_id
+        )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = services.review_document(
@@ -195,16 +207,19 @@ class AdminDocumentDownloadView(APIView):
         )
 
 
-# ---------------------------------------------------------------- portal (the institute's own staff)
-
-
+# portal (the institute's own staff)
 class InstituteProfileView(RetrieveUpdateAPIView):
     serializer_class = InstituteProfileSerializer
     permission_classes = [IsInstituteMember]
     http_method_names = ["get", "patch", "head", "options"]
+    queryset = Institute.objects.select_related("contact", "ceo").prefetch_related(
+        "social_links"
+    )
 
     def get_object(self):
-        return self.request.user.membership.institute
+        return get_object_or_404(
+            self.get_queryset(), pk=self.request.user.membership.institute_id
+        )
 
 
 class ResubmitView(GenericAPIView):
@@ -292,3 +307,36 @@ class PortalInvitationViewSet(InstituteScopedMixin, CreateListDestroyViewSet):
 
     def perform_destroy(self, instance):
         services.revoke_invitation(instance, by=self.request.user)
+
+
+class PortalContactView(RetrieveUpdateAPIView):
+    serializer_class = InstituteContactSerializer
+    permission_classes = [IsInstituteMember]
+    http_method_names = ["get", "put", "patch", "head", "options"]
+
+    def get_object(self):
+        return get_object_or_404(
+            InstituteContact, institute_id=self.request.user.membership.institute_id
+        )
+
+
+class PortalCEOView(RetrieveUpdateDestroyAPIView):
+    serializer_class = InstituteCEOSerializer
+    permission_classes = [IsInstituteMember]
+    http_method_names = ["get", "put", "delete", "head", "options"]
+
+    def get_object(self):
+        institute_id = self.request.user.membership.institute_id
+        if self.request.method == "PUT":  # PUT creates the row when there is none
+            return InstituteCEO.objects.filter(
+                institute_id=institute_id
+            ).first() or InstituteCEO(institute_id=institute_id)
+        return get_object_or_404(InstituteCEO, institute_id=institute_id)
+
+
+class PortalSocialLinkViewSet(InstituteScopedMixin, CreateListUpdateDestroyViewSet):
+    serializer_class = InstituteSocialLinkSerializer
+    permission_classes = [IsInstituteMember]
+    lookup_value_regex = r"[0-9]+"
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    queryset = InstituteSocialLink.objects.order_by("pk")

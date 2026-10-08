@@ -54,6 +54,7 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
             "category__parent",
             "institute_location__location__district",
             "institute_location__location__province",
+            "institute__contact",
         )
         if self.action == "retrieve":
             return queryset.prefetch_related(*CHILDREN)
@@ -94,7 +95,9 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
 
     def _respond(self, training):
         # re-read through the viewset queryset so the children are prefetched
-        return Response(self.get_serializer(self.get_queryset().get(pk=training.pk)).data)
+        return Response(
+            self.get_serializer(self.get_queryset().get(pk=training.pk)).data
+        )
 
     def _move(self, service):
         return self._respond(service(self.get_object(), by=self.request.user))
@@ -128,7 +131,8 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
         )
         return Response(
             PortalTrainingSerializer(
-                self.get_queryset().get(pk=training.pk), context=self.get_serializer_context()
+                self.get_queryset().get(pk=training.pk),
+                context=self.get_serializer_context(),
             ).data
         )
 
@@ -171,7 +175,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
         training = service(self.get_object(), by=request.user, **kwargs)
         return Response(
             AdminTrainingSerializer(
-                self.get_queryset().get(pk=training.pk), context=self.get_serializer_context()
+                self.get_queryset().get(pk=training.pk),
+                context=self.get_serializer_context(),
             ).data
         )
 

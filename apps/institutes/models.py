@@ -15,7 +15,7 @@ from apps.institutes.constants import (
 )
 from apps.institutes.storage import PrivateStorage
 from apps.institutes.validators import validate_document_file, validate_image_file
-from apps.users.constants import SOCIAL_PLATFORM_CHOICES
+from apps.users.constants import SocialPlatform
 
 
 class Institute(BaseModel, SlugModel):
@@ -179,12 +179,7 @@ class InstituteContact(BaseModel):
     )
     contact_person = models.CharField(max_length=150)
     contact_phone = models.CharField(max_length=25, validators=[validate_phone_number])
-    contact_email = models.EmailField(blank=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["institute"], name="institutes_one_contact")
-        ]
+    contact_email = models.EmailField()
 
     def __str__(self):
         return f"{self.contact_person} - {self.institute.name}"
@@ -194,7 +189,7 @@ class InstituteCEO(BaseModel):
     """Optional CEO/leadership profile."""
 
     institute = models.OneToOneField(
-        Institute, on_delete=models.CASCADE, related_name="ceo", null=True, blank=True
+        Institute, on_delete=models.CASCADE, related_name="ceo"
     )
     name = models.CharField(max_length=150)
     message = models.TextField(blank=True)
@@ -202,11 +197,6 @@ class InstituteCEO(BaseModel):
         upload_to=get_upload_path, blank=True, validators=[validate_image_file]
     )
     linkedin_url = models.URLField(blank=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(fields=["institute"], name="institutes_one_ceo")
-        ]
 
     def __str__(self):
         return f"CEO: {self.name} - {self.institute.name}"
@@ -218,7 +208,7 @@ class InstituteSocialLink(BaseModel):
     institute = models.ForeignKey(
         Institute, on_delete=models.CASCADE, related_name="social_links"
     )
-    platform = models.CharField(max_length=20, choices=SOCIAL_PLATFORM_CHOICES)
+    platform = models.CharField(max_length=20, choices=SocialPlatform.CHOICES)
     url = models.URLField()
     label = models.CharField(max_length=100, blank=True)
 
@@ -226,6 +216,7 @@ class InstituteSocialLink(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["institute", "platform"],
+                condition=~models.Q(platform=SocialPlatform.OTHER),  # any number of "other" links
                 name="institutes_unique_social_platform",
             )
         ]

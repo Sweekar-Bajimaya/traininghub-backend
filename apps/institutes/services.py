@@ -29,7 +29,7 @@ from apps.institutes.models import (
 from apps.institutes.validators import validate_institute_location
 from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
-from apps.users.constants import Role
+from apps.users.constants import Role, SocialPlatform
 
 User = get_user_model()
 
@@ -130,36 +130,31 @@ def update_profile(institute: Institute, data: dict, user) -> Institute:
 
 # registration and locations
 @transaction.atomic
-def register(data: dict) -> Institute:
-    """Create an institute, its owner account and its locations in one transaction.
-
-    owner = {"email", "password", "full_name", optional "phone_number"}; the owner is always
-    INSTITUTE_STAFF. Documents are uploaded afterwards through the portal.
-    """
-    with transaction.atomic():
-        owner_data = data.pop("owner")
-        locations_data = data.pop("locations")
-        contact_data = data.pop("contact")  # Required
-        ceo_data = data.pop("ceo", None)
-        social_data = data.pop("social_links", [])
-
-        institute = Institute.objects.create(**data)
-
-        # Create contact (required)
-        InstituteContact.objects.create(institute=institute, **contact_data)
-
-        if ceo_data:
-            InstituteCEO.objects.create(institute=institute, **ceo_data)
-
-        for sd in social_data:
-            InstituteSocialLink.objects.create(institute=institute, **sd)
-
-        # Create owner + locations (existing logic)
-        owner = create_owner(institute, owner_data)
-        for loc in locations_data:
-            create_location(institute, loc)
-
-        return institute
+def register(
+    *, institute_data, owner, contact, locations=(), ceo=None, social_links=()
+):
+    for item in locations:
+        validate_institute_location(
+            item["location"]
+        )  # bulk_create skips model validation
+    institute = Institute.objects.create(**institute_data)
+    owner_user = User.objects.create_user(role=Role.INSTITUTE_STAFF, **owner)
+    InstituteMember.objects.create(
+        user=owner_user, institute=institute, role=MemberRole.OWNER
+    )
+    InstituteLocation.objects.bulk_create(
+        [
+            InstituteLocation(institute=institute, is_main=(i == 0), **item)
+            for i, item in enumerate(locations)
+        ]
+    )
+    InstituteContact.objects.create(institute=institute, **contact)
+    if ceo:
+        InstituteCEO.objects.create(institute=institute, **ceo)
+    InstituteSocialLink.objects.bulk_create(
+        [InstituteSocialLink(institute=institute, **link) for link in social_links]
+    )
+    return institute
 
 
 @transaction.atomic
@@ -272,9 +267,7 @@ def reorder_gallery(institute, ids):
     InstituteGalleryImage.objects.bulk_update(images.values(), ["position"])
 
 
-# ---------------------------------------------------------------- staff and invitations
-
-
+# staff and invitations
 def _hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -370,3 +363,50 @@ def remove_staff(member, *, by):
     member.delete()
     # deactivates the account and revokes its refresh tokens
     user_services.set_status(user, active=False, by=by)
+
+
+@transaction.atomic
+def save_ceo(institute, **fields):
+    """Create or update the CEO. Only the keys sent are changed, so an omitted photo stays."""
+    Institute.objects.select_for_update().get(
+        pk=institute.pk
+    )  # serialise per institute
+    ceo = InstituteCEO.objects.filter(institute=institute).first() or InstituteCEO(
+        institute=institute
+    )
+    for name, value in fields.items():
+        setattr(ceo, name, value)
+    ceo.save()
+    return ceo
+
+
+def _check_platform_free(institute_id, platform, *, exclude_pk=None):
+    if platform == SocialPlatform.OTHER:
+        return
+    taken = InstituteSocialLink.objects.filter(
+        institute_id=institute_id, platform=platform
+    )
+    if exclude_pk:
+        taken = taken.exclude(pk=exclude_pk)
+    if taken.exists():
+        raise ValidationError(
+            {"platform": "This platform is already added."}
+        )  # 400, not a 409
+
+
+@transaction.atomic
+def add_social_link(institute, **fields):
+    Institute.objects.select_for_update().get(pk=institute.pk)
+    _check_platform_free(institute.pk, fields["platform"])
+    return InstituteSocialLink.objects.create(institute=institute, **fields)
+
+
+@transaction.atomic
+def update_social_link(link, **fields):
+    Institute.objects.select_for_update().get(pk=link.institute_id)
+    if "platform" in fields:
+        _check_platform_free(link.institute_id, fields["platform"], exclude_pk=link.pk)
+    for name, value in fields.items():
+        setattr(link, name, value)
+    link.save()
+    return link

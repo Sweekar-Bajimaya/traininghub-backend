@@ -143,11 +143,11 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
         return [o.text for o in obj.outcomes.all()]
 
     def get_contact(self, obj):
+        contact = getattr(obj.institute, "contact", None)   # a missing row raises an AttributeError subclass
         return {
             "person": obj.contact_person,
-            "phone": obj.contact_phone
-            or obj.institute.contact_phone,  # falls back to the institute
-            "email": obj.contact_email or obj.institute.contact_email,
+            "phone": obj.contact_phone or (contact.contact_phone if contact else ""),
+            "email": obj.contact_email or (contact.contact_email if contact else ""),
         }
 
 
