@@ -1,7 +1,7 @@
 from django.contrib.postgres.search import SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Value
+from django.db.models import Count, Q, Value
 from django.utils import timezone
 
 from apps.institutes.constants import InstituteStatus
@@ -19,9 +19,8 @@ from apps.training.models import (
     TrainingSession,
 )
 
-# ---------------------------------------------------------------- derived values and search
 
-
+# derived values and search
 def duration_in_weeks(value, unit):
     if not value or unit not in DurationUnit.WEEKS_PER_UNIT:
         return None
@@ -31,13 +30,19 @@ def duration_in_weeks(value, unit):
 
 def _build_search_vector(training):
     category = training.category
-    category_names = f"{category.parent.name if category.parent_id else ''} {category.name}"
+    category_names = (
+        f"{category.parent.name if category.parent_id else ''} {category.name}"
+    )
     place = training.institute_location
-    place_names = f"{place.location.name} {place.location.district.name}" if place else ""
+    place_names = (
+        f"{place.location.name} {place.location.district.name}" if place else ""
+    )
     return (
         SearchVector(Value(training.title), weight="A", config=SEARCH_CONFIG)
         + SearchVector(
-            Value(f"{training.institute.name} {category_names} {' '.join(training.skills)}"),
+            Value(
+                f"{training.institute.name} {category_names} {' '.join(training.skills)}"
+            ),
             weight="B",
             config=SEARCH_CONFIG,
         )
@@ -69,11 +74,11 @@ def refresh_search_vectors(queryset):
         refresh_search_vector(Training(pk=pk))
 
 
-# ---------------------------------------------------------------- checks
-
-
+# checks
 def _require_approved_institute(institute):
-    if not Institute.objects.filter(pk=institute.pk, status=InstituteStatus.APPROVED).exists():
+    if not Institute.objects.filter(
+        pk=institute.pk, status=InstituteStatus.APPROVED
+    ).exists():
         raise ValidationError("Only an approved institute can do this.")
 
 
@@ -85,12 +90,16 @@ def _check_category(category):
 def _check_location(institute, mode, location):
     if mode == TrainingMode.ONLINE:
         if location is not None:
-            raise ValidationError({"institute_location": "An online training has no location."})
+            raise ValidationError(
+                {"institute_location": "An online training has no location."}
+            )
         return
     if location is not None and (
         location.institute_id != institute.pk or not location.is_active
     ):
-        raise ValidationError({"institute_location": "Choose one of your active locations."})
+        raise ValidationError(
+            {"institute_location": "Choose one of your active locations."}
+        )
 
 
 def _check_dates(start, end, deadline):
@@ -109,7 +118,9 @@ def _check_sessions(sessions):
     for session in sessions:
         days = session["class_days"]
         if not days or len(set(days)) != len(days):
-            raise ValidationError({"sessions": "Choose at least one class day, each day once."})
+            raise ValidationError(
+                {"sessions": "Choose at least one class day, each day once."}
+            )
         if session["end_time"] <= session["start_time"]:
             raise ValidationError({"sessions": "A session must end after it starts."})
 
@@ -124,12 +135,18 @@ def _replace_children(training, sessions, modules, outcomes):
     if modules is not None:
         training.modules.all().delete()
         TrainingModule.objects.bulk_create(
-            [TrainingModule(training=training, position=i, **m) for i, m in enumerate(modules)]
+            [
+                TrainingModule(training=training, position=i, **m)
+                for i, m in enumerate(modules)
+            ]
         )
     if outcomes is not None:
         training.outcomes.all().delete()
         LearningOutcome.objects.bulk_create(
-            [LearningOutcome(training=training, position=i, **o) for i, o in enumerate(outcomes)]
+            [
+                LearningOutcome(training=training, position=i, **o)
+                for i, o in enumerate(outcomes)
+            ]
         )
 
 
@@ -160,9 +177,7 @@ def _ready_for_submission(training):
         raise ValidationError(errors)
 
 
-# ---------------------------------------------------------------- workflow
-
-
+# workflow
 def _transition(training, to, *, only_from=None, reason="", check=None):
     """Caller must be inside transaction.atomic()."""
     training = (
@@ -172,7 +187,9 @@ def _transition(training, to, *, only_from=None, reason="", check=None):
     )
     # The table alone is not enough: UNPUBLISHED -> APPROVED is a republish, not an admin approval.
     if only_from is not None and training.status not in only_from:
-        raise ValidationError(f"A {training.get_status_display().lower()} training cannot do this.")
+        raise ValidationError(
+            f"A {training.get_status_display().lower()} training cannot do this."
+        )
     if to not in TrainingStatus.TRANSITIONS[training.status]:
         raise ValidationError(f"Cannot move from {training.status} to {to}.")
     if to in TrainingStatus.REASON_REQUIRED and not reason.strip():
@@ -206,7 +223,9 @@ def submit(training, *, by):
 @transaction.atomic
 def withdraw(training, *, by):
     """Take a submitted training back to DRAFT while it waits for review."""
-    return _transition(training, TrainingStatus.DRAFT, only_from={TrainingStatus.SUBMITTED})
+    return _transition(
+        training, TrainingStatus.DRAFT, only_from={TrainingStatus.SUBMITTED}
+    )
 
 
 @transaction.atomic
@@ -227,12 +246,12 @@ def republish(training, *, by):
 @transaction.atomic
 def cancel(training, *, by):
     # TODO(notify): people who sent an enquiry (once enquiries exist)
-    return _transition(training, TrainingStatus.CANCELLED, only_from=TrainingStatus.LIVE)
+    return _transition(
+        training, TrainingStatus.CANCELLED, only_from=TrainingStatus.LIVE
+    )
 
 
 # admin actions (a training that waits for review)
-
-
 @transaction.atomic
 def approve(training, *, by):
     training = _transition(
@@ -258,13 +277,14 @@ def request_changes(training, *, by, reason):
 @transaction.atomic
 def reject(training, *, by, reason):
     return _transition(
-        training, TrainingStatus.REJECTED, reason=reason, only_from={TrainingStatus.SUBMITTED}
+        training,
+        TrainingStatus.REJECTED,
+        reason=reason,
+        only_from={TrainingStatus.SUBMITTED},
     )
 
 
 # the system
-
-
 def expire_trainings(today=None):
     """Set EXPIRED on every live training whose end date has passed. One statement, safe to run often."""
     today = today or timezone.localdate()
@@ -273,17 +293,19 @@ def expire_trainings(today=None):
     ).update(status=TrainingStatus.EXPIRED, modified_at=timezone.now())
 
 
-# ---------------------------------------------------------------- content
-
-
+# content
 @transaction.atomic
 def create_training(institute, *, sessions=None, modules=None, outcomes=None, **fields):
-    Institute.objects.select_for_update().get(pk=institute.pk)  # an admin may be suspending it right now
+    Institute.objects.select_for_update().get(
+        pk=institute.pk
+    )  # an admin may be suspending it right now
     _require_approved_institute(institute)
     _check_category(fields["category"])
     _check_location(institute, fields["mode"], fields.get("institute_location"))
     _check_dates(
-        fields.get("start_date"), fields.get("end_date"), fields.get("registration_deadline")
+        fields.get("start_date"),
+        fields.get("end_date"),
+        fields.get("registration_deadline"),
     )
     if sessions is not None:
         _check_sessions(sessions)
@@ -316,7 +338,9 @@ def update_training(training, *, sessions=None, modules=None, outcomes=None, **f
         fields["institute_location"] = None  # switching to online clears the location
     _check_category(fields.get("category", training.category))
     _check_location(
-        training.institute, mode, fields.get("institute_location", training.institute_location)
+        training.institute,
+        mode,
+        fields.get("institute_location", training.institute_location),
     )
     _check_dates(
         fields.get("start_date", training.start_date),
@@ -359,5 +383,15 @@ def set_cover(training, image):
 def delete_training(training):
     training = Training.objects.select_for_update().get(pk=training.pk)
     if training.status != TrainingStatus.DRAFT:
-        raise ValidationError("Only a draft can be deleted. Cancel the training instead.")
+        raise ValidationError(
+            "Only a draft can be deleted. Cancel the training instead."
+        )
     training.delete()
+
+
+def institute_counts(trainings):
+    return trainings.aggregate(
+        total=Count("pk"),
+        active=Count("pk", filter=Q(status=TrainingStatus.APPROVED)),
+        pending_review=Count("pk", filter=Q(status=TrainingStatus.SUBMITTED)),
+    )

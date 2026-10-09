@@ -266,6 +266,60 @@ class AdminApiTests(APITestCase):
                 self.assertEqual(self.client.post(f"{ADMIN}{training.pk}/approve/").status_code, 400)
 
 
+class SummaryTests(PortalTestCase):
+    SUMMARY = f"{PORTAL}summary/"
+
+    def test_counts_only_this_institutes_trainings(self):
+        for status in (S.DRAFT, S.SUBMITTED, S.APPROVED, S.APPROVED, S.CANCELLED):
+            make_training(self.institute, status=status)
+        other, _, _ = approved_institute("Beta Institute", "beta@example.com", code=2)
+        make_training(other, status=S.APPROVED)
+        response = self.client.get(self.SUMMARY)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data, {"total": 5, "active": 2, "pending_review": 1}
+        )
+
+    def test_is_one_aggregate_query(self):
+        make_training(self.institute)
+        self.client.get(self.SUMMARY)  # warm-up: permissions are cached per user
+        self.assertEqual(count_queries(lambda: self.client.get(self.SUMMARY)), 1)
+
+    def test_an_institute_without_trainings_gets_zeros(self):
+        response = self.client.get(self.SUMMARY)
+        self.assertEqual(response.data, {"total": 0, "active": 0, "pending_review": 0})
+
+    def test_anonymous_is_refused(self):
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.get(self.SUMMARY).status_code, (401, 403))
+
+
+class ActionQueryCountTests(TempMediaMixin, PortalTestCase):
+    """The services lock and re-read the row, so the viewset must not prefetch before them
+    (measured: 12 queries per transition or cover upload with a prefetch in get_object, 9 without)."""
+
+    def queries(self, call):
+        self.client.get(PORTAL)  # warm-up: permissions are cached per user
+        return count_queries(call)
+
+    def test_a_transition_re_reads_the_row_once(self):
+        training = make_training(self.institute, status=S.SUBMITTED)
+        self.assertLessEqual(
+            self.queries(lambda: self.client.post(self.url(training, "withdraw"))), 9
+        )
+
+    def test_cover_re_reads_the_row_once(self):
+        training = make_training(self.institute, status=S.DRAFT)
+        self.assertLessEqual(
+            self.queries(
+                lambda: self.client.post(
+                    self.url(training, "cover"), {"cover_image": png()}, format="multipart"
+                )
+            ),
+            9,
+        )
+
+
 class QueryCountTests(PortalTestCase):
     def test_portal_and_admin_lists_are_constant(self):
         reviewer = make_admin("reviewer@example.com")

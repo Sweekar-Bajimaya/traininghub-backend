@@ -27,9 +27,7 @@ from apps.users.permissions import HasPlatformPermission
 CHILDREN = ("sessions", "modules", "outcomes")
 
 
-# ---------------------------------------------------------------- public
-
-
+# public
 class PublicTrainingViewSet(ReadOnlyViewSet):
     """Approved trainings of approved institutes. Sort for the UI: Newest is
     ?ordering=-published_at, Upcoming is ?ordering=start_date, Price is ?ordering=fee_npr or
@@ -61,7 +59,19 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
         return queryset.order_by("-published_at", "-pk")
 
 
-# ---------------------------------------------------------------- portal (the institute's own staff)
+# portal (the institute's own staff)
+def transition(service):
+    """A POST action that runs one workflow service and answers with the training.
+    Assign it to the service's own name (`submit = transition(services.submit)`): that name
+    becomes the URL, and DRF refuses to start if the two differ."""
+
+    def run(self, request, pk=None):
+        return self._respond(service(self.get_object(), by=request.user))
+
+    # `action()` reads the name when it decorates, so set it first
+    run.__name__ = service.__name__
+    run.__doc__ = service.__doc__
+    return action(detail=True, methods=["post"])(run)
 
 
 class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
@@ -86,60 +96,44 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()  # scoped to the caller's institute
-        if self.action == "list":
-            return queryset
-        return queryset.prefetch_related(*CHILDREN)
+        if self.action == "retrieve":
+            return queryset.prefetch_related(*CHILDREN)
+        # Every other action either lists (cards need no children), counts, or hands the row to a
+        # service that locks and re-reads it, so a prefetch here would be thrown away.
+        return queryset
 
     def perform_destroy(self, instance):
         services.delete_training(instance)
 
     def _respond(self, training):
-        # re-read through the viewset queryset so the children are prefetched
-        return Response(
-            self.get_serializer(self.get_queryset().get(pk=training.pk)).data
-        )
-
-    def _move(self, service):
-        return self._respond(service(self.get_object(), by=self.request.user))
-
-    @action(detail=True, methods=["post"])
-    def submit(self, request, pk=None):
-        return self._move(services.submit)
-
-    @action(detail=True, methods=["post"])
-    def withdraw(self, request, pk=None):
-        return self._move(services.withdraw)
-
-    @action(detail=True, methods=["post"])
-    def unpublish(self, request, pk=None):
-        return self._move(services.unpublish)
-
-    @action(detail=True, methods=["post"])
-    def republish(self, request, pk=None):
-        return self._move(services.republish)
-
-    @action(detail=True, methods=["post"])
-    def cancel(self, request, pk=None):
-        return self._move(services.cancel)
-
-    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
-    def cover(self, request, pk=None):
-        serializer = CoverSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        training = services.set_cover(
-            self.get_object(), serializer.validated_data["cover_image"]
-        )
+        # The services return a bare row: re-read it once, with the children, for the response.
+        # Named serializer: `get_serializer()` would give `cover` its CoverSerializer.
+        training = self.get_queryset().prefetch_related(*CHILDREN).get(pk=training.pk)
         return Response(
             PortalTrainingSerializer(
-                self.get_queryset().get(pk=training.pk),
-                context=self.get_serializer_context(),
+                training, context=self.get_serializer_context()
             ).data
         )
 
+    # Workflow moves: one POST each, answering with the training. The attribute name is the URL.
+    submit = transition(services.submit)
+    withdraw = transition(services.withdraw)
+    unpublish = transition(services.unpublish)
+    republish = transition(services.republish)
+    cancel = transition(services.cancel)
 
-# ---------------------------------------------------------------- admin console
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
+    def cover(self, request, pk=None):
+        serializer = self.get_serializer(self.get_object(), data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return self._respond(serializer.save())
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        return Response(services.institute_counts(self.get_queryset()))
 
 
+# admin console
 class AdminTrainingViewSet(ReadOnlyViewSet):
     """Review queue: ?status=SUBMITTED."""
 

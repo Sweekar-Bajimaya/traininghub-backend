@@ -143,7 +143,9 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
         return [o.text for o in obj.outcomes.all()]
 
     def get_contact(self, obj):
-        contact = getattr(obj.institute, "contact", None)   # a missing row raises an AttributeError subclass
+        contact = getattr(
+            obj.institute, "contact", None
+        )  # a missing row raises an AttributeError subclass
         return {
             "person": obj.contact_person,
             "phone": obj.contact_phone or (contact.contact_phone if contact else ""),
@@ -287,6 +289,9 @@ class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
 
 class CoverSerializer(DynamicFieldsSerializer):
     cover_image = serializers.ImageField(validators=[validate_image_file])
+
+    def update(self, instance, validated_data):
+        return services.set_cover(instance, validated_data["cover_image"])
 
 
 # admin review
