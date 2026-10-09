@@ -136,8 +136,7 @@ class CreateTests(TrainingTestCase):
         self.assertEqual(training.status, S.DRAFT)
         self.assertEqual(training.duration_weeks, 6)
         self.assertEqual(
-            list(training.modules.values_list("title", "position")),
-            [("Espresso", 0), ("Milk", 1)],
+            list(training.modules.values_list("title", flat=True)), ["Espresso", "Milk"]
         )
         self.assertEqual(training.sessions.get().class_days, ["SUN", "TUE"])
 

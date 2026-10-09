@@ -116,7 +116,10 @@ apps/
                           emails), API under `user/` (auth/, me/, admins/, users/{id}/status/,
                           auth/otp/{send,verify}/ for password reset), management command `generate_rsa_keys`;
                           also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use
-  training/               `Training`, `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome`;
+  training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills) and `TrainingContact`
+                          (one row each, created with the training; the API still shows them as flat fields),
+                          `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
+                          the order they were sent in: ordered by pk, no position column);
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
                           APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
@@ -237,7 +240,9 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   `common:category-tree:v1`). `post_save` / `post_delete` (and `load_locations`) clear them; `QuerySet.update()` and
   `bulk_update()` do not, so delete the key yourself after those.
 - **Trainings carry a stored search vector.** Write them through `apps/training/services.py` (it rebuilds the vector and
-  `duration_weeks`); a direct `create()` / `update()` leaves search stale. Renaming an institute, renaming or moving a
+  `duration_weeks`, and writes the `TrainingDetail` / `TrainingContact` rows); a direct `create()` / `update()` leaves
+  search stale and makes no detail or contact row (readers treat a missing row as empty). The overview and skills feed
+  the vector, so change them through `update_training(detail={...})` too. Renaming an institute, renaming or moving a
   category and changing a location's municipality refresh the affected trainings through queued tasks, so they need
   `qcluster`.
 - **Expiry only happens if `expire_trainings` is scheduled** (daily); otherwise past trainings stay `APPROVED` and

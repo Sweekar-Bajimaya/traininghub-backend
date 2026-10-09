@@ -15,6 +15,8 @@ from apps.training.constants import (
 from apps.training.models import (
     LearningOutcome,
     Training,
+    TrainingContact,
+    TrainingDetail,
     TrainingModule,
     TrainingSession,
 )
@@ -37,17 +39,18 @@ def _build_search_vector(training):
     place_names = (
         f"{place.location.name} {place.location.district.name}" if place else ""
     )
+    detail = getattr(training, "detail", None)  # a row made without the services has none
+    skills = " ".join(detail.skills) if detail else ""
+    overview = detail.overview if detail else ""
     return (
         SearchVector(Value(training.title), weight="A", config=SEARCH_CONFIG)
         + SearchVector(
-            Value(
-                f"{training.institute.name} {category_names} {' '.join(training.skills)}"
-            ),
+            Value(f"{training.institute.name} {category_names} {skills}"),
             weight="B",
             config=SEARCH_CONFIG,
         )
         + SearchVector(
-            Value(f"{training.short_description} {training.overview} {place_names}"),
+            Value(f"{training.short_description} {overview} {place_names}"),
             weight="C",
             config=SEARCH_CONFIG,
         )
@@ -62,7 +65,10 @@ def _build_search_vector(training):
 def refresh_search_vector(training):
     """The vector is built from Python values, so one UPDATE and no joins in the database."""
     training = Training.objects.select_related(
-        "institute", "category__parent", "institute_location__location__district"
+        "institute",
+        "category__parent",
+        "institute_location__location__district",
+        "detail",
     ).get(pk=training.pk)
     Training.objects.filter(pk=training.pk).update(
         search_vector=_build_search_vector(training)
@@ -135,19 +141,28 @@ def _replace_children(training, sessions, modules, outcomes):
     if modules is not None:
         training.modules.all().delete()
         TrainingModule.objects.bulk_create(
-            [
-                TrainingModule(training=training, position=i, **m)
-                for i, m in enumerate(modules)
-            ]
+            [TrainingModule(training=training, **m) for m in modules]
         )
     if outcomes is not None:
         training.outcomes.all().delete()
         LearningOutcome.objects.bulk_create(
-            [
-                LearningOutcome(training=training, position=i, **o)
-                for i, o in enumerate(outcomes)
-            ]
+            [LearningOutcome(training=training, **o) for o in outcomes]
         )
+
+
+def _save_extras(training, detail, contact):
+    """The one-to-one rows hold the long text, skills and contact. None leaves a row alone; a dict
+    changes only the fields in it (and creates the row if the training was made without one)."""
+    for name, model, values in (
+        ("detail", TrainingDetail, detail),
+        ("contact", TrainingContact, contact),
+    ):
+        if values is None:
+            continue
+        row = getattr(training, name, None) or model(training=training)
+        for field, value in values.items():
+            setattr(row, field, value)
+        row.save()
 
 
 def _ready_for_submission(training):
@@ -295,7 +310,16 @@ def expire_trainings(today=None):
 
 # content
 @transaction.atomic
-def create_training(institute, *, sessions=None, modules=None, outcomes=None, **fields):
+def create_training(
+    institute,
+    *,
+    sessions=None,
+    modules=None,
+    outcomes=None,
+    detail=None,
+    contact=None,
+    **fields,
+):
     Institute.objects.select_for_update().get(
         pk=institute.pk
     )  # an admin may be suspending it right now
@@ -313,19 +337,31 @@ def create_training(institute, *, sessions=None, modules=None, outcomes=None, **
         fields.get("duration_value"), fields.get("duration_unit")
     )
     training = Training.objects.create(institute=institute, **fields)
+    _save_extras(training, detail or {}, contact or {})  # every training has both rows
     _replace_children(training, sessions, modules, outcomes)
     refresh_search_vector(training)
     return training
 
 
 @transaction.atomic
-def update_training(training, *, sessions=None, modules=None, outcomes=None, **fields):
+def update_training(
+    training,
+    *,
+    sessions=None,
+    modules=None,
+    outcomes=None,
+    detail=None,
+    contact=None,
+    **fields,
+):
     """DRAFT, CHANGES_REQUESTED and REJECTED are saved as they are. APPROVED and UNPUBLISHED go
     straight back to review (hidden until approved), and the edit is refused if the result is not
     ready to submit; the whole edit then rolls back."""
     training = (
         Training.objects.select_for_update(of=("self",))
-        .select_related("institute", "category__parent", "institute_location")
+        .select_related(
+            "institute", "category__parent", "institute_location", "detail", "contact"
+        )
         .get(pk=training.pk)
     )
     back_to_review = training.status in TrainingStatus.REVIEWED_EDIT
@@ -357,6 +393,7 @@ def update_training(training, *, sessions=None, modules=None, outcomes=None, **f
     for name, value in fields.items():
         setattr(training, name, value)
     training.save(update_fields=[*fields, "modified_at"])
+    _save_extras(training, detail, contact)
     _replace_children(training, sessions, modules, outcomes)
     refresh_search_vector(training)
     if back_to_review:

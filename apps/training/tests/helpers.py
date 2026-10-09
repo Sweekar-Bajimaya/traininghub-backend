@@ -18,7 +18,12 @@ from apps.institutes.tests.helpers import (  # noqa: F401  (re-exported for the 
 )
 from apps.training import services
 from apps.training.constants import TrainingStatus
-from apps.training.models import Training, TrainingSession
+from apps.training.models import (
+    Training,
+    TrainingContact,
+    TrainingDetail,
+    TrainingSession,
+)
 from apps.users import services as user_services
 
 
@@ -37,22 +42,25 @@ def make_admin(email, permissions=("manage_trainings",)):
     return User.objects.get(pk=admin.pk)  # fresh instance: permissions are cached per object
 
 
+DETAIL_FIELDS = ("overview", "eligibility", "certification", "skills")
+CONTACT_FIELDS = ("contact_person", "contact_phone", "contact_email")
+
+
 def make_training(
     institute, *, category=None, location=None, status=TrainingStatus.APPROVED, **overrides
 ):
-    """Writes the row directly (any status, no checks) and then builds its search vector."""
+    """Writes the rows directly (any status, no checks) and then builds the search vector.
+    The detail and contact fields can be overridden here like the training's own."""
     today = timezone.localdate()
     fields = dict(
         title="Python Bootcamp",
         short_description="Learn Python from scratch",
-        overview="A detailed description",
         mode="ONLINE",
         level="BEGINNER",
         duration_value=8,
         duration_unit="WEEKS",
         duration_weeks=8,
         fee_npr=Decimal("5000"),
-        skills=["Python", "Git"],
         start_date=today + timedelta(days=30),
         end_date=today + timedelta(days=90),
         registration_deadline=today + timedelta(days=20),
@@ -61,13 +69,23 @@ def make_training(
     )
     if location is not None:
         fields["mode"] = "PHYSICAL"  # a located training is physical unless the test says otherwise
+    detail = dict(overview="A detailed description", skills=["Python", "Git"])
+    contact = {}
     fields.update(overrides)
+    for name in DETAIL_FIELDS:
+        if name in fields:
+            detail[name] = fields.pop(name)
+    for name in CONTACT_FIELDS:
+        if name in fields:
+            contact[name] = fields.pop(name)
     training = Training.objects.create(
         institute=institute,
         category=category or make_category(),
         institute_location=location,
         **fields,
     )
+    TrainingDetail.objects.create(training=training, **detail)
+    TrainingContact.objects.create(training=training, **contact)
     TrainingSession.objects.create(
         training=training,
         class_days=["SUN", "MON", "TUE"],

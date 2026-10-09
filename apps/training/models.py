@@ -183,9 +183,15 @@ class TrainingModule(BaseModel):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
 
+    class Meta:
+        ordering = ("pk",)  # entered order: the services insert the list in order
+
 
 class LearningOutcome(BaseModel):
     training = models.ForeignKey(
         Training, on_delete=models.CASCADE, related_name="outcomes"
     )
     text = models.CharField(max_length=300)
+
+    class Meta:
+        ordering = ("pk",)

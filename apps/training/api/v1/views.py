@@ -27,6 +27,11 @@ from apps.users.permissions import HasPlatformPermission
 CHILDREN = ("sessions", "modules", "outcomes")
 
 
+def with_content(queryset):
+    """Everything the full training serializers read: the detail and contact rows, and the children."""
+    return queryset.select_related("detail", "contact").prefetch_related(*CHILDREN)
+
+
 # public
 class PublicTrainingViewSet(ReadOnlyViewSet):
     """Approved trainings of approved institutes. Sort for the UI: Newest is
@@ -53,9 +58,10 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
             "institute_location__location__district",
             "institute_location__location__province",
             "institute__contact",
+            "detail",  # the cards show the skills
         )
         if self.action == "retrieve":
-            return queryset.prefetch_related(*CHILDREN)
+            return queryset.select_related("contact").prefetch_related(*CHILDREN)
         return queryset.order_by("-published_at", "-pk")
 
 
@@ -97,7 +103,7 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()  # scoped to the caller's institute
         if self.action == "retrieve":
-            return queryset.prefetch_related(*CHILDREN)
+            return with_content(queryset)
         # Every other action either lists (cards need no children), counts, or hands the row to a
         # service that locks and re-reads it, so a prefetch here would be thrown away.
         return queryset
@@ -108,7 +114,7 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     def _respond(self, training):
         # The services return a bare row: re-read it once, with the children, for the response.
         # Named serializer: `get_serializer()` would give `cover` its CoverSerializer.
-        training = self.get_queryset().prefetch_related(*CHILDREN).get(pk=training.pk)
+        training = with_content(self.get_queryset()).get(pk=training.pk)
         return Response(
             PortalTrainingSerializer(
                 training, context=self.get_serializer_context()
@@ -158,7 +164,7 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
         queryset = super().get_queryset()
         if self.action == "list":
             return queryset
-        return queryset.prefetch_related(*CHILDREN)
+        return with_content(queryset)
 
     def _review(self, request, service, *, with_reason):
         kwargs = {}

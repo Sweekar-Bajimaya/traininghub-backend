@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from apps.institutes.constants import InstituteStatus, MemberRole
 from apps.institutes.models import InstituteMember
 from apps.training.constants import TrainingStatus
-from apps.training.models import Training
+from apps.training.models import Training, TrainingContact, TrainingDetail
 from apps.training.tests.helpers import (
     PASSWORD,
     TempMediaMixin,
@@ -82,6 +82,44 @@ class PortalCreateTests(PortalTestCase):
         self.assertEqual(res.data["sessions"][0]["class_days"][0], "SUN")
         self.assertEqual(res.data["outcomes"], [{"text": "Pull a shot"}])
 
+    def test_detail_and_contact_are_written_to_their_rows_and_answered_flat(self):
+        res = self.create(
+            eligibility="Age 18+",
+            certification="Certificate",
+            contact_person="Ram",
+            contact_phone="9800000000",
+            contact_email="ram@example.com",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        training = Training.objects.get(pk=res.data["id"])
+        self.assertEqual(
+            (training.detail.overview, training.detail.eligibility, training.detail.skills),
+            ("Espresso, milk and latte art", "Age 18+", ["Espresso", "Latte art"]),
+        )
+        self.assertEqual(
+            (training.contact.contact_person, training.contact.contact_phone),
+            ("Ram", "9800000000"),
+        )
+        for name in ("overview", "eligibility", "certification", "skills", "contact_person", "contact_email"):
+            self.assertIn(name, res.data)
+        self.assertEqual(res.data["skills"], ["Espresso", "Latte art"])
+        self.assertEqual(res.data["contact_person"], "Ram")
+
+    def test_a_create_without_them_still_makes_both_rows(self):
+        res = self.create(overview="")
+        training = Training.objects.get(pk=res.data["id"])
+        self.assertEqual(training.contact.contact_person, "")
+        self.assertTrue(TrainingDetail.objects.filter(training=training).exists())
+
+    def test_a_bad_phone_or_email_is_400(self):
+        for label, overrides in (
+            ("phone", dict(contact_phone="not a phone")),
+            ("email", dict(contact_email="not an email")),
+            ("long skill", dict(skills=["x" * 61])),
+        ):
+            with self.subTest(label):
+                self.assertEqual(self.create(**overrides).status_code, 400)
+
     def test_a_top_level_category_is_accepted(self):
         res = self.create(category=self.category.parent_id)
         self.assertEqual(res.status_code, 201, res.data)
@@ -123,6 +161,32 @@ class PortalEditTests(PortalTestCase):
         self.assertEqual(len(res.data["sessions"]), 1)
         res = self.client.patch(self.url(training), {"modules": []}, format="json")
         self.assertEqual(res.data["modules"], [])
+
+    def test_patch_changes_only_the_fields_it_sends_on_the_detail_and_contact_rows(self):
+        training = make_training(
+            self.institute, status=S.DRAFT, contact_person="Ram", contact_phone="9800000000"
+        )
+        res = self.client.patch(self.url(training), {"contact_phone": "9811111111"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        contact = TrainingContact.objects.get(training=training)
+        self.assertEqual((contact.contact_person, contact.contact_phone), ("Ram", "9811111111"))
+        res = self.client.patch(self.url(training), {"skills": ["Go"]}, format="json")
+        self.assertEqual((res.data["skills"], res.data["overview"]), (["Go"], "A detailed description"))
+        self.assertEqual(res.data["contact_phone"], "9811111111")
+
+    def test_patch_builds_the_rows_for_a_training_that_has_none(self):
+        training = Training.objects.create(
+            institute=self.institute, category=self.category, title="Bare", mode="ONLINE"
+        )
+        res = self.client.patch(self.url(training), {"overview": "Now described"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(TrainingDetail.objects.get(training=training).overview, "Now described")
+
+    def test_a_skills_edit_is_found_by_search(self):
+        training = make_training(self.institute, status=S.DRAFT, skills=["Python"])
+        self.client.patch(self.url(training), {"skills": ["Welding"]}, format="json")
+        Training.objects.filter(pk=training.pk).update(status=S.APPROVED)  # public to search
+        self.assertEqual(self.client.get(PUBLIC, {"search": "weld"}).data["count"], 1)
 
     def test_patch_of_an_approved_training_sends_it_back_to_review(self):
         training = make_training(self.institute)
@@ -248,6 +312,9 @@ class AdminApiTests(APITestCase):
         data = self.client.get(f"{ADMIN}{self.training.pk}/").data
         self.assertEqual(data["institute"]["status"], InstituteStatus.APPROVED)
         self.assertEqual(len(data["sessions"]), 1)
+        self.assertEqual(data["overview"], "A detailed description")
+        self.assertEqual(data["skills"], ["Python", "Git"])
+        self.assertEqual(data["contact_person"], "")
 
     def test_review_actions(self):
         self.client.force_authenticate(self.reviewer)

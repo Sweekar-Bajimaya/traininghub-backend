@@ -6,6 +6,7 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.common.validators import validate_phone_number
 from apps.institutes.models import InstituteLocation
 from apps.institutes.validators import validate_image_file
 from apps.training import services
@@ -43,6 +44,7 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
     institute = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
+    skills = serializers.ListField(source="detail.skills", read_only=True)
 
     class Meta:
         model = Training
@@ -106,6 +108,9 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
 class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
     """sessions, modules and outcomes are prefetched in order by the view."""
 
+    overview = serializers.CharField(source="detail.overview", read_only=True)
+    eligibility = serializers.CharField(source="detail.eligibility", read_only=True)
+    certification = serializers.CharField(source="detail.certification", read_only=True)
     schedule = serializers.SerializerMethodField()
     modules = serializers.SerializerMethodField()
     outcomes = serializers.SerializerMethodField()
@@ -143,13 +148,15 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
         return [o.text for o in obj.outcomes.all()]
 
     def get_contact(self, obj):
-        contact = getattr(
-            obj.institute, "contact", None
-        )  # a missing row raises an AttributeError subclass
+        # a missing row raises an AttributeError subclass, so getattr falls back to the default
+        own = getattr(obj, "contact", None)
+        institute = getattr(obj.institute, "contact", None)
         return {
-            "person": obj.contact_person,
-            "phone": obj.contact_phone or (contact.contact_phone if contact else ""),
-            "email": obj.contact_email or (contact.contact_email if contact else ""),
+            "person": own.contact_person if own else "",
+            "phone": (own.contact_phone if own else "")
+            or (institute.contact_phone if institute else ""),
+            "email": (own.contact_email if own else "")
+            or (institute.contact_email if institute else ""),
         }
 
 
@@ -190,7 +197,43 @@ def available_categories():
     )
 
 
-class PortalTrainingSerializer(DynamicFieldsModelSerializer):
+class TrainingContentFields(serializers.Serializer):
+    """The flat fields that live on `TrainingDetail` and `TrainingContact`, so the API keeps one
+    flat training. Writes arrive nested (`validated_data["detail"]`), as `services` takes them."""
+
+    overview = serializers.CharField(
+        source="detail.overview", required=False, allow_blank=True
+    )
+    eligibility = serializers.CharField(
+        source="detail.eligibility", required=False, allow_blank=True
+    )
+    certification = serializers.CharField(
+        source="detail.certification", required=False, allow_blank=True, max_length=255
+    )
+    skills = serializers.ListField(
+        source="detail.skills",
+        child=serializers.CharField(max_length=60),
+        required=False,
+    )
+    contact_person = serializers.CharField(
+        source="contact.contact_person",
+        required=False,
+        allow_blank=True,
+        max_length=150,
+    )
+    contact_phone = serializers.CharField(
+        source="contact.contact_phone",
+        required=False,
+        allow_blank=True,
+        max_length=25,
+        validators=[validate_phone_number],
+    )
+    contact_email = serializers.EmailField(
+        source="contact.contact_email", required=False, allow_blank=True
+    )
+
+
+class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
     """A nested list replaces the whole list; leave it out to keep it."""
 
     category = serializers.PrimaryKeyRelatedField(queryset=available_categories())
@@ -247,7 +290,10 @@ class PortalTrainingSerializer(DynamicFieldsModelSerializer):
 
     @staticmethod
     def _children(data):
-        return {key: data.pop(key, None) for key in ("sessions", "modules", "outcomes")}
+        return {
+            key: data.pop(key, None)
+            for key in ("sessions", "modules", "outcomes", "detail", "contact")
+        }
 
     def create(self, validated_data):
         children = self._children(validated_data)
@@ -302,7 +348,7 @@ class AdminTrainingListSerializer(PortalTrainingListSerializer):
         fields = PortalTrainingListSerializer.Meta.fields + ("institute_name",)
 
 
-class AdminTrainingSerializer(DynamicFieldsModelSerializer):
+class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
     """Read-only view of a whole training for the reviewer."""
 
     institute = serializers.SerializerMethodField()
