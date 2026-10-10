@@ -2,6 +2,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import CASCADE
 
 from apps.common.models.base import BaseModel, SlugModel
 from apps.common.models.category import Category
@@ -28,24 +29,6 @@ class Training(BaseModel, SlugModel):
     category = models.ForeignKey(
         Category, on_delete=models.PROTECT, related_name="trainings"
     )
-    title = models.CharField(max_length=255)
-    short_description = models.CharField(max_length=160, blank=True)  # on the cards; needed to submit
-    overview = models.TextField(blank=True)  # the detailed description
-    mode = models.CharField(max_length=10, choices=TrainingMode.CHOICES)
-    level = models.CharField(max_length=15, choices=TrainingLevel.CHOICES, blank=True)
-    duration_value = models.PositiveSmallIntegerField(null=True, blank=True)
-    duration_unit = models.CharField(
-        max_length=10, choices=DurationUnit.CHOICES, blank=True
-    )
-    # derived from value and unit by the services; the duration filter uses it
-    duration_weeks = models.PositiveSmallIntegerField(null=True, blank=True, editable=False)
-    fee_npr = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )  # 0 means free
-    seats = models.PositiveIntegerField(null=True, blank=True)  # empty = unlimited
-    start_date = models.DateField(null=True, blank=True)  # Nepal time
-    end_date = models.DateField(null=True, blank=True)
-    registration_deadline = models.DateField(null=True, blank=True)
     institute_location = models.ForeignKey(
         InstituteLocation,
         null=True,
@@ -53,20 +36,33 @@ class Training(BaseModel, SlugModel):
         on_delete=models.PROTECT,
         related_name="trainings",
     )
-    eligibility = models.TextField(blank=True)
-    certification = models.CharField(max_length=255, blank=True)  # free text
-    skills = ArrayField(models.CharField(max_length=60), blank=True, default=list)
-    contact_person = models.CharField(max_length=150, blank=True)
-    contact_phone = models.CharField(
-        max_length=25, blank=True, validators=[validate_phone_number]
-    )
-    contact_email = models.EmailField(blank=True)
+    title = models.CharField(max_length=255)
+    short_description = models.CharField(
+        max_length=160, blank=True
+    )  # on the cards; needed to submit
     cover_image = models.ImageField(
         upload_to=get_upload_path, blank=True, validators=[validate_image_file]
     )
+    mode = models.CharField(max_length=10, choices=TrainingMode.CHOICES)
+    level = models.CharField(max_length=15, choices=TrainingLevel.CHOICES, blank=True)
+    duration_value = models.PositiveSmallIntegerField(null=True, blank=True)
+    duration_unit = models.CharField(
+        max_length=10, choices=DurationUnit.CHOICES, blank=True
+    )
+    # derived from value and unit by the services; the duration filter uses it
+    duration_weeks = models.PositiveSmallIntegerField(
+        null=True, blank=True, editable=False
+    )
+    fee_npr = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )  # 0 means free
+    seats = models.PositiveIntegerField(null=True, blank=True)  # empty = unlimited
+    start_date = models.DateField(null=True, blank=True)  # Nepal time
+    end_date = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=TrainingStatus.CHOICES, default=TrainingStatus.DRAFT
     )
+    registration_deadline = models.DateField(null=True, blank=True)
     review_feedback = models.TextField(blank=True)
     published_at = models.DateTimeField(null=True, blank=True)  # first approval
     search_vector = SearchVectorField(null=True, editable=False)
@@ -123,7 +119,9 @@ class Training(BaseModel, SlugModel):
                 condition=models.Q(status=TrainingStatus.APPROVED),
                 name="training_published_idx",
             ),
-            models.Index(fields=["institute", "status"], name="training_inst_status_idx"),
+            models.Index(
+                fields=["institute", "status"], name="training_inst_status_idx"
+            ),
             models.Index(fields=["category", "status"], name="training_cat_status_idx"),
             # the daily expiry job
             models.Index(fields=["status", "end_date"], name="training_status_end_idx"),
@@ -132,6 +130,25 @@ class Training(BaseModel, SlugModel):
 
     def __str__(self):
         return self.title
+
+
+class TrainingDetail(BaseModel):
+    training = models.OneToOneField(Training, on_delete=CASCADE, related_name="detail")
+    overview = models.TextField(blank=True)
+    eligibility = models.TextField(blank=True)
+    certification = models.CharField(max_length=255, blank=True)
+    skills = ArrayField(models.CharField(max_length=60), blank=True, default=list)
+
+
+class TrainingContact(BaseModel):
+    training = models.OneToOneField(
+        Training, on_delete=models.CASCADE, related_name="contact"
+    )
+    contact_person = models.CharField(max_length=150, blank=True)
+    contact_phone = models.CharField(
+        max_length=25, blank=True, validators=[validate_phone_number]
+    )
+    contact_email = models.EmailField(blank=True)
 
 
 class TrainingSession(BaseModel):
@@ -165,13 +182,9 @@ class TrainingModule(BaseModel):
     )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    position = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
-        ordering = ("position", "pk")
-        indexes = [
-            models.Index(fields=["training", "position"], name="training_module_pos_idx")
-        ]
+        ordering = ("pk",)  # entered order: the services insert the list in order
 
 
 class LearningOutcome(BaseModel):
@@ -179,10 +192,6 @@ class LearningOutcome(BaseModel):
         Training, on_delete=models.CASCADE, related_name="outcomes"
     )
     text = models.CharField(max_length=300)
-    position = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
-        ordering = ("position", "pk")
-        indexes = [
-            models.Index(fields=["training", "position"], name="training_outcome_pos_idx")
-        ]
+        ordering = ("pk",)

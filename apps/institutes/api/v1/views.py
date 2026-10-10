@@ -44,7 +44,7 @@ from apps.institutes.api.v1.serializers import (
     PublicInstituteListSerializer,
     StaffSerializer,
 )
-from apps.institutes.constants import InstituteStatus, MemberRole
+from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import (
     Institute,
     InstituteCEO,
@@ -65,7 +65,6 @@ from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
 )
-from apps.users.permissions import HasPlatformPermission
 
 
 def private_file_response(document):

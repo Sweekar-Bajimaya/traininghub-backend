@@ -83,6 +83,3 @@ class TrainingFilter(django_filters.FilterSet):
             .annotate(rank=SearchRank(F("search_vector"), search_query))
             .order_by("-rank", "-published_at", "-pk")
         )
-
-
-

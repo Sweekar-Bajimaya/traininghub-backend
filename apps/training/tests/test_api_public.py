@@ -181,10 +181,10 @@ class DetailTests(PublicTrainingTestCase):
         TrainingSession.objects.filter(training=training, start_time=time(7)).update(
             class_days=["SUN", "MON", "TUE", "WED", "THU", "FRI"]
         )
-        training.modules.create(title="Advanced", position=1)
-        training.modules.create(title="Basics", position=0)
-        training.outcomes.create(text="Two", position=1)
-        training.outcomes.create(text="One", position=0)
+        training.modules.create(title="Basics")
+        training.modules.create(title="Advanced")
+        training.outcomes.create(text="One")
+        training.outcomes.create(text="Two")
         data = self.client.get(f"{URL}{training.slug}/").data
         self.assertEqual(
             [(s["class_days_text"], str(s["start_time"])) for s in data["schedule"]],

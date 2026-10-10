@@ -51,6 +51,8 @@ if DEBUG:
     # Unconditional in prod otherwise - the toolbar is a dev-only tool and
     # its middleware/panels have no business running against real traffic.
     THIRD_PARTY_APPS.append("debug_toolbar")
+    # Dev-only, like the toolbar (requirements/dev.txt): gives `manage.py show_urls`.
+    THIRD_PARTY_APPS.append("django_extensions")
 
 
 LOCAL_APPS = [

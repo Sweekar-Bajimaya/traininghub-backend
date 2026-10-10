@@ -8,7 +8,6 @@ from apps.common.api.v1.serializers import (
 )
 from apps.common.serializers import DynamicFieldsModelSerializer
 from apps.institutes import services
-from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import (
     Institute,
     InstituteCEO,

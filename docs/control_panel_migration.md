@@ -1,107 +1,84 @@
-# Control Panel App Migration - Summary
+# Control Panel App - Migration Notes
 
-## Overview
-Created a dedicated `control_panel` app that consolidates all admin-related functionality previously scattered across `users`, `institutes`, `training`, and `common` apps. This provides a single entry point for admin operations under `/api/v1/admin/`.
+A record of the move, not a description of the code: where they differ, the code wins. The current layout is in
+`CLAUDE.md` (Layout) and the decision is in `docs/System Design.md` (decision log, 2026-10-10).
 
-## What Was Done
+## What changed
 
-### 1. Created New App Structure
+Every admin endpoint now lives in one app, `apps/control_panel`, under `/api/v1/admin/`. Before, the admin side was
+spread over four apps (`users`, `common`, `institutes`, `training`), each with its own `urls/admin.py` and an `Admin*`
+viewset and serializer next to its public and portal code.
+
+`control_panel` has no models and no migrations. It only exposes the other apps' services over HTTP; the rules stay
+where they were (`users/services.py`, `common/services.py`, `institutes/services.py`, `training/services.py`).
+
+## Structure
+
 ```
 apps/control_panel/
-├── api/v1/
-│   ├── users/
-│   │   ├── serializers.py    # AdminSerializer (moved from users app)
-│   │   └── views.py          # AdminViewSet (moved from users app)
-│   ├── institutes/
-│   │   ├── serializers.py    # AdminInstituteSerializer, DocumentReviewSerializer, etc.
-│   │   └── views.py          # AdminInstituteViewSet, AdminDocumentView, AdminDocumentDownloadView
-│   ├── training/
-│   │   ├── serializers.py    # AdminTrainingListSerializer, AdminTrainingSerializer, TrainingReasonSerializer
-│   │   └── views.py          # AdminTrainingViewSet
-│   ├── filters.py            # AdminTrainingFilter (moved from training app)
-│   └── urls.py               # Unified admin URL routing
-├── apps.py
-├── models.py                 # Empty (no new models)
-└── admin.py                  # Empty (uses existing admin)
+├── apps.py, __init__.py
+├── models.py, admin.py, migrations/    empty (no models)
+├── tests.py                            routing: admin API root, admin/users/admins/, the old path is gone
+└── api/v1/
+    ├── serializers.py                  every admin serializer
+    ├── views.py                        every admin view
+    ├── filters.py                      AdminCategoryFilter, AdminTrainingFilter
+    └── urls.py                         one DefaultRouter + the two document routes
 ```
 
-### 2. Consolidated Admin Endpoints
+`api/v1/` is deliberately flat for now (one file each). `serializers.py` and `views.py` are grouped by comment headers in
+the same order: admins, categories, institutes, trainings. If a file grows too large, split it per resource then.
 
-| Previous Location | New Location (under `/admin/`) |
-|-------------------|--------------------------------|
-| `/user/admins/` → `apps.users.api.v1.views.AdminViewSet` | `/admin/users/admins/` → `apps.control_panel.api.v1.users.views.AdminViewSet` |
-| `/admin/institutes/` → `apps.institutes.api.v1.views.AdminInstituteViewSet` | `/admin/institutes/` → `apps.control_panel.api.v1.institutes.views.AdminInstituteViewSet` |
-| `/admin/institutes/{id}/documents/` → `apps.institutes.api.v1.views.AdminDocumentView` | `/admin/institutes/{id}/documents/` → `apps.control_panel.api.v1.institutes.views.AdminDocumentView` |
-| `/admin/trainings/` → `apps.training.api.v1.views.AdminTrainingViewSet` | `/admin/trainings/` → `apps.control_panel.api.v1.training.views.AdminTrainingViewSet` |
-| `/admin/categories/` → `apps.common.api.v1.views.AdminCategoryViewSet` | `/admin/categories/` → `apps.control_panel.api.v1.views.AdminCategoryViewSet` |
+## Where each endpoint came from
 
-### 3. Backward Compatibility
-- `/user/admins/` still works (mapped to same `AdminViewSet` in control_panel)
-- Old admin URLs in individual apps are removed
+| Endpoint (under `/api/v1/`) | Permission | Was in |
+|---|---|---|
+| `admin/users/admins/` (list, create, retrieve, patch) | `users.manage_admins` | `users` (`user/admins/`, now a 404) |
+| `admin/categories/` (list, create, retrieve, patch) | `users.manage_categories` | `common` |
+| `admin/institutes/` and `{id}/{approve,reject,request-info,suspend,reinstate}/` | `users.manage_institutes` | `institutes` |
+| `admin/institutes/{id}/documents/{doc}/` (PATCH) and `.../download/` | `users.manage_institutes` | `institutes` |
+| `admin/trainings/` and `{id}/{approve,request-changes,reject}/` | `users.manage_trainings` | `training` |
 
-## Files Modified
+`GET admin/` is the DRF API root and lists the four groups (`users/admins`, `categories`, `institutes`, `trainings`).
 
-### Core Configuration
+Only the admin-team path changed. The category, institute and training admin URLs are the same as before the move.
+
+## The old admins path
+
+`user/admins/` was dropped with no alias: it answers 404 now, and the frontend must call `admin/users/admins/`.
+`PATCH user/users/{id}/status/` (suspend / activate) did not move; it is still in `users`.
+
+## Files touched outside `control_panel`
+
 | File | Change |
-|------|--------|
-| `config/settings/base.py` | Added `"apps.control_panel"` to `LOCAL_APPS` |
+|---|---|
+| `config/settings/base.py` | `"apps.control_panel"` added to `LOCAL_APPS` |
+| `apps/api/v1/urls.py` | one `admin/` include of `control_panel` |
+| `apps/users/api/v1/{serializers,views}.py`, `urls/users.py` | `AdminSerializer` and `AdminViewSet` removed |
+| `apps/common/api/v1/{serializers,views,filters}.py` | `AdminCategory*` removed |
+| `apps/institutes/api/v1/{serializers,views}.py` | `Admin*` serializers and views, `ReasonSerializer`, `DocumentReviewSerializer` removed |
+| `apps/training/api/v1/{serializers,views,filters}.py` | `Admin*` serializers, viewset and filter, `TrainingReasonSerializer` removed |
+| `apps/{common,institutes,training}/api/v1/urls/admin.py` | deleted |
 
-### Main URL Routing
-| File | Change |
-|------|--------|
-| `apps/api/v1/urls.py` | Replaced 3 separate `admin/` includes with single `include("apps.control_panel.api.v1.urls")`; added backward compat route for `/user/admins/` |
+Import direction: `control_panel` imports from `users`, `common`, `institutes` and `training`; nothing imports it except
+`apps/api/v1/urls.py`. The one cross-view import is `with_content` (training) and `private_file_response` (institutes).
 
-### Users App
-| File | Change |
-|------|--------|
-| `apps/users/api/v1/urls/users.py` | Removed `AdminViewSet` router registration (no longer owns admin management) |
-| `apps/users/api/v1/views.py` | Removed `AdminViewSet` class; imports `AdminSerializer` from control_panel |
+## Merge with `main-v2` (2026-10-10)
 
-### Control Panel App - Users
-| File | Change |
-|------|--------|
-| `apps/control_panel/api/v1/users/serializers.py` | Added `from apps.users import services` import; fixed `services.create_admin` / `services.update_admin` calls |
-| `apps/control_panel/api/v1/users/views.py` | Unchanged (already correct) |
+`main-v2` changed the same training files that the move emptied. The merge was finished by hand:
 
-### Control Panel App - Training
-| File | Change |
-|------|--------|
-| `apps/control_panel/api/v1/training/views.py` | Changed `from apps.common import services` → `from apps.training import services`; added `from apps.training.api.v1.views import CHILDREN` |
-| `apps/control_panel/api/v1/training/serializers.py` | Unchanged |
-
-### Control Panel App - Institutes
-| File | Change |
-|------|--------|
-| `apps/control_panel/api/v1/institutes/views.py` | Changed `from apps.common import services` → `from apps.institutes import services`; added `AdminDocumentSerializer` import; fixed `AdminDocumentView.patch()` to pass serializer context |
-| `apps/control_panel/api/v1/institutes/serializers.py` | Fixed import: `from rest_framework import serializers` instead of `from apps.common import serializers` |
-
-### Control Panel App - URLs
-| File | Change |
-|------|--------|
-| `apps/control_panel/api/v1/urls.py` | **New file** - unified router with all admin viewsets: `AdminCategoryViewSet`, `AdminViewSet`, `AdminInstituteViewSet`, `AdminTrainingViewSet` + document endpoints |
-
-### Common App
-| File | Change |
-|------|--------|
-| `apps/common/api/v1/urls/admin.py` | Removed (admin categories moved to control_panel) |
-
-### Training App
-| File | Change |
-|------|--------|
-| `apps/training/api/v1/urls/admin.py` | Removed (admin trainings moved to control_panel) |
-
-### Institutes App
-| File | Change |
-|------|--------|
-| `apps/institutes/api/v1/urls/admin.py` | Removed (admin institutes moved to control_panel) |
+- `AdminTrainingSerializer` takes the flat `overview`, `eligibility`, `certification`, `skills` and `contact_*` fields
+  (`TrainingContentFields`), and `AdminTrainingViewSet` loads them with `with_content()` (the detail and contact rows plus
+  the children), as `main-v2` did in `training/api/v1`.
+- The portal `cover` and `summary` actions had been deleted along with the admin viewset that followed them; they are back
+  in `PortalTrainingViewSet`.
+- `main-v2`'s `DefaultRouter` change is followed in `control_panel/api/v1/urls.py`.
+- The two reason serializers (`ReasonSerializer` and `TrainingReasonSerializer`, both just `reason`) are one
+  `ReasonSerializer`.
 
 ## Testing
-- All 339 existing tests pass
-- 1 pre-existing flaky test (`test_the_sixth_registration_in_an_hour_is_throttled`) unrelated to this migration
-- Django system check passes with no warnings
 
-## Benefits
-1. **Single admin entry point**: All admin operations under `/api/v1/admin/`
-2. **Clear separation**: Admin logic isolated from public/portal APIs
-3. **Easier maintenance**: Admin permissions, throttling, and docs in one place
-4. **Consistent patterns**: All admin viewsets follow same structure (ReadOnlyViewSet + action decorators)
+`python manage.py test`: 355 tests pass (352 from `main-v2` plus 3 in `apps/control_panel/tests.py`).
+`python manage.py check` and `python manage.py makemigrations --check --dry-run` are clean. The admin endpoints keep
+being tested with their resource (`apps/users/tests.py`, `apps/common/tests/`, `apps/institutes/tests/`,
+`apps/training/tests/`); they hit the URLs, so the move needed no test changes.

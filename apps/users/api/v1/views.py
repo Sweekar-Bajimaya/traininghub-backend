@@ -8,8 +8,7 @@ from rest_framework_simplejwt.views import (
 )
 
 from apps.common.throttling import IdentityScopedRateThrottle
-from apps.common.viewsets import ActionAPIView, CreateListRetrieveUpdateViewSet
-from apps.control_panel.api.v1.users.serializers import AdminSerializer
+from apps.common.viewsets import ActionAPIView
 from apps.users.api.v1.serializers import (
     LoginSerializer,
     PasswordChangeSerializer,
@@ -18,7 +17,6 @@ from apps.users.api.v1.serializers import (
     UpdateStatusSerializer,
     VerifyOTPSerializer,
 )
-from apps.users.constants import Role
 from apps.users.permissions import HasPlatformPermission
 
 User = get_user_model()
