@@ -4,7 +4,7 @@ from apps.institutes.api.v1 import views
 
 app_name = "institutes_public"
 
-router = routers.SimpleRouter()
+router = routers.DefaultRouter()
 router.register("", views.PublicInstituteViewSet, basename="institute")
 
 urlpatterns = router.urls

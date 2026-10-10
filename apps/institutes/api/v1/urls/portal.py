@@ -5,7 +5,7 @@ from apps.institutes.api.v1 import views
 
 app_name = "institutes_portal"
 
-router = routers.SimpleRouter()
+router = routers.DefaultRouter()
 router.register("locations", views.PortalLocationViewSet, basename="portal-location")
 router.register("documents", views.PortalDocumentViewSet, basename="portal-document")
 router.register("gallery", views.PortalGalleryViewSet, basename="portal-gallery")

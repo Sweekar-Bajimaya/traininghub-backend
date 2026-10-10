@@ -159,6 +159,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/common/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
+| list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
 | tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
@@ -185,8 +186,10 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   answers 200, the `apps.common.viewsets` mixins) with only attributes set; no hand-written `post()` / `patch()`. Business rules and state changes live in each app's
   `services.py` (`transaction.atomic()`, `select_for_update()` before check-then-write), called from serializer
   `create()` / `update()`. Admin lists use `prefetch_related` and a deterministic `order_by(..., "-pk")`.
-- URL prefixes live only in `apps/api/v1/urls.py`; an app's URL module is relative to its prefix. A router
-  registered with an empty prefix must be a `SimpleRouter` (`DefaultRouter` adds a root view at `""`).
+- URL prefixes live only in `apps/api/v1/urls.py`; an app's URL module is relative to its prefix. Routers
+  are `DefaultRouter`, which also adds an API-root page and `.json` suffix routes (signed-in only). With an empty prefix
+  the root view sits behind the list route and is never reached; `admin/` is included once per app, so `GET admin/`
+  lists only the first include's endpoints (institutes).
 - Filter on a foreign key with `NumberFilter(field_name="<fk>_id")`, not django-filter's default
   `ModelChoiceFilter`, which runs an extra query per request to check that the row exists.
 - Institute-scoped views mix in `InstituteScopedMixin` and use `IsInstituteMember` / `IsInstituteOwner`

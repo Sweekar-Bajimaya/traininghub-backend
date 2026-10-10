@@ -5,7 +5,7 @@ from apps.institutes.api.v1 import views
 
 app_name = "institutes_admin"
 
-router = routers.SimpleRouter()
+router = routers.DefaultRouter()
 router.register("institutes", views.AdminInstituteViewSet, basename="admin-institute")
 
 urlpatterns = [

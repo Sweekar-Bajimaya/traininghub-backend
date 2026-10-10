@@ -4,7 +4,7 @@ from apps.training.api.v1 import views
 
 app_name = "training_admin"
 
-router = routers.SimpleRouter()
+router = routers.DefaultRouter()
 router.register("trainings", views.AdminTrainingViewSet, basename="admin-training")
 
 urlpatterns = router.urls
