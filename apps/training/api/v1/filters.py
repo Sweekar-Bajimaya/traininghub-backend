@@ -3,8 +3,8 @@ import re
 import django_filters
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F, Q
-from django.utils import timezone
 
+from apps.training import services
 from apps.training.constants import SEARCH_CONFIG
 from apps.training.models import Training
 
@@ -66,11 +66,7 @@ class TrainingFilter(django_filters.FilterSet):
         """The deadline has not passed, or there is none and the training has not started."""
         if not value:
             return queryset
-        today = timezone.localdate()
-        return queryset.filter(
-            Q(registration_deadline__gte=today)
-            | Q(registration_deadline__isnull=True, start_date__gte=today)
-        )
+        return queryset.filter(services.registration_open_q())
 
     def filter_search(self, queryset, name, value):
         query = prefix_query(value)

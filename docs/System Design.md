@@ -11,7 +11,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Topic | Decision |
 | :---- | :---- |
 | Stack | Django 5.2 + DRF, PostgreSQL, Next.js frontend (separate project) |
-| Learner interaction (MVP) | Anonymous **Enquiry** (name, phone, optional email). No learner login |
+| Learner interaction (MVP) | Anonymous **Enquiry** (name, phone, optional email, message, preferred time; an `ENQUIRY` or an `INTEREST`). No learner login |
 | Learner interaction (phase 2) | **Application** (approve / reject / capacity). Schema must allow adding it without a rewrite |
 | Who logs in | Institute staff and admins only |
 | Providers | Verified **Institutes** only (no individual instructors) |
@@ -24,16 +24,16 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Admin permissions | A Super Admin can do everything and grants admins limited rights per area (see 3.1) |
 | Auth | Own accounts, email + password. JWT via simplejwt, RS256 with a key pair (`manage.py generate_rsa_keys`), Bearer header. Suspended accounts (`is_active=False`) are rejected at the authentication layer |
 | Public user registration | None. Institute owners are created by institute registration; admins are created by the Super Admin, who sets the initial password. A "set your own password" email to the new admin comes later, with `notifications` |
-| Frontend calls the API | Directly from the **browser** (may change). Needs a CORS allow-list; throttling can key on client IP (proxy headers must be configured); reCAPTCHA token comes from the browser |
-| Notifications | Email (SMTP) at MVP. SMS not planned |
+| Frontend calls the API | Directly from the **browser** (may change). Needs a CORS allow-list; throttling can key on client IP (proxy headers must be configured); the `X-Device-Token` header (see "My enquiries") is in the CORS allow-list |
+| Notifications | Email (SMTP) at MVP. SMS not planned. A new enquiry sends no alert yet (decided 2026-10-10); the portal shows the new count from `institute/enquiries/summary/` |
 | Async jobs / cache | django-q2 + Redis (Redis broker) |
 | Files | Local `media/` now, S3 later. Use Django's storage API only; no hard-coded paths |
-| Abuse protection | Google reCAPTCHA (verified server-side) + DRF rate limiting on public submit endpoints |
+| Abuse protection | DRF rate limiting on public submit endpoints. The enquiry form has **no captcha for now** (decided 2026-10-10): 10 a hour per client IP and 3 a day per phone number, plus one open enquiry per phone number and training. `RECAPTCHA_SECRET_KEY` exists in settings but nothing verifies it yet |
 | Training mode | `PHYSICAL`, `ONLINE`, `HYBRID` |
 | Reviews & ratings | **Out of MVP** (needs learner login). `reviews` app deferred |
-| "My enquiries" | Tracked by a browser-stored device token; lost if browser data is cleared. A device sees its enquiries for **90 days**. Revisit when learner login is added |
+| "My enquiries" | Tracked by a device token: a random UUID4 the browser makes and sends in the `X-Device-Token` header (a missing, malformed or non-v4 token is a 400). Lost if browser data is cleared. A device sees its enquiries for **90 days**, with a plain-language status and never the phone number or notes. Revisit when learner login is added |
 | Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/common/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
-| Enquiry statuses | `NEW`, `CONTACTED`, `CONVERTED`, `CLOSED`. Kept easy to change later |
+| Enquiry statuses | The portal's seven: `NEW`, `CONTACTED`, `FOLLOW_UP`, `INTERESTED`, `CONVERTED`, `NOT_INTERESTED`, `CLOSED`. Any status can move to any other; institute staff and the owner both change them. Only `CONVERTED` is guarded, by the seats (see Seats) |
 | Location | Managed list of Nepal provinces / districts / **municipalities**. The third level is called Municipality in code and UI and includes rural municipalities. Names are kept exactly as they appear in the data (no normalising of "Province" / "Pradesh") |
 | API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`, `categories/`, `trainings/`, `institutes/` public, `institute/trainings/` and `institute/` portal, `admin/` console); an app's URL module is relative to its prefix. `admin/` is a single include of `apps/control_panel` |
 | Institute re-application | A rejected institute can re-apply for verification (`REJECTED` → `PENDING`) |
@@ -72,7 +72,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | `control_panel` | The admin API, one place for every admin task, served under `admin/`: admin team, category admin, institute and training review. No models; it calls the other apps' services. Flat `api/v1/` (one `serializers.py`, `views.py`, `urls.py`, `filters.py`) until it grows | built |
 | `institutes` | Institute, locations, staff membership and invitations, verification documents, contact person / CEO / social links, gallery, status workflow | built (on defaults, see section 8) |
 | `training` | Training, weekly sessions, curriculum modules, learning outcomes, search, review workflow, expiry | built (on defaults, see section 1) |
-| `enquiries` | Enquiry, status workflow, device tracking | planned |
+| `enquiries` | Enquiry, internal notes, status changes with the seat guard, device tracking ("My enquiries"), public submit and portal APIs | built (on defaults, see section 3.7) |
 | `notifications` | In-app notifications + email dispatch (django-q2 tasks) | planned |
 | `analytics` | View counters, enquiry stats for dashboards | planned |
 | `api` | Versioned URL routing (`/api/v1/`) | exists |
@@ -94,7 +94,8 @@ Phase 2: `applications` (reuses Training capacity fields), `learners`.
 - **Training** (`apps/training`): institute, category (a category or a sub-category), title, short description (160 characters, on the cards), mode (`PHYSICAL`, `ONLINE`, `HYBRID`), level, duration value and unit plus derived `duration_weeks`, fee (NPR, 0 = free), seats (empty = unlimited), start / end date, registration deadline, `institute_location` (nullable FK to one of the same institute's locations; empty for `ONLINE`, required to submit `PHYSICAL` / `HYBRID`), cover image, status, review feedback, `published_at` (first approval), `search_vector` (GIN index, kept by the services). Drafts may be incomplete; check constraints cover online-without-location, date order, deadline before start, non-negative fee, positive seats and duration, and a unit with every duration.
 - **TrainingDetail** (one-to-one with a training, created with it): overview (the detailed description), eligibility, certification (text), skills (list). **TrainingContact** (one-to-one, created with it): contact person / phone / email, all optional. The API shows both as flat fields on the training (`overview`, `skills`, `contact_person`, ...); only the tables are split.
 - **TrainingSession**: a weekly slot (class days, start / end time, NPT); a training may have several (for example a morning and an evening batch). **TrainingModule** (curriculum: title, description), **LearningOutcome** (text); both come back in the order they were sent (ordered by pk, no position column).
-- **Enquiry**: training, name, phone, email (optional), message, status, device_token, created_at. "My enquiries" returns only a device's enquiries from the last 90 days; older ones stay visible to the institute.
+- **Enquiry** (`apps/enquiries`): training and institute (both `PROTECT`; the institute is copied from the training by the service so the portal can scope on it), name, phone (ten digits, no country code, a 96 / 97 / 98 mobile number), email (optional), message (up to 2000 characters), `type` (`ENQUIRY`, `INTEREST`), `preferred_time` (optional: `MORNING`, `DAY`, `EVENING`, `WEEKEND`), status, `device_token` (UUID). "My enquiries" returns only a device's enquiries from the last 90 days; older ones stay visible to the institute. Check constraints cover the status, type, preferred time and phone format; a partial unique index allows one *open* (`NEW`, `CONTACTED`, `FOLLOW_UP`, `INTERESTED`) enquiry per phone number and training. There is no preferred-location field (dropped 2026-10-10).
+- **EnquiryNote**: enquiry, author (null if the user is deleted), text. Internal: only the institute's team sees notes.
 - **Notification**: recipient user, type, body, read_at.
 - **Proposed (derived, to confirm)**: `AuditLog` (actor, action, target, changes; append-only), `TrainingViewDaily` (training, day, views).
 - **Seats**: `available_seats = seats - count(CONVERTED enquiries)`. A training with no `seats` value is unlimited. Converting an enquiry is rejected once converted enquiries reach `seats`, with the training row locked.
@@ -147,7 +148,7 @@ Implemented in `apps/users`, except the admins CRUD (`apps/control_panel`). `adm
 ### 3.4 Engineering conventions (the `users` app already follows them)
 
 - Each app gets `services.py` (business rules, transactions, state changes) and `selectors.py` (read queries with `select_related` / `prefetch_related`). Views and serializers stay thin; status changes go only through services.
-- State machines (institute, training, enquiry) are one allowed-transitions table each; illegal moves raise a validation error.
+- State machines (institute, training) are one allowed-transitions table each; illegal moves raise a validation error. Enquiry statuses are the exception: any status moves to any other, and only seats guard `CONVERTED`.
 - Workflow actions run in `transaction.atomic()` with `select_for_update()`; emails are queued with `transaction.on_commit`.
 - Invariants are also database constraints: one Super Admin, one main active location per institute, one owner per institute, training mode / location check, case-insensitive unique email.
 - List endpoints avoid N+1 queries (query-count tests); public lists use cursor pagination; Redis caches only reference data and short-lived facets.
@@ -188,26 +189,39 @@ The `admin/institutes/` endpoints are implemented in `apps/control_panel`. Rows 
 
 The `admin/categories/` and `admin/trainings/` endpoints are implemented in `apps/control_panel`; the services they call stay in `common` and `training`.
 
+### 3.7 Enquiries API (built)
+
+| Endpoint | Who | Notes |
+| :---- | :---- | :---- |
+| `POST enquiries/` | public (no account) | Needs header `X-Device-Token` (a random UUID4) and body `training` (slug), `name` (2+ characters), `phone` (a 96 / 97 / 98 mobile number; spaces, dashes and `+977` are accepted and stripped), optional `email`, `message`, `type` (`ENQUIRY` default, or `INTEREST`), `preferred_time`. Throttled: `enquiry` scope (10/hour per client IP) and 3 per phone number per day, both `429` with `Retry-After`. `400` when the training is not an approved one of an approved institute, when registration has closed or the seats are full (a plain enquiry only), or when the phone number already has an open enquiry for that training. The answer is the visitor's view (`id`, `type`, `training`, `institute_name`, `status_label`, `created_at`); the status, institute and device token cannot be set |
+| `GET enquiries/my/` | public (header) | The enquiries of this device from the last 90 days, newest first, paginated (`limit` / `offset`). Same fields as the answer above: never the phone, email, message or notes |
+| `GET institute/enquiries/` | institute staff (owner or staff) | Newest first, paginated (the UI asks for 25 at a time); filters `status`, `training`, `q` (name, phone or email, anywhere in the text). Constant number of queries |
+| `GET, PATCH institute/enquiries/{id}/` | institute staff | The detail adds `message`, `preferred_time`, `modified_at` and the `notes` (newest first, with the author's name, or email if none). `PATCH` takes only `status`, moves any status to any other, and is refused with `400` for `CONVERTED` when the training's converted enquiries already reach its `seats`, or for a status that would make a second open enquiry of one phone number for one training. No PUT or DELETE |
+| `GET, POST institute/enquiries/{id}/notes/` | institute staff | Internal notes (up to 2000 characters), all of them in one list; the author is the caller |
+| `GET institute/enquiries/summary/` | institute staff | `total`, `new`, `unique_phones` and `by_status` (every status, zeros included) in one query. The `training` and `q` filters apply, so the tab counts follow them; call it without filters for the sidebar badge, and leave `status` out |
+
+Another institute's enquiry or note is a 404. Enquiries are written only through `apps/enquiries/services.py`: `submit_enquiry` (rules, per-phone allowance, one open enquiry per phone and training, the unique index as the final judge) and `change_status` (locks the enquiry, then the training for `CONVERTED`, so two staff cannot take the last seat). The per-phone counter lives in Redis under `enquiry_phone_<phone>` for 24 hours. A training that has enquiries cannot be deleted (`delete_training` says so; the foreign key is `PROTECT`).
+
 ## 4. Key workflows
 
 1. **Institute onboarding**: request a code for the login email (`register/send-otp/`) → register (one JSON request: institute, owner with that email and the code, contact, at least one location; the owner can log in right away) → upload verification documents in the portal → `PENDING` → admin approves / rejects / requests more info / suspends → email to the institute. A rejected institute can re-apply (`REJECTED` → `PENDING`) after updating its details. Only `APPROVED` institutes are visible publicly.
 2. **Training lifecycle**: institute drafts → submits (`SUBMITTED`, can withdraw) → admin approves / requests changes / rejects (with a reason) → `APPROVED` (public) → an edit sends it back to review; the institute can unpublish / republish (no review) or cancel; a daily job expires it after `end_date`. `CANCELLED` and `EXPIRED` are final.
-3. **Enquiry**: public submit (captcha + throttle) → institute notified (email + dashboard) → institute updates status → admin sees conversion stats. The visitor's device sees it under "My enquiries" for 90 days.
+3. **Enquiry**: public submit (throttled per IP and per phone number, no captcha yet) → the institute sees it in the portal (no email yet; the sidebar count comes from `summary/`) → staff change the status and add internal notes → admin conversion stats (not built). The visitor's device sees it under "My enquiries" for 90 days. A plain enquiry is refused once registration has closed or the seats are full; an `INTEREST` ("tell me about the next batch") is still accepted.
 3a. **Staff invitation**: institute owner invites by email → invitee accepts and sets a password → becomes `INSTITUTE_STAFF` of that institute.
 4. **Discovery**: prefix full-text search + filters (category, sub-category, mode, level, location, fee, start date, duration, registration open, institute) using PostgreSQL full-text search and django-filter. The availability filter waits for `enquiries`.
 
 ## 5. API surface (v1, sketch)
 
-- **Public**: `GET trainings`, `trainings/{slug}`, `categories`, `locations`, `institutes`, `institutes/{slug}`, `POST enquiries`, `GET my-enquiries` (by device token, last 90 days).
+- **Public**: `GET trainings`, `trainings/{slug}`, `categories`, `locations`, `institutes`, `institutes/{slug}`, `POST enquiries/`, `GET enquiries/my/` (by device token, last 90 days); built, see 3.7.
 - **Built (institutes):** see section 3.5 for `institutes/`, `institute/` and `admin/institutes/`.
 - **Built (categories and trainings):** see section 3.6.
 - **Built:** `GET locations/` (filters `level`, `parent`, `province`, `district`; `search` on name; only active rows; one query, unpaginated, about 850 rows), `GET locations/{id}/`, `GET locations/tree/` (province > district > municipality, cached in Redis until a location changes).
-- **Institute**: auth, profile + documents + gallery + locations, staff invitations, CRUD trainings, submit for review, enquiries list / update, dashboard stats.
+- **Institute**: auth, profile + documents + gallery + locations, staff invitations, CRUD trainings, submit for review, enquiries list / status / notes / summary (built, see 3.7), dashboard stats (weekly trend, by training: not built; page views wait for `analytics`).
 - **Admin**: institute review actions, training review actions, categories and locations CRUD, enquiries monitor / export, admin team, platform settings.
 
 ## 6. Non-functional
 
-- DRF throttling by scope, backed by Redis; captcha verification server-side. Because the browser calls the API directly, throttling can key on client IP (and phone for enquiries); the deployment proxy must pass the real client IP.
+- DRF throttling by scope, backed by Redis; no captcha is verified yet. Because the browser calls the API directly, throttling keys on client IP (and the enquiry service also limits each phone number, with a Redis counter); the deployment proxy must pass the real client IP. If Redis is down the throttle and the phone counter raise, so an enquiry fails with a 500 (it fails closed).
 - One-time codes, their attempt counters and cooldowns live in the Redis cache with a 5-minute expiry; the OTP throttles are keyed on the submitted email, not on the client IP. The email is sent by a django-q task, so OTP mail is delivered only while `qcluster` runs, and `qcluster` does not reload code: restart it after a deploy.
 - Caching: the location and category trees are cached in Redis with no expiry and cleared when a `Location` / `Category` is saved or deleted (and by `load_locations`). `QuerySet.update()` skips the signals.
 - Scheduled job: `apps.training.tasks.expire_trainings` must run daily (a django-q `Schedule`, or `manage.py expire_trainings` from cron), with `qcluster` running for the queued search refreshes.
@@ -227,34 +241,32 @@ The `admin/categories/` and `admin/trainings/` endpoints are implemented in `app
 2b. [x] One-time codes by email: `users` services / tasks / `auth/otp/` endpoints, and email verification at institute registration (`register/send-otp/`, `register/verify-otp/`, the code goes with `owner.email` in `register/`).
 3. [x] `institutes`: models and constraints, services, public / admin / portal APIs (132 tests). The decisions it was built on were confirmed on 2026-10-02.
 4. [x] `catalog` (locations, categories) and `training` (trainings, weekly sessions, curriculum, search and filters, institute portal, admin review, expiry): built from `docs/catalog-checklist.md` on its defaults (confirmed 2026-10-05). The whole suite is 266 tests (users 26, catalog 36, institutes 132, training 72).
-5. [ ] `enquiries`, `notifications`, `analytics`.
+5. [x] `enquiries`: models and constraints, services, public submit and "My enquiries", portal list / detail / status / notes / summary (built 2026-10-10 on the decisions in the log). No email alert and no captcha yet. 89 tests; the whole suite is 444.
+5a. [ ] `notifications`, `analytics`, the admin enquiries monitor (`users.manage_enquiries`), and the availability filter / "seats left" on public trainings.
 6. [ ] Search, filters and public API polish.
 7. [ ] Docker.
 
 ## 8. Open questions
 
-1. **Enquiry retention**: after 90 days an enquiry disappears from the visitor's "My enquiries". Does the institute keep it indefinitely, or should old enquiries be deleted too?
+1. **Enquiry retention**: after 90 days an enquiry disappears from the visitor's "My enquiries". Today the institute keeps every enquiry and nothing deletes old ones. Keep it that way, or delete old enquiries too?
 2. **Browser auth storage**: where does the frontend keep the access and refresh tokens (memory, `localStorage`, or an httpOnly cookie)? This affects security and CORS settings.
-3. **Enquiry status moves**: free or forward-only? Who changes them: institute staff only, or admins with `manage_enquiries` too?
-4. **Enquiries after the deadline**: allowed after the registration deadline or the start date?
-5. **Search**: the PRD lists "Instructor Name" but there is no instructor field (the UI has none either). Add a text field on `Training` or drop it?
-6. **Enquirers and cancellation**: are people who sent an enquiry told when a training is cancelled? (`TODO(notify)` in `training/services.py`.)
-7. **Redis outage**: should throttled / captcha-protected enquiry submit fail closed or open?
-8. **Notifications**: which events notify whom (in-app and email)? Is the enquirer ever emailed?
-9. **Reports**: which provider "Reports" / "Sessions" dashboard items belong to the MVP ("Participants" is phase 2)?
-10. **PRD wording**: the Problem Statement and some user stories describe the later phase, and the "Training Instructors" list repeats the Learner list. Treat as phase 2 / ignore?
-11. **Privacy**: retention, consent and export rules for enquirer name / phone.
-12. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admin/users/admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
-13. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
-14. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
-15. **Editing an approved institute**: today an institute's staff can change the profile of an `APPROVED` institute without re-review (an edited training does go back to review). Should some fields (name, type) need re-approval?
-16. **Public contact details**: the institute detail page shows the contact person's name, phone and email, and the CEO profile (a comment in `PublicInstituteDetailSerializer` shows how to hide the name). Keep all of it public? And should `registration_number` be unique or validated?
-17. **Featured and views**: the UI's relevance sort uses a featured flag and view counts; neither exists yet.
-18. **Password reset**: `auth/otp/send/` and `auth/otp/verify/` exist, but no endpoint takes a verified code and sets a new password. Build it (`consume_otp` is ready), and should it also cover admins (see 12)?
+3. **Search**: the PRD lists "Instructor Name" but there is no instructor field (the UI has none either). Add a text field on `Training` or drop it?
+4. **Enquirers and cancellation**: are people who sent an enquiry told when a training is cancelled? (`TODO(notify)` in `training/services.py`.)
+5. **Notifications**: which events notify whom (in-app and email)? A new enquiry sends nothing today (decided 2026-10-10), and the enquirer is never emailed.
+6. **Reports**: which provider "Reports" / "Sessions" dashboard items belong to the MVP ("Participants" is phase 2)?
+7. **PRD wording**: the Problem Statement and some user stories describe the later phase, and the "Training Instructors" list repeats the Learner list. Treat as phase 2 / ignore?
+8. **Privacy**: retention, consent and export rules for enquirer name / phone.
+9. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admin/users/admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
+10. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
+11. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
+12. **Editing an approved institute**: today an institute's staff can change the profile of an `APPROVED` institute without re-review (an edited training does go back to review). Should some fields (name, type) need re-approval?
+13. **Public contact details**: the institute detail page shows the contact person's name, phone and email, and the CEO profile (a comment in `PublicInstituteDetailSerializer` shows how to hide the name). Keep all of it public? And should `registration_number` be unique or validated?
+14. **Featured and views**: the UI's relevance sort uses a featured flag and view counts; neither exists yet.
+15. **Password reset**: `auth/otp/send/` and `auth/otp/verify/` exist, but no endpoint takes a verified code and sets a new password. Build it (`consume_otp` is ready), and should it also cover admins (see 9)?
 
 ## 9. Decision log (answered questions)
 
-- Reviews: skipped for now; needs login first. Hybrid mode: included. "My enquiries": browser-stored token accepted. Enquiry statuses: `NEW` / `CONTACTED` / `CONVERTED` / `CLOSED`, changeable later.
+- Reviews: skipped for now; needs login first. Hybrid mode: included. "My enquiries": browser-stored token accepted. Enquiry statuses: first `NEW` / `CONTACTED` / `CONVERTED` / `CLOSED`, replaced by the portal's seven on 2026-10-10 (see the last entry).
 - Admin roles: Super Admin does everything and grants limited permissions (e.g. handling enquiries, account status) to other users.
 - Location: managed Nepal list. Price: single fee in NPR. Search: PostgreSQL full-text. Time: NPT everywhere, multiple sessions. Certification: text field.
 - Merojob integration: on hold. Email: SMTP. Captcha: reCAPTCHA. Deployment: Docker, later.
@@ -272,3 +284,4 @@ The `admin/categories/` and `admin/trainings/` endpoints are implemented in `app
 - Email verification at institute registration (2026-10-08): the institute's login is `owner.email` with `owner.password`, so that is the address verified; `Institute` has no separate email column. `POST institute/register/send-otp/` emails the code to it, and `POST institute/register/` takes the code as `otp`. The send endpoint refuses an address a user already has. Assumed defaults, easy to change in `apps/users/constants.py`: six digits, 5 minutes, 60-second resend, 5 wrong guesses. The send / verify endpoints answer 200 (not 201); too many requests is a 429 from `TooManyRequests`, which the exception handler maps. `POST institute/register/` lost its `AllowAny`, `authentication_classes = []` and `institute_register` throttle in an earlier refactor, so it answered 401; they are back.
 - Institute profile split (2026-10-08, built in the registration refactor): registration now takes a required `registration_number` and contact person (name, phone, email), plus an optional CEO and social links; the contact, CEO and social links live in their own tables with portal endpoints (see 3.5). This answers the old question about the UI's registration number, contact person and mobile. A follow-up repaired what that refactor broke: `PATCH institute/profile/` crashed (`update_profile` had a new signature) and lost the search refresh on rename, the public detail returned location ids instead of objects, `save_ceo` was never called, and tests still used removed columns.
 - Control panel (2026-10-10): every admin endpoint lives in `apps/control_panel` under `admin/`, so admin work has one home and its permissions, serializers and views are read in one place. It has no models and calls the services of `users`, `common`, `institutes` and `training`, which keep the rules. Its `api/v1/` is deliberately flat (one `serializers.py`, `views.py`, `urls.py` and `filters.py`) until it grows. The admin-team CRUD moved from `user/admins/` to `admin/users/admins/`; the old path was dropped without an alias. URLs of the category, institute and training admin endpoints did not change. `users/{id}/status/` (suspend) is still in `users`.
+- Enquiries (2026-10-10), decided from the Institute Portal's Enquiries screen before building `apps/enquiries`: (1) the status set is the UI's seven and any status moves to any other; institute staff and the owner both change them, and an admin only reads (the admin monitor is not built); (2) the UI's `type` is kept (`ENQUIRY` / `INTEREST`): an interest is always accepted for a published training, a plain enquiry is refused when seats are full or registration has closed (`registration_open`: the deadline has not passed, or there is no deadline and the training has not started); (3) the preferred location is dropped, the preferred time (`MORNING`, `DAY`, `EVENING`, `WEEKEND`) is kept; (4) internal notes are a table of their own, and a status change adds no automatic note; (5) no email alert for a new enquiry and no captcha for now; the limits are the `enquiry` throttle scope (10 an hour per IP), 3 a day per phone number and one open enquiry per phone number and training; (6) "My enquiries" uses a client-made UUID4 in `X-Device-Token`, answers with a plain-language status label and never the phone, notes or the institute's internal status (`NOT_INTERESTED` reads as "Closed"); (7) the portal dashboard gets `summary/` now, while the weekly trend, per-training counts and page views wait; (8) all enquiries are kept (no deletion job); (9) the submit fails closed if Redis is down. Built: 3.7. Two touches in `training`: `registration_open_q` is now the one definition of "registration open" (the public filter and enquiries share it), and `delete_training` refuses a draft that has enquiries, since the institute keeps them.

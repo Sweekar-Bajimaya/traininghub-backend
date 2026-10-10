@@ -80,6 +80,16 @@ def refresh_search_vectors(queryset):
         refresh_search_vector(Training(pk=pk))
 
 
+def registration_open_q(today=None):
+    """A training still takes registrations: its deadline has not passed, or it has no deadline
+    and has not started. One definition for the public `registration_open` filter and for
+    enquiries (a plain enquiry is refused once this is false)."""
+    today = today or timezone.localdate()
+    return Q(registration_deadline__gte=today) | Q(
+        registration_deadline__isnull=True, start_date__gte=today
+    )
+
+
 # checks
 def _require_approved_institute(institute):
     if not Institute.objects.filter(
@@ -422,6 +432,11 @@ def delete_training(training):
     if training.status != TrainingStatus.DRAFT:
         raise ValidationError(
             "Only a draft can be deleted. Cancel the training instead."
+        )
+    # a training that was live and went back to a draft may hold enquiries, which the institute keeps
+    if training.enquiries.exists():
+        raise ValidationError(
+            "This training has enquiries, so it cannot be deleted. Cancel it instead."
         )
     training.delete()
 
