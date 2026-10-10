@@ -8,7 +8,6 @@ from apps.common.api.v1.serializers import (
 )
 from apps.common.serializers import DynamicFieldsModelSerializer
 from apps.institutes import services
-from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import (
     Institute,
     InstituteCEO,
@@ -182,49 +181,6 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
 
     def get_gallery(self, obj):
         return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
-
-
-# admin review
-class ReasonSerializer(serializers.Serializer):
-    reason = serializers.CharField()
-
-
-class AdminDocumentSerializer(DynamicFieldsModelSerializer):
-    class Meta:
-        model = InstituteDocument
-        fields = ("id", "name", "status", "created_at")  # never the file path or URL
-        read_only_fields = ("id", "name", "created_at")
-
-
-class DocumentReviewSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(
-        choices=(DocumentStatus.VERIFIED, DocumentStatus.REJECTED)
-    )
-
-
-class AdminInstituteSerializer(DynamicFieldsModelSerializer):
-    documents = AdminDocumentSerializer(many=True, read_only=True)
-    owner_email = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Institute
-        fields = (
-            "id",
-            "slug",
-            "name",
-            "type",
-            "status",
-            "status_reason",
-            "established_year",
-            "description",
-            "created_at",
-            "owner_email",
-            "documents",
-        )
-
-    def get_owner_email(self, obj):
-        owners = getattr(obj, "owner_members", [])  # prefetched by the admin viewset
-        return owners[0].user.email if owners else None
 
 
 class InstituteProfileSerializer(DynamicFieldsModelSerializer):

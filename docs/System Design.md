@@ -35,7 +35,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/common/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
 | Enquiry statuses | `NEW`, `CONTACTED`, `CONVERTED`, `CLOSED`. Kept easy to change later |
 | Location | Managed list of Nepal provinces / districts / **municipalities**. The third level is called Municipality in code and UI and includes rural municipalities. Names are kept exactly as they appear in the data (no normalising of "Province" / "Pradesh") |
-| API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`, `categories/`, `trainings/`, `institutes/` public, `institute/trainings/` and `institute/` portal, `admin/` console, included once per app); an app's URL module is relative to its prefix |
+| API URL prefixes | Every prefix is declared in `apps/api/v1/urls.py`, one include per resource group (`user/`, `locations/`, `categories/`, `trainings/`, `institutes/` public, `institute/trainings/` and `institute/` portal, `admin/` console); an app's URL module is relative to its prefix. `admin/` is a single include of `apps/control_panel` |
 | Institute re-application | A rejected institute can re-apply for verification (`REJECTED` → `PENDING`) |
 | Institute visibility | Only `APPROVED` institutes, and their approved trainings, appear on the public site. Pending, info-requested, rejected and suspended institutes are not visible |
 | Institute type | A fixed list, required at registration: Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School, Company, NGO/INGO, Government |
@@ -67,8 +67,9 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 
 | App | Responsibility | State |
 | :---- | :---- | :---- |
-| `common` | BaseModel, SlugModel, shared serializers / viewsets / validators; reference data: Location (managed Nepal list) and Category (two-level tree), with their loaders and public / admin APIs | built |
-| `users` | User, roles, permissions, auth endpoints, admin team | in progress |
+| `common` | BaseModel, SlugModel, shared serializers / viewsets / validators; reference data: Location (managed Nepal list) and Category (two-level tree), with their loaders and public APIs | built |
+| `users` | User, roles, permissions, auth endpoints, the services behind the admin team (its API is in `control_panel`) | in progress |
+| `control_panel` | The admin API, one place for every admin task, served under `admin/`: admin team, category admin, institute and training review. No models; it calls the other apps' services. Flat `api/v1/` (one `serializers.py`, `views.py`, `urls.py`, `filters.py`) until it grows | built |
 | `institutes` | Institute, locations, staff membership and invitations, verification documents, contact person / CEO / social links, gallery, status workflow | built (on defaults, see section 8) |
 | `training` | Training, weekly sessions, curriculum modules, learning outcomes, search, review workflow, expiry | built (on defaults, see section 1) |
 | `enquiries` | Enquiry, status workflow, device tracking | planned |
@@ -131,10 +132,10 @@ All models extend `BaseModel`. Public listings return only `APPROVED` trainings 
 | `POST auth/otp/verify/` | public | Checks `{email, otp}` without using the code up. `400` for a wrong or expired code, `429` after 5 wrong guesses. Nothing consumes a verified password-reset code yet |
 | `GET/PATCH me/` | authenticated | Own profile. `email` and `role` are read-only |
 | `PUT me/password/` | authenticated | Old password required; Django password validators applied |
-| `admins/` (CRUD) | `manage_admins` | Create / edit admins, set the initial password and the permissions granted. Role forced to `ADMIN` |
+| `admin/users/admins/` (CRUD) | `manage_admins` | Create / edit admins, set the initial password and the permissions granted. Role forced to `ADMIN`. Implemented in `apps/control_panel` |
 | `PATCH users/{id}/status/` | `manage_account_status` | Suspend / activate. Not yourself, never the Super Admin; only the Super Admin may change an admin's status. Suspending revokes the user's refresh tokens |
 
-Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH admins/{id}/` edits name, phone, gender, picture and the granted permissions, but not `email` or `password`. Changing your own password revokes your refresh tokens, and the new password must differ from the old one. Throttling uses the `login`, `token_refresh` and `otp` scopes.
+Implemented in `apps/users`, except the admins CRUD (`apps/control_panel`). `admins/` has no DELETE (suspend instead); `PATCH admin/users/admins/{id}/` edits name, phone, gender, picture and the granted permissions, but not `email` or `password`. Changing your own password revokes your refresh tokens, and the new password must differ from the old one. Throttling uses the `login`, `token_refresh` and `otp` scopes.
 
 ### 3.3 Institute locations
 
@@ -173,7 +174,7 @@ Implemented in `apps/users`. `admins/` has no DELETE (suspend instead); `PATCH a
 | `admin/institutes/` and `.../{id}/{approve,reject,request-info,suspend,reinstate}/` | `users.manage_institutes` | Reject, request-info and suspend need a reason; approve needs one active location and one document |
 | `admin/institutes/{id}/documents/{doc}/` (PATCH) and `.../download/` | `users.manage_institutes` | Document review: `VERIFIED` or `REJECTED` |
 
-Rows of another institute return 404. Verification documents live under `PRIVATE_MEDIA_ROOT`, outside `MEDIA_ROOT`, and never get a URL. Invitation tokens are stored as a sha256 hash only. Renaming an institute queues a refresh of its trainings' search vectors.
+The `admin/institutes/` endpoints are implemented in `apps/control_panel`. Rows of another institute return 404. Verification documents live under `PRIVATE_MEDIA_ROOT`, outside `MEDIA_ROOT`, and never get a URL. Invitation tokens are stored as a sha256 hash only. Renaming an institute queues a refresh of its trainings' search vectors.
 
 ### 3.6 Categories and trainings API (built)
 
@@ -184,6 +185,8 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 | `GET trainings/`, `trainings/{slug}/` | public | `APPROVED` trainings of `APPROVED` institutes. Filters `category` (includes its sub-categories), `sub_category`, `mode`, `level`, `province`, `district`, `municipality`, `fee_min` / `fee_max`, `start_from` / `start_to`, `duration` (`short`, `mid`, `long`), `duration_weeks_min` / `_max`, `institute` (slug), `registration_open`, `search`; `ordering` on `published_at`, `start_date`, `fee_npr`. Constant number of queries |
 | `institute/trainings/` (list, create, retrieve, patch, delete) | institute staff | Nested `sessions`, `modules`, `outcomes` in one JSON body (a list replaces the whole list; leave it out to keep it). Filter `status`. Actions `submit/`, `withdraw/`, `unpublish/`, `republish/`, `cancel/`, `cover/` (multipart, jpg or png, 5 MB, only while editable) |
 | `admin/trainings/` (list, retrieve) and `.../{id}/{approve,request-changes,reject}/` | `users.manage_trainings` | Review queue with `?status=SUBMITTED`; filters `status`, `mode`, `institute`, search title and institute name. Request-changes and reject need a reason; only a `SUBMITTED` training can be reviewed |
+
+The `admin/categories/` and `admin/trainings/` endpoints are implemented in `apps/control_panel`; the services they call stay in `common` and `training`.
 
 ## 4. Key workflows
 
@@ -241,7 +244,7 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 9. **Reports**: which provider "Reports" / "Sessions" dashboard items belong to the MVP ("Participants" is phase 2)?
 10. **PRD wording**: the Problem Statement and some user stories describe the later phase, and the "Training Instructors" list repeats the Learner list. Treat as phase 2 / ignore?
 11. **Privacy**: retention, consent and export rules for enquirer name / phone.
-12. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
+12. **Admin password reset**: the Super Admin sets an admin's initial password, but nothing resets it later (`PATCH admin/users/admins/{id}/` rejects `password`). Add an endpoint, or the "set your own password" email with `notifications`?
 13. **Admin site access**: rename `/admin/`, restrict it at the proxy, or add 2FA before production?
 14. **Locations at runtime**: may admins with `manage_categories` edit locations through an API, or does only `load_locations` write them? Until then the admin site is read-only and the loader is the only writer.
 15. **Editing an approved institute**: today an institute's staff can change the profile of an `APPROVED` institute without re-review (an edited training does go back to review). Should some fields (name, type) need re-approval?
@@ -268,3 +271,4 @@ Rows of another institute return 404. Verification documents live under `PRIVATE
 - Locations are required at registration (2026-10-07): `POST institute/register/` answers 400 when `locations` is missing or empty, so every new institute starts with at least one location. This replaces the 2026-10-02 default of optional locations at registration; approval still needs at least one active location and one document. The serializer enforces it; `services.register` itself accepts none.
 - Email verification at institute registration (2026-10-08): the institute's login is `owner.email` with `owner.password`, so that is the address verified; `Institute` has no separate email column. `POST institute/register/send-otp/` emails the code to it, and `POST institute/register/` takes the code as `otp`. The send endpoint refuses an address a user already has. Assumed defaults, easy to change in `apps/users/constants.py`: six digits, 5 minutes, 60-second resend, 5 wrong guesses. The send / verify endpoints answer 200 (not 201); too many requests is a 429 from `TooManyRequests`, which the exception handler maps. `POST institute/register/` lost its `AllowAny`, `authentication_classes = []` and `institute_register` throttle in an earlier refactor, so it answered 401; they are back.
 - Institute profile split (2026-10-08, built in the registration refactor): registration now takes a required `registration_number` and contact person (name, phone, email), plus an optional CEO and social links; the contact, CEO and social links live in their own tables with portal endpoints (see 3.5). This answers the old question about the UI's registration number, contact person and mobile. A follow-up repaired what that refactor broke: `PATCH institute/profile/` crashed (`update_profile` had a new signature) and lost the search refresh on rename, the public detail returned location ids instead of objects, `save_ceo` was never called, and tests still used removed columns.
+- Control panel (2026-10-10): every admin endpoint lives in `apps/control_panel` under `admin/`, so admin work has one home and its permissions, serializers and views are read in one place. It has no models and calls the services of `users`, `common`, `institutes` and `training`, which keep the rules. Its `api/v1/` is deliberately flat (one `serializers.py`, `views.py`, `urls.py` and `filters.py`) until it grows. The admin-team CRUD moved from `user/admins/` to `admin/users/admins/`; the old path was dropped without an alias. URLs of the category, institute and training admin endpoints did not change. `users/{id}/status/` (suspend) is still in `users`.

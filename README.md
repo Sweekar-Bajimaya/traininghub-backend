@@ -82,9 +82,10 @@ apps/
   api/v1/     mounts each app's URLs under /api/v1/
   common/     base models, base viewsets, shared serializers and validators; Nepal locations (province / district /
               municipality) and training categories, with their loaders and APIs
-  users/      User model, roles and permissions, JWT auth, admin management
-  training/   trainings, weekly class slots, curriculum, search; public, portal and admin review APIs
-  institutes/ institutes, staff and invitations, documents, locations, gallery; public, portal and admin APIs
+  users/      User model, roles and permissions, JWT auth
+  training/   trainings, weekly class slots, curriculum, search; public and portal APIs
+  institutes/ institutes, staff and invitations, documents, locations, gallery; public and portal APIs
+  control_panel/ the admin API (`/api/v1/admin/`): admin team, categories, institute and training review
 docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
@@ -97,10 +98,9 @@ Planned apps: `enquiries`, `notifications`, `analytics`.
 | --------------------------------------------------- | ------------------------------------------------------- |
 | `POST auth/login/`, `auth/refresh/`, `auth/logout/` | public (login and refresh are throttled)                |
 | `GET, PATCH me/` and `PUT me/password/`             | any logged-in user                                      |
-| `admins/` (list, create, retrieve, update)          | Super Admin only                                        |
 | `PATCH users/{id}/status/`                          | `manage_account_status` permission (suspend / activate) |
 
-There is no public user registration. Admins are created by the Super Admin; institute owners are created by
+There is no public user registration. Admins are created by the Super Admin (`/api/v1/admin/users/admins/`, in the control panel); institute owners are created by
 institute registration (below). Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF`.
 
 ## Locations API (`/api/v1/locations/`)

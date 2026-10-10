@@ -94,8 +94,8 @@ config/
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
-                          `institute/trainings/`, `institute/`, `admin/` (one include per resource group;
-                          `admin/` is included once per app)
+                          `institute/trainings/`, `institute/`, `admin/` (one include per resource group; `admin/`
+                          is one include, of `control_panel`)
   common/                 the one shared app (installed, label `common`): base classes and reference data.
                           `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
                           `category.py`; `BaseViewSet` + mixin viewsets, `ActionAPIView` (POST that answers 200),
@@ -105,16 +105,17 @@ apps/
                           `province` / `district`), management command `load_locations` (data in
                           `common/data/`: provinces.json, districts.json, cities.json), public read-only API
                           under `locations/` (list with filters, detail, cached `tree/`); `Category` (two-level
-                          tree, `services.py`), public cached tree under `categories/`, admin API under
-                          `admin/categories/` (`users.manage_categories`, no DELETE); starter categories in
+                          tree, `services.py`), public cached tree under `categories/` (its admin API is in
+                          `control_panel`); starter categories in
                           `common/data/categories.json`, loaded by `load_categories`; `signals.py` clears the
                           tree caches
   users/                  custom User (email login), roles/permissions, JWT auth, `services.py` (admin
                           create/update, suspend, password change, one-time codes: `send_otp`, `verify_otp`,
                           `consume_otp`, plus `send_password_reset_otp` and the institute-registration pair
                           `send_registration_otp` / `verify_registration_otp`; cache only), `tasks.py` (OTP
-                          emails), API under `user/` (auth/, me/, admins/, users/{id}/status/,
-                          auth/otp/{send,verify}/ for password reset), management command `generate_rsa_keys`;
+                          emails), API under `user/` (auth/, me/, users/{id}/status/,
+                          auth/otp/{send,verify}/ for password reset; the admin-team API is in `control_panel`),
+                          management command `generate_rsa_keys`;
                           also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use
   training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills) and `TrainingContact`
                           (one row each, created with the training; the API still shows them as flat fields),
@@ -124,13 +125,22 @@ apps/
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
                           APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
-                          cover), admin `admin/trainings/` (approve, request-changes, reject)
+                          cover, summary); the admin review API is in `control_panel`
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
                           (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
-                          social-links, locations, documents, gallery, staff, invitations, resubmit), admin `admin/institutes/` (review actions,
-                          document review and download)
+                          social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
+                          `control_panel`
+  control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
+                          `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they
+                          grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),
+                          `categories/` (`users.manage_categories`, no DELETE), `institutes/` (review actions, document
+                          review and download; `users.manage_institutes`), `trainings/` (approve, request-changes,
+                          reject; `users.manage_trainings`); `GET admin/` lists the four. It only calls the services
+                          of the other apps, which keep the rules. `users/{id}/status/` (suspend) is still in `users`.
+                          Nothing imports `control_panel` except `apps/api/v1/urls.py`; new admin endpoints go here,
+                          not in the resource's own app
   templates/email/        HTML email templates (`base_email`, `otp_email`, `registration_otp_email`);
                           `TEMPLATES["DIRS"]` points at `apps/templates`
 docs/  design/            see "Source of truth"
@@ -139,7 +149,7 @@ docs/  design/            see "Source of truth"
 Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
 `learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
 code (send and verify exist; nothing sets the new password yet).
-Each app follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
+Each app (except `control_panel`, which has no models) follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
 (`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
 `apps/training/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
 module per model group, its `__init__.py` imports them all so every model registers, and callers import by module path,
@@ -161,7 +171,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
 ## Conventions
@@ -181,15 +191,17 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   (including active-municipality selection and `LocationInputSerializer`); `users` owns identity, registration and
   OTP serializers; `institutes` owns institute-model and institute-workflow serializers. Import a serializer directly
   from its owning app—never route a `users` import through `institutes`. The dependency direction for serializers is
-  `institutes` → `users` + `common`, `users` → `common`, and `common` → no domain app.
+  `institutes` → `users` + `common`, `users` → `common`, and `common` → no domain app. The admin serializers are the
+  exception: `control_panel` owns them (admin management, category admin, institute and training review) and may import
+  from every app.
 - Views are DRF generics (`RetrieveUpdateAPIView`, `UpdateAPIView`, `ActionAPIView` for a POST that does something and
   answers 200, the `apps.common.viewsets` mixins) with only attributes set; no hand-written `post()` / `patch()`. Business rules and state changes live in each app's
   `services.py` (`transaction.atomic()`, `select_for_update()` before check-then-write), called from serializer
   `create()` / `update()`. Admin lists use `prefetch_related` and a deterministic `order_by(..., "-pk")`.
 - URL prefixes live only in `apps/api/v1/urls.py`; an app's URL module is relative to its prefix. Routers
   are `DefaultRouter`, which also adds an API-root page and `.json` suffix routes (signed-in only). With an empty prefix
-  the root view sits behind the list route and is never reached; `admin/` is included once per app, so `GET admin/`
-  lists only the first include's endpoints (institutes).
+  the root view sits behind the list route and is never reached. `admin/` is a single include (`control_panel`), so
+  `GET admin/` lists every admin group.
 - Filter on a foreign key with `NumberFilter(field_name="<fk>_id")`, not django-filter's default
   `ModelChoiceFilter`, which runs an extra query per request to check that the row exists.
 - Institute-scoped views mix in `InstituteScopedMixin` and use `IsInstituteMember` / `IsInstituteOwner`

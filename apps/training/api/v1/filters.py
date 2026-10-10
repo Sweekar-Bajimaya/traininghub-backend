@@ -83,11 +83,3 @@ class TrainingFilter(django_filters.FilterSet):
             .annotate(rank=SearchRank(F("search_vector"), search_query))
             .order_by("-rank", "-published_at", "-pk")
         )
-
-
-class AdminTrainingFilter(django_filters.FilterSet):
-    institute = django_filters.NumberFilter(field_name="institute_id")
-
-    class Meta:
-        model = Training
-        fields = ("status", "mode", "institute")

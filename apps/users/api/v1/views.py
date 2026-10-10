@@ -8,9 +8,8 @@ from rest_framework_simplejwt.views import (
 )
 
 from apps.common.throttling import IdentityScopedRateThrottle
-from apps.common.viewsets import ActionAPIView, CreateListRetrieveUpdateViewSet
+from apps.common.viewsets import ActionAPIView
 from apps.users.api.v1.serializers import (
-    AdminSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
     ProfileSerializer,
@@ -18,7 +17,6 @@ from apps.users.api.v1.serializers import (
     UpdateStatusSerializer,
     VerifyOTPSerializer,
 )
-from apps.users.constants import Role
 from apps.users.permissions import HasPlatformPermission
 
 User = get_user_model()
@@ -55,20 +53,6 @@ class PasswordChangeView(UpdateAPIView):
 
     def get_object(self):
         return self.request.user
-
-
-class AdminViewSet(CreateListRetrieveUpdateViewSet):
-    """Super Admin only. No DELETE: suspend through users/{id}/status/."""
-
-    serializer_class = AdminSerializer
-    permission_classes = [HasPlatformPermission]
-    required_permission = "users.manage_admins"
-    queryset = (
-        User.objects.filter(role=Role.ADMIN)
-        .prefetch_related("user_permissions")
-        .order_by("-created_at", "-pk")
-    )
-    http_method_names = ["get", "post", "patch", "head", "options"]
 
 
 class UserStatusView(UpdateAPIView):

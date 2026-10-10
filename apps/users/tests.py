@@ -143,7 +143,7 @@ class AuthApiTests(UsersApiTestCase):
 
 
 class AdminApiTests(UsersApiTestCase):
-    url = "/api/v1/user/admins/"
+    url = "/api/v1/admin/users/admins/"
 
     def test_super_admin_creates_admin_with_forced_role(self):
         self.client.force_authenticate(self.super_admin)
