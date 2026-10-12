@@ -55,6 +55,7 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
             "short_description",
             "mode",
             "level",
+            "shifts",
             "duration",
             "fee_npr",
             "start_date",
@@ -236,7 +237,15 @@ class TrainingContentFields(serializers.Serializer):
 class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
     """A nested list replaces the whole list; leave it out to keep it."""
 
-    category = serializers.PrimaryKeyRelatedField(queryset=available_categories())
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=available_categories().filter(parent__isnull=True)
+    )
+    sub_category = serializers.PrimaryKeyRelatedField(
+        queryset=available_categories().filter(parent__isnull=False),
+        required=False,
+        allow_null=True,
+    )
+
     institute_location = OwnLocationField(required=False, allow_null=True)
     sessions = TrainingSessionSerializer(many=True, required=False)
     modules = TrainingModuleSerializer(many=True, required=False)
@@ -249,6 +258,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "slug",
             "title",
             "category",
+            "sub_category",
             "short_description",
             "overview",
             "mode",
@@ -260,6 +270,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "seats",
             "start_date",
             "end_date",
+            "shifts",
             "registration_deadline",
             "institute_location",
             "eligibility",
@@ -287,6 +298,35 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "published_at",
             "created_at",
         )
+
+    def validate(self, attrs):
+        """The stored category is the leaf: the sub-category if one is given, else the category.
+        Sending `category` alone therefore clears the sub-category."""
+        attrs = super().validate(attrs)
+        if "sub_category" in attrs:
+            sub_category = attrs.pop("sub_category")
+            category = attrs.get("category") or self._current_top_category()
+            if sub_category and sub_category.parent_id != category.pk:
+                raise serializers.ValidationError(
+                    {"sub_category": "Choose a sub-category of the selected category."}
+                )
+            attrs["category"] = sub_category or category
+        return attrs
+
+    def _current_top_category(self):
+        leaf = (
+            self.instance.category
+        )  # PATCH only: the viewset selects category__parent
+        return leaf.parent if leaf.parent_id else leaf
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        leaf = instance.category  # split the stored leaf back into the two inputs
+        if "category" in data:
+            data["category"] = leaf.parent_id or leaf.pk
+        if "sub_category" in data:
+            data["sub_category"] = leaf.pk if leaf.parent_id else None
+        return data
 
     @staticmethod
     def _children(data):

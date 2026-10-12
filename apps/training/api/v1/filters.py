@@ -5,7 +5,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.training.constants import SEARCH_CONFIG
+from apps.training.constants import SEARCH_CONFIG, TrainingShift
 from apps.training.models import Training
 
 # the hub's own buckets: under 1 month, 1 to 3 months, 3 months or more
@@ -34,7 +34,9 @@ class TrainingFilter(django_filters.FilterSet):
     district = django_filters.NumberFilter(
         field_name="institute_location__location__district_id"
     )
-    municipality = django_filters.NumberFilter(field_name="institute_location__location_id")
+    municipality = django_filters.NumberFilter(
+        field_name="institute_location__location_id"
+    )
     fee_min = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="gte")
     fee_max = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="lte")
     start_from = django_filters.DateFilter(field_name="start_date", lookup_expr="gte")
@@ -51,6 +53,9 @@ class TrainingFilter(django_filters.FilterSet):
     institute = django_filters.CharFilter(field_name="institute__slug")
     registration_open = django_filters.BooleanFilter(method="filter_registration_open")
     search = django_filters.CharFilter(method="filter_search")
+    shifts = django_filters.MultipleChoiceFilter(
+        choices=TrainingShift.CHOICES, method="filter_shift"
+    )
 
     class Meta:
         model = Training
@@ -83,3 +88,7 @@ class TrainingFilter(django_filters.FilterSet):
             .annotate(rank=SearchRank(F("search_vector"), search_query))
             .order_by("-rank", "-published_at", "-pk")
         )
+
+    def filter_shift(self, queryset, name, value):
+        """?shift=MORNING&shift=EVENING: trainings offering any of them."""
+        return queryset.filter(shifts__overlap=value)

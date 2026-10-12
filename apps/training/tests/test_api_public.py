@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import InstituteContact
 from apps.training import services
-from apps.training.constants import TrainingStatus
+from apps.training.constants import TrainingShift, TrainingStatus
 from apps.training.models import Training, TrainingSession
 from apps.training.tests.helpers import (
     approved_institute,
@@ -18,6 +18,7 @@ from apps.training.tests.helpers import (
 
 URL = "/api/v1/trainings/"
 S = TrainingStatus
+MORNING, DAY, EVENING = TrainingShift.MORNING, TrainingShift.DAY, TrainingShift.EVENING
 
 
 def titles(res):
@@ -62,13 +63,13 @@ class FilterTests(PublicTrainingTestCase):
         self.python = make_category("Python", parent="Technology")
         self.online = make_training(
             self.institute, title="Online", category=self.python, fee_npr=Decimal("5000"),
-            level="ADVANCED",
+            level="ADVANCED", shifts=[MORNING, EVENING],
         )
         self.physical = make_training(
             self.institute, title="Physical", category=self.coffee, location=self.location,
             fee_npr=Decimal("20000"), duration_value=3, duration_unit="MONTHS", duration_weeks=13,
             start_date=self.today + timedelta(days=60), end_date=self.today + timedelta(days=150),
-            registration_deadline=None,
+            registration_deadline=None, shifts=[DAY],
         )
         self.short = make_training(
             self.institute, title="Short", category=self.coffee.parent, fee_npr=Decimal("1000"),
@@ -83,6 +84,11 @@ class FilterTests(PublicTrainingTestCase):
             ({"sub_category": self.coffee.pk}, ["Physical"]),
             ({"mode": "ONLINE"}, ["Online", "Short"]),
             ({"level": "ADVANCED"}, ["Online"]),
+            ({"shifts": MORNING}, ["Online", "Short"]),
+            ({"shifts": DAY}, ["Physical"]),
+            ({"shifts": EVENING}, ["Online"]),
+            ({"shifts": [DAY, EVENING]}, ["Online", "Physical"]),  # any of them
+            ({"shifts": [MORNING, EVENING]}, ["Online", "Short"]),  # no duplicate rows
             ({"province": place.province_id}, ["Physical"]),
             ({"district": place.district_id}, ["Physical"]),
             ({"municipality": place.pk}, ["Physical"]),
@@ -100,6 +106,9 @@ class FilterTests(PublicTrainingTestCase):
         for params, expected in cases:
             with self.subTest(params=params):
                 self.assertEqual(sorted(titles(self.get(**params))), expected)
+
+    def test_an_unknown_shift_is_400(self):
+        self.assertEqual(self.client.get(URL, {"shifts": "Night"}).status_code, 400)
 
     def test_bucket_edges(self):
         for weeks, bucket in ((3, "short"), (4, "mid"), (12, "mid"), (13, "long")):
@@ -162,6 +171,13 @@ class SearchTests(PublicTrainingTestCase):
     def test_an_explicit_ordering_replaces_the_rank(self):
         Training.objects.filter(pk=self.coffee.pk).update(fee_npr=1)
         self.assertEqual(self.search("python", ordering="fee_npr"), ["Barista Course", "Python Bootcamp"])
+
+
+class ShiftsAreShownTests(PublicTrainingTestCase):
+    def test_list_and_detail_show_the_shifts(self):
+        training = make_training(self.institute, shifts=[MORNING, EVENING])
+        self.assertEqual(self.get().data["results"][0]["shifts"], [MORNING, EVENING])
+        self.assertEqual(self.client.get(f"{URL}{training.slug}/").data["shifts"], [MORNING, EVENING])
 
 
 class DetailTests(PublicTrainingTestCase):

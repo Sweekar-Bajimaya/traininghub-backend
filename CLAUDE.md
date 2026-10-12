@@ -59,7 +59,10 @@ or an open question gets answered. Rules:
   configuration, word-prefix match).
 - Trainings (`apps/training/constants.py`): levels `BEGINNER` / `INTERMEDIATE` / `ADVANCED`; duration is a value plus a
   unit (days, weeks, months) and the service derives `duration_weeks`; the schedule is a start / end date plus weekly
-  class slots (`TrainingSession.class_days` and times). A training uses a category or a sub-category (two levels).
+  class slots (`TrainingSession.class_days` and times). A training uses a category or a sub-category (two levels): the
+  portal API takes `category` (top-level) and an optional `sub_category` and answers with both, while the database keeps
+  one `Training.category` column that holds the leaf. `shifts` is a list of `TrainingShift` values (Morning, Day, Evening):
+  an independent label, not checked against the sessions, empty in a draft and required to submit.
   Statuses `DRAFT` → `SUBMITTED` → `APPROVED` / `CHANGES_REQUESTED` / `REJECTED`; then `UNPUBLISHED`, `CANCELLED`, and
   `EXPIRED` (set by a daily job after `end_date`). Editing an `APPROVED` / `UNPUBLISHED` training sends it back to
   `SUBMITTED`; only a `DRAFT` can be deleted; only an `APPROVED` institute creates, submits or republishes. Empty

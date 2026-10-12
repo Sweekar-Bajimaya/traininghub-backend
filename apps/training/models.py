@@ -14,6 +14,7 @@ from apps.training.constants import (
     DurationUnit,
     TrainingLevel,
     TrainingMode,
+    TrainingShift,
     TrainingStatus,
     WeekDay,
 )
@@ -45,6 +46,12 @@ class Training(BaseModel, SlugModel):
     )
     mode = models.CharField(max_length=10, choices=TrainingMode.CHOICES)
     level = models.CharField(max_length=15, choices=TrainingLevel.CHOICES, blank=True)
+    shifts = ArrayField(
+        models.CharField(max_length=10, choices=TrainingShift.CHOICES),
+        size=3,
+        blank=True,
+        default=list,
+    )
     duration_value = models.PositiveSmallIntegerField(null=True, blank=True)
     duration_unit = models.CharField(
         max_length=10, choices=DurationUnit.CHOICES, blank=True

@@ -10,6 +10,7 @@ from apps.training.constants import (
     SEARCH_CONFIG,
     DurationUnit,
     TrainingMode,
+    TrainingShift,
     TrainingStatus,
 )
 from apps.training.models import (
@@ -39,7 +40,9 @@ def _build_search_vector(training):
     place_names = (
         f"{place.location.name} {place.location.district.name}" if place else ""
     )
-    detail = getattr(training, "detail", None)  # a row made without the services has none
+    detail = getattr(
+        training, "detail", None
+    )  # a row made without the services has none
     skills = " ".join(detail.skills) if detail else ""
     overview = detail.overview if detail else ""
     return (
@@ -131,6 +134,11 @@ def _check_sessions(sessions):
             raise ValidationError({"sessions": "A session must end after it starts."})
 
 
+def _clean_shifts(shifts):
+    """Each shift once, in Morning, Day, Evening order."""
+    return sorted(set(shifts), key=TrainingShift.ORDER.index)
+
+
 def _replace_children(training, sessions, modules, outcomes):
     """None leaves a list alone; a list (even an empty one) replaces it."""
     if sessions is not None:
@@ -170,6 +178,7 @@ def _ready_for_submission(training):
     required = {
         "short_description": training.short_description,
         "level": training.level,
+        "shifts": training.shifts,
         "duration_value": training.duration_value,
         "duration_unit": training.duration_unit,
         "fee_npr": training.fee_npr,
@@ -177,7 +186,7 @@ def _ready_for_submission(training):
         "end_date": training.end_date,
     }
     for name, value in required.items():
-        if value in (None, ""):
+        if value in (None, "", []):
             errors[name] = "This is required before submitting."
     if training.mode != TrainingMode.ONLINE:
         if training.institute_location_id is None:
@@ -383,6 +392,9 @@ def update_training(
         fields.get("end_date", training.end_date),
         fields.get("registration_deadline", training.registration_deadline),
     )
+    if "shifts" in fields:
+        fields["shifts"] = _clean_shifts(fields["shifts"])
+
     if sessions is not None:
         _check_sessions(sessions)
     if "duration_value" in fields or "duration_unit" in fields:

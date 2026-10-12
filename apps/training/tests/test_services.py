@@ -15,7 +15,7 @@ from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.training import services, tasks
 from apps.training.api.v1.filters import prefix_query
-from apps.training.constants import SEARCH_CONFIG, TrainingStatus
+from apps.training.constants import SEARCH_CONFIG, TrainingShift, TrainingStatus
 from apps.training.models import Training
 from apps.training.tests.helpers import (
     add_location,
@@ -47,6 +47,7 @@ class TrainingTestCase(TestCase):
             short_description="Coffee basics",
             mode="ONLINE",
             level="BEGINNER",
+            shifts=[TrainingShift.MORNING],
             duration_value=6,
             duration_unit="WEEKS",
             fee_npr=Decimal("18500"),
@@ -151,6 +152,17 @@ class CreateTests(TrainingTestCase):
         training = self.create(category=self.category.parent)
         self.assertEqual(training.category, self.category.parent)
 
+    def test_shifts_are_stored_once_each_in_day_order(self):
+        training = self.create(
+            shifts=[TrainingShift.EVENING, TrainingShift.MORNING, TrainingShift.EVENING]
+        )
+        training.refresh_from_db()
+        self.assertEqual(training.shifts, [TrainingShift.MORNING, TrainingShift.EVENING])
+
+    def test_a_draft_may_have_no_shifts(self):
+        training = self.create(shifts=[])
+        self.assertEqual((training.status, training.shifts), (S.DRAFT, []))
+
     def test_refused(self):
         other_institute, _, other_location = approved_institute(
             name="Beta", email="beta@example.com", code=2
@@ -219,6 +231,22 @@ class EditTests(TrainingTestCase):
         training.refresh_from_db()
         self.assertEqual((training.status, training.title), (S.APPROVED, "Python Bootcamp"))
 
+    def test_shifts_are_cleaned_on_edit(self):
+        training = make_training(self.institute, status=S.DRAFT)
+        training = services.update_training(
+            training, shifts=[TrainingShift.EVENING, TrainingShift.DAY, TrainingShift.EVENING]
+        )
+        training.refresh_from_db()
+        self.assertEqual(training.shifts, [TrainingShift.DAY, TrainingShift.EVENING])
+
+    def test_clearing_the_shifts_of_a_published_training_is_refused_and_rolled_back(self):
+        training = make_training(self.institute, status=S.APPROVED)
+        with self.assertRaises(ValidationError) as caught:
+            services.update_training(training, shifts=[])
+        self.assertEqual(set(caught.exception.message_dict), {"shifts"})
+        training.refresh_from_db()
+        self.assertEqual((training.status, training.shifts), (S.APPROVED, [TrainingShift.MORNING]))
+
     def test_some_statuses_cannot_be_edited(self):
         for status in (S.SUBMITTED, S.CANCELLED, S.EXPIRED):
             with self.subTest(status=status):
@@ -263,7 +291,7 @@ class SubmitTests(TrainingTestCase):
             services.submit(training, by=self.owner)
         self.assertEqual(
             set(caught.exception.message_dict),
-            {"short_description", "level", "duration_value", "duration_unit", "fee_npr",
+            {"short_description", "level", "shifts", "duration_value", "duration_unit", "fee_npr",
              "start_date", "end_date", "institute_location", "sessions"},
         )
 
@@ -273,6 +301,14 @@ class SubmitTests(TrainingTestCase):
         )
         with self.assertRaises(ValidationError):
             services.submit(training, by=self.owner)
+
+    def test_shifts_are_required_to_submit(self):
+        training = self.create(shifts=[])
+        with self.assertRaises(ValidationError) as caught:
+            services.submit(training, by=self.owner)
+        self.assertEqual(set(caught.exception.message_dict), {"shifts"})
+        training = services.update_training(training, shifts=[TrainingShift.DAY])
+        self.assertEqual(services.submit(training, by=self.owner).status, S.SUBMITTED)
 
     def test_a_free_training_can_be_submitted(self):
         training = services.submit(self.create(fee_npr=Decimal("0")), by=self.owner)

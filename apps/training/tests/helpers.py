@@ -17,7 +17,7 @@ from apps.institutes.tests.helpers import (  # noqa: F401  (re-exported for the 
     reset_throttles,
 )
 from apps.training import services
-from apps.training.constants import TrainingStatus
+from apps.training.constants import TrainingShift, TrainingStatus
 from apps.training.models import (
     Training,
     TrainingContact,
@@ -57,6 +57,7 @@ def make_training(
         short_description="Learn Python from scratch",
         mode="ONLINE",
         level="BEGINNER",
+        shifts=[TrainingShift.MORNING],
         duration_value=8,
         duration_unit="WEEKS",
         duration_weeks=8,
@@ -98,15 +99,18 @@ def make_training(
 
 
 def training_payload(category, **overrides):
-    """A complete portal create body (online, so no location needed)."""
+    """A complete portal create body (online, so no location needed). `category` may be a
+    sub-category, as `make_category` returns: it is sent as `category` plus `sub_category`."""
     today = timezone.localdate()
+    top = category.parent or category
     data = {
         "title": "Barista Course",
-        "category": category.pk,
+        "category": top.pk,
         "short_description": "Coffee basics",
         "overview": "Espresso, milk and latte art",
         "mode": "ONLINE",
         "level": "BEGINNER",
+        "shifts": [TrainingShift.MORNING],
         "duration_value": 6,
         "duration_unit": "WEEKS",
         "fee_npr": "18500.00",
@@ -119,5 +123,7 @@ def training_payload(category, **overrides):
         "modules": [{"title": "Espresso"}, {"title": "Milk", "description": "Steaming"}],
         "outcomes": [{"text": "Pull a shot"}],
     }
+    if category.parent_id:
+        data["sub_category"] = category.pk
     data.update(overrides)
     return data
