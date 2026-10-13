@@ -1,13 +1,16 @@
 from django.db.models import Q
 from rest_framework import serializers
 
+from apps.common.api.v1.serializers import (
+    LocationInputSerializer,
+    active_municipalities,
+)
 from apps.common.models.category import Category
 from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
 from apps.common.validators import validate_phone_number
-from apps.institutes.models import InstituteLocation
 from apps.institutes.validators import validate_image_file
 from apps.training import services
 from apps.training.constants import WeekDay
@@ -94,15 +97,16 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
         }
 
     def get_location(self, obj):
-        place = obj.institute_location
-        if place is None:
-            return None  # online
+        venue = getattr(obj, "venue", None)
+        if venue is None:
+            return None
+        place = venue.location  # empty for an online training: only the address text is left
         return {
-            "municipality": place.location.name,
-            "district": place.location.district.name,
-            "province": place.location.province.name,
-            "address": place.address,
-            "map_url": place.map_url,
+            "municipality": place.name if place else None,
+            "district": place.district.name if place else None,
+            "province": place.province.name if place else None,
+            "address": venue.address,
+            "map_url": venue.map_url,
         }
 
 
@@ -180,16 +184,12 @@ class LearningOutcomeSerializer(serializers.ModelSerializer):
         fields = ("text",)
 
 
-class OwnLocationField(serializers.PrimaryKeyRelatedField):
-    """Only the caller's own active locations are valid; anything else reads as an unknown id."""
+class VenueSerializer(LocationInputSerializer):
+    """Physical: `location` (a municipality) and `address`. Online: `address` only, as plain text."""
 
-    def get_queryset(self):
-        membership = getattr(self.context["request"].user, "membership", None)
-        if membership is None:  # schema generation
-            return InstituteLocation.objects.none()
-        return InstituteLocation.objects.filter(
-            institute_id=membership.institute_id, is_active=True
-        )
+    location = serializers.PrimaryKeyRelatedField(
+        queryset=active_municipalities(), required=False, allow_null=True
+    )
 
 
 def available_categories():
@@ -246,7 +246,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
         allow_null=True,
     )
 
-    institute_location = OwnLocationField(required=False, allow_null=True)
+    venue = VenueSerializer(required=False, allow_null=True)
     sessions = TrainingSessionSerializer(many=True, required=False)
     modules = TrainingModuleSerializer(many=True, required=False)
     outcomes = LearningOutcomeSerializer(many=True, required=False)
@@ -272,7 +272,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "end_date",
             "shifts",
             "registration_deadline",
-            "institute_location",
+            "venue",
             "eligibility",
             "certification",
             "skills",
@@ -332,7 +332,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
     def _children(data):
         return {
             key: data.pop(key, None)
-            for key in ("sessions", "modules", "outcomes", "detail", "contact")
+            for key in ("sessions", "modules", "outcomes", "detail", "contact", "venue")
         }
 
     def create(self, validated_data):
@@ -368,9 +368,8 @@ class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
         )
 
     def get_municipality(self, obj):
-        return (
-            obj.institute_location.location.name if obj.institute_location_id else None
-        )
+        venue = getattr(obj, "venue", None)
+        return venue.location.name if venue and venue.location_id else None
 
 
 class CoverSerializer(DynamicFieldsSerializer):

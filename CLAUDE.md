@@ -1,7 +1,7 @@
 # traininghub-backend
 
 Django + DRF backend for **TrainingHub**, a Merojob training marketplace. Verified institutes publish
-trainings (physical / online / hybrid); admins review them; visitors browse and send enquiries without
+trainings (physical / online); admins review them; visitors browse and send enquiries without
 an account. The frontend is a separate Next.js project.
 
 ## Source of truth
@@ -49,12 +49,16 @@ or an open question gets answered. Rules:
   shows the last 90 days.
 - Learner **Applications** (approve/reject/capacity) are phase 2 - keep the schema open to them.
 - Providers are verified **Institutes** only; an Institute has several staff users (owner + staff; the owner
-  can invite more) and **several locations** - a physical/hybrid training is held at one of its own locations.
+  can invite more) and **several locations** (its offices; a training's venue is separate, see below).
 - Roles: `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF` (`apps/users/constants.py::Role`).
   The Super Admin sets a new admin's initial password. A Super Admin grants
   admins limited rights via Django permissions on `User.Meta.permissions` (`users.manage_*`), checked with
   `has_perm`. `GRANTABLE_PERMISSIONS` excludes `manage_admins`.
-- Training mode: `PHYSICAL`, `ONLINE`, `HYBRID`. Single fee, NPR only. All times are NPT, online included.
+- Training mode: `PHYSICAL`, `ONLINE`. A training has one venue, `TrainingLocation` (`training.venue`, API key `venue`): a
+  physical training takes a municipality (any active one, not tied to the institute's offices) plus an address, an online
+  one takes only an address text (the platform or a link) and no municipality. Create requires a venue; an edit checks it
+  only when `venue` or `mode` is sent (changing the mode needs the new venue); submit needs a complete one. Single fee,
+  NPR only. All times are NPT, online included.
   Locations are a managed Nepal province/district/municipality list. Search is PostgreSQL full-text (`simple`
   configuration, word-prefix match).
 - Trainings (`apps/training/constants.py`): levels `BEGINNER` / `INTERMEDIATE` / `ADVANCED`; duration is a value plus a
@@ -122,7 +126,7 @@ apps/
                           also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use
   training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills) and `TrainingContact`
                           (one row each, created with the training; the API still shows them as flat fields),
-                          `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
+                          `TrainingLocation` (the venue, one row), `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
                           the order they were sent in: ordered by pk, no position column);
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
@@ -173,7 +177,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
-| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move, location change) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
+| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
 | tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 
@@ -261,13 +265,14 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   `duration_weeks`, and writes the `TrainingDetail` / `TrainingContact` rows); a direct `create()` / `update()` leaves
   search stale and makes no detail or contact row (readers treat a missing row as empty). The overview and skills feed
   the vector, so change them through `update_training(detail={...})` too. Renaming an institute, renaming or moving a
-  category and changing a location's municipality refresh the affected trainings through queued tasks, so they need
+  category refresh the affected trainings through queued tasks, so they need
   `qcluster`.
 - **Expiry only happens if `expire_trainings` is scheduled** (daily); otherwise past trainings stay `APPROVED` and
   public.
 - **`select_for_update()` with a nullable `select_related`** fails in Postgres ("FOR UPDATE cannot be applied to the
   nullable side of an outer join"); the training services lock with `of=("self",)`.
-- An `InstituteLocation` cannot be deactivated while a training that is not `CANCELLED` / `EXPIRED` uses it.
+- A training's venue is its own row, not an `InstituteLocation`: deactivating an institute location never touches
+  trainings. "An online training has no municipality" is checked in `training/services._check_venue`, not by the database.
 - **Verification documents are private.** They are stored under `PRIVATE_MEDIA_ROOT` (`private_media/` in the project
   root, gitignored; note `BASE_DIR` is `config/`, so it is `BASE_DIR.parent`), `PrivateStorage` raises on `.url`, and
   they are only served by `private_file_response` after a permission check. `InstituteDocument` is deliberately not

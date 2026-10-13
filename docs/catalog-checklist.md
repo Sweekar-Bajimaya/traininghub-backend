@@ -26,25 +26,25 @@ follows the UI unless the PRD or a decision you already made says otherwise.
 
 ## What the UI check found
 
-| Area | Version 1 | The UI says | Now |
-|---|---|---|---|
-| Levels | Beginner, Intermediate, Advanced, All levels | Filter chips and the portal select have exactly **Beginner, Intermediate, Advanced** | Three levels; `ALL_LEVELS` removed |
-| Duration | number + unit (hours, days, weeks, months) | Free text such as "6 weeks"; the portal parses day, week or month and stores a `weeks` number (month = 4.3 weeks, at least 1); the hub filter is **Under 1 month (under 4 weeks), 1 to 3 months (4 to 12), 3 months or more (13+)** | Units days, weeks, months (no hours); a derived `duration_weeks`; filter `duration=short, mid, long` |
-| Schedule | dated sessions (date, start, end) | **Start date, end date, one daily start and end time, class days (Sun to Sat)**; the detail page shows "Class days" and "Class time" | A session is a weekly slot: `class_days` plus times. No per-date sessions |
-| Statuses | Draft, Submitted, Approved, Changes requested, Rejected, Unpublished, Cancelled, Completed | Draft, **Pending Review**, Approved, Rejected, Changes Requested, **Expired**. The admin settings page has "Auto-expire trainings after end date" and "New and edited trainings stay hidden until approved" | `Expired` set automatically replaces manual `Completed`; editing an approved training sends it back to review by itself (no separate "withdraw") |
-| Description | one `overview` | **Short description** (160 characters, on the cards, required) and **Detailed description** | `short_description` and `overview` |
-| Skills | none | "Skills covered", comma separated, shown as chips, **searchable** | `skills` list, in the search |
-| Category | a training belongs to a sub-category | The portal asks for a **Category** (required) and a free-text Subcategory; the admin manages 13 flat categories with an **icon and a colour hue**; the hub filters by category | Managed two-level tree is kept (PRD, System Design), a training may use a category **or** a sub-category; `icon` and `hue` added; starter data comes from the UI |
-| Contact | none | Contact person, phone, email on every training (person and phone required) | Optional `contact_person`, `contact_phone`, `contact_email` on the training |
-| Map | none | "Google Map location" link next to the address | `map_url` on `InstituteLocation` (institutes app) |
-| Search | title, institute, category, overview, modules | Title, category, subcategory, **skills**, institute name, **location**, short description | The search vector covers all of those, prefix match |
-| Sort | `ordering` published, start, fee | Relevance (title match, then featured, then views), Newest, Upcoming (start date), Price low to high, Price high to low | Same fields; `featured` and `views` are left for later (admin and analytics) |
-| Fee filter | min and max | A maximum-fee slider (5,000 to 60,000) | `fee_max` (and `fee_min`) |
-| Seats | optional, empty means unlimited | "Maximum participants"; the UI uses 20 when empty and always shows "N seats left" | Optional, empty means unlimited, the frontend shows "Open"; **confirm** |
-| Modes | PHYSICAL, ONLINE, HYBRID | Physical, Online, Hybrid | Match |
-| Fee | NPR | "NPR 18,500" | Match |
-| Public visibility | approved training of approved institute | `isPublic` is exactly that | Match |
-| Institute types | your seven types | Labels differ ("Private Training Institute", "Vocational School", "NGO / INGO") | Your list stays; align the frontend labels |
+| Area              | Version 1                                                                                  | The UI says                                                                                                                                                                                                                         | Now                                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Levels            | Beginner, Intermediate, Advanced, All levels                                               | Filter chips and the portal select have exactly **Beginner, Intermediate, Advanced**                                                                                                                                                | Three levels; `ALL_LEVELS` removed                                                                                                                               |
+| Duration          | number + unit (hours, days, weeks, months)                                                 | Free text such as "6 weeks"; the portal parses day, week or month and stores a `weeks` number (month = 4.3 weeks, at least 1); the hub filter is **Under 1 month (under 4 weeks), 1 to 3 months (4 to 12), 3 months or more (13+)** | Units days, weeks, months (no hours); a derived `duration_weeks`; filter `duration=short, mid, long`                                                             |
+| Schedule          | dated sessions (date, start, end)                                                          | **Start date, end date, one daily start and end time, class days (Sun to Sat)**; the detail page shows "Class days" and "Class time"                                                                                                | A session is a weekly slot: `class_days` plus times. No per-date sessions                                                                                        |
+| Statuses          | Draft, Submitted, Approved, Changes requested, Rejected, Unpublished, Cancelled, Completed | Draft, **Pending Review**, Approved, Rejected, Changes Requested, **Expired**. The admin settings page has "Auto-expire trainings after end date" and "New and edited trainings stay hidden until approved"                         | `Expired` set automatically replaces manual `Completed`; editing an approved training sends it back to review by itself (no separate "withdraw")                 |
+| Description       | one `overview`                                                                             | **Short description** (160 characters, on the cards, required) and **Detailed description**                                                                                                                                         | `short_description` and `overview`                                                                                                                               |
+| Skills            | none                                                                                       | "Skills covered", comma separated, shown as chips, **searchable**                                                                                                                                                                   | `skills` list, in the search                                                                                                                                     |
+| Category          | a training belongs to a sub-category                                                       | The portal asks for a **Category** (required) and a free-text Subcategory; the admin manages 13 flat categories with an **icon and a colour hue**; the hub filters by category                                                      | Managed two-level tree is kept (PRD, System Design), a training may use a category **or** a sub-category; `icon` and `hue` added; starter data comes from the UI |
+| Contact           | none                                                                                       | Contact person, phone, email on every training (person and phone required)                                                                                                                                                          | Optional `contact_person`, `contact_phone`, `contact_email` on the training                                                                                      |
+| Map               | none                                                                                       | "Google Map location" link next to the address                                                                                                                                                                                      | `map_url` on `InstituteLocation` (institutes app)                                                                                                                |
+| Search            | title, institute, category, overview, modules                                              | Title, category, subcategory, **skills**, institute name, **location**, short description                                                                                                                                           | The search vector covers all of those, prefix match                                                                                                              |
+| Sort              | `ordering` published, start, fee                                                           | Relevance (title match, then featured, then views), Newest, Upcoming (start date), Price low to high, Price high to low                                                                                                             | Same fields; `featured` and `views` are left for later (admin and analytics)                                                                                     |
+| Fee filter        | min and max                                                                                | A maximum-fee slider (5,000 to 60,000)                                                                                                                                                                                              | `fee_max` (and `fee_min`)                                                                                                                                        |
+| Seats             | optional, empty means unlimited                                                            | "Maximum participants"; the UI uses 20 when empty and always shows "N seats left"                                                                                                                                                   | Optional, empty means unlimited, the frontend shows "Open"; **confirm**                                                                                          |
+| Modes             | PHYSICAL, ONLINE, HYBRID                                                                   | Physical, Online, Hybrid                                                                                                                                                                                                            | Match                                                                                                                                                            |
+| Fee               | NPR                                                                                        | "NPR 18,500"                                                                                                                                                                                                                        | Match                                                                                                                                                            |
+| Public visibility | approved training of approved institute                                                    | `isPublic` is exactly that                                                                                                                                                                                                          | Match                                                                                                                                                            |
+| Institute types   | your seven types                                                                           | Labels differ ("Private Training Institute", "Vocational School", "NGO / INGO")                                                                                                                                                     | Your list stays; align the frontend labels                                                                                                                       |
 
 Not in this list but seen in the UI: the institute registration form has a **registration number** (required), a contact
 person and mobile, and the hub mentions a PAN/VAT document; `Institute` has none of those. Reviews and ratings, FAQs, SMS
@@ -55,24 +55,24 @@ alerts and the "featured" flag are out of scope here.
 Defaults for everything the UI or the PRD did not settle; confirm them (or change a row) before the milestone in the last
 column. Rows that changed after the UI check are marked **changed**.
 
-| # | Decision | Default used | Milestone |
-|---|---|---|---|
-| 1 | Categories (**changed**) | Two levels, managed by admins with `manage_categories`. A training may use a **category or a sub-category**. Starter data is the UI's 13 categories and their sub-categories, with `icon` and `hue` | C1 |
-| 2 | Levels (**decided**) | `BEGINNER`, `INTERMEDIATE`, `ADVANCED` | C2 |
-| 3 | Duration (**changed**) | Number plus unit (days, weeks, months), derived `duration_weeks`, filter `short`, `mid`, `long` | C2, C4 |
-| 4 | Schedule (**changed**) | Training has start and end date; each session is a weekly slot (class days and times); at least one slot is needed to submit | C2, C3 |
-| 5 | Editing (**changed**) | `DRAFT`, `CHANGES_REQUESTED` and `REJECTED` are saved as they are and the institute submits when ready. Editing an `APPROVED` or `UNPUBLISHED` training sends it straight back to review (hidden until approved). `SUBMITTED` cannot be edited, but can be withdrawn to `DRAFT` | C3 |
-| 6 | Expiry (**changed**) | A daily job sets `EXPIRED` on `APPROVED` and `UNPUBLISHED` trainings whose `end_date` has passed; there is no manual "complete". `UNPUBLISHED` and `CANCELLED` stay (PRD) | C3 |
-| 7 | Who can create and submit | Only an `APPROVED` institute can create, submit, republish or edit an approved training | C3 |
-| 8 | Needed to submit (**changed**) | short description, level, duration, fee (0 allowed), start and end date, at least one weekly slot, a location unless online, start date not in the past. Overview, contact, skills and registration deadline are optional | C3 |
-| 9 | Seats | Optional; empty means unlimited. The "available" filter waits for `enquiries` | C2 |
-| 10 | Search (**changed**) | Full-text, `simple` configuration, prefix match over title, institute, category and sub-category, skills, short description, overview, municipality and district, module titles | C3, C4 |
-| 11 | Public visibility | `APPROVED` training of an `APPROVED` institute; an expired, cancelled or unpublished training is not listed | C4 |
-| 12 | Cover image | Own endpoint (multipart), jpg or png, 5 MB | C5 |
-| 13 | Deleting | Only a `DRAFT` | C5 |
-| 14 | Sorting | `ordering=published_at, start_date, fee_npr` (either direction); with `search`, best match first. UI "Newest" is `-published_at`, "Upcoming" is `start_date` | C4 |
-| 15 | Contact | Optional on the training; the public page falls back to the institute's contact phone and email | C2, C4 |
-| 16 | Map link | `map_url` on `InstituteLocation` | C2 |
+| #   | Decision                       | Default used                                                                                                                                                                                                                                                                    | Milestone |
+| --- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | Categories (**changed**)       | Two levels, managed by admins with `manage_categories`. A training may use a **category or a sub-category**. Starter data is the UI's 13 categories and their sub-categories, with `icon` and `hue`                                                                             | C1        |
+| 2   | Levels (**decided**)           | `BEGINNER`, `INTERMEDIATE`, `ADVANCED`                                                                                                                                                                                                                                          | C2        |
+| 3   | Duration (**changed**)         | Number plus unit (days, weeks, months), derived `duration_weeks`, filter `short`, `mid`, `long`                                                                                                                                                                                 | C2, C4    |
+| 4   | Schedule (**changed**)         | Training has start and end date; each session is a weekly slot (class days and times); at least one slot is needed to submit                                                                                                                                                    | C2, C3    |
+| 5   | Editing (**changed**)          | `DRAFT`, `CHANGES_REQUESTED` and `REJECTED` are saved as they are and the institute submits when ready. Editing an `APPROVED` or `UNPUBLISHED` training sends it straight back to review (hidden until approved). `SUBMITTED` cannot be edited, but can be withdrawn to `DRAFT` | C3        |
+| 6   | Expiry (**changed**)           | A daily job sets `EXPIRED` on `APPROVED` and `UNPUBLISHED` trainings whose `end_date` has passed; there is no manual "complete". `UNPUBLISHED` and `CANCELLED` stay (PRD)                                                                                                       | C3        |
+| 7   | Who can create and submit      | Only an `APPROVED` institute can create, submit, republish or edit an approved training                                                                                                                                                                                         | C3        |
+| 8   | Needed to submit (**changed**) | short description, level, duration, fee (0 allowed), start and end date, at least one weekly slot, a location unless online, start date not in the past. Overview, contact, skills and registration deadline are optional                                                       | C3        |
+| 9   | Seats                          | Optional; empty means unlimited. The "available" filter waits for `enquiries`                                                                                                                                                                                                   | C2        |
+| 10  | Search (**changed**)           | Full-text, `simple` configuration, prefix match over title, institute, category and sub-category, skills, short description, overview, municipality and district, module titles                                                                                                 | C3, C4    |
+| 11  | Public visibility              | `APPROVED` training of an `APPROVED` institute; an expired, cancelled or unpublished training is not listed                                                                                                                                                                     | C4        |
+| 12  | Cover image                    | Own endpoint (multipart), jpg or png, 5 MB                                                                                                                                                                                                                                      | C5        |
+| 13  | Deleting                       | Only a `DRAFT`                                                                                                                                                                                                                                                                  | C5        |
+| 14  | Sorting                        | `ordering=published_at, start_date, fee_npr` (either direction); with `search`, best match first. UI "Newest" is `-published_at`, "Upcoming" is `start_date`                                                                                                                    | C4        |
+| 15  | Contact                        | Optional on the training; the public page falls back to the institute's contact phone and email                                                                                                                                                                                 | C2, C4    |
+| 16  | Map link                       | `map_url` on `InstituteLocation`                                                                                                                                                                                                                                                | C2        |
 
 Already decided elsewhere: modes `PHYSICAL`, `ONLINE`, `HYBRID`; a training is held at exactly one location of its own
 institute; one fee in NPR; all times are Nepal time; certification is free text; a training's location must belong to the
@@ -101,7 +101,7 @@ same words. Unpublished and Cancelled have no UI yet.
 - [x] Branch created (`feature/catalog-app`).
 - [x] Confirm the sixteen decisions above (or reply "use the defaults").
 - [x] Fix the category task path. `apps/catalog/services.py::update_category` queues `apps.catalog.tasks.refresh_category_trainings`,
-  which does not exist and, with the split, belongs to the training app. Nothing tests it yet, so the failure would be silent:
+      which does not exist and, with the split, belongs to the training app. Nothing tests it yet, so the failure would be silent:
 
   ```python
   # apps/catalog/services.py, in update_category
@@ -110,21 +110,21 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Small clean-ups from the review: `AdminCategoryFilter.Meta.fields` is a **set** (`{"parent", "is_active"}`), use a tuple
-  (a set has no stable order, the same reason `MunicipalityType.CHOICES` had to be a tuple); rename the cache key to
-  `"catalog:category-tree:v1"` (it is `catalog:catalog-tree:v1`); delete the stub `apps/training/views.py`; add a full stop to
-  the first error message in `_check_parent` (the second has one).
+      (a set has no stable order, the same reason `MunicipalityType.CHOICES` had to be a tuple); rename the cache key to
+      `"catalog:category-tree:v1"` (it is `catalog:catalog-tree:v1`); delete the stub `apps/training/views.py`; add a full stop to
+      the first error message in `_check_parent` (the second has one).
 - [x] `django.contrib.postgres` is now installed. It is harmless (one small query per new database connection), it makes
-  `ArrayField` available (used for `class_days` and `skills`), and it makes `CLAUDE.md` and version 1 wrong where they said it
-  stays out. Docs are updated in C6.
+      `ArrayField` available (used for `class_days` and `skills`), and it makes `CLAUDE.md` and version 1 wrong where they said it
+      stays out. Docs are updated in C6.
 - [x] Move the shared test helpers. `apps/catalog/tests/helpers.py` imports `apps.training.models` and calls
-  `services.refresh_search_vector` from `apps.catalog.services`, which will not have it. Keep `make_category` there; put
-  `approved_institute` and `make_training` in `apps/training/tests/helpers.py` (C2).
+      `services.refresh_search_vector` from `apps.catalog.services`, which will not have it. Keep `make_category` there; put
+      `approved_institute` and `make_training` in `apps/training/tests/helpers.py` (C2).
 
 ## C1 – Categories (mostly done)
 
 - [x] Constants, model, migration `0003` (applied), signals, services, public tree API, admin API and URLs.
 - [x] Add `icon` and `hue` (the hub draws every category tile with a Remix icon and a colour). Edit the model and make a new
-  migration (`0003` is already applied, so this is `0004`):
+      migration (`0003` is already applied, so this is `0004`):
 
   ```python
   # apps/catalog/models.py, in Category
@@ -139,23 +139,88 @@ same words. Unpublished and Cancelled have no UI yet.
   Add `"icon"` and `"hue"` to `AdminCategorySerializer.Meta.fields` and to the `.values(...)` call in `build_category_tree`.
 
 - [x] Starter data. It is the UI's own list, not the PRD examples: 13 categories with their icon and hue, and the
-  sub-categories that the UI's sample trainings use. Create `apps/catalog/data/categories.json`:
+      sub-categories that the UI's sample trainings use. Create `apps/catalog/data/categories.json`:
 
   ```json
   [
-    {"name": "IT & Computer", "icon": "ri-computer-line", "hue": 235, "children": ["Web development", "Office skills", "Data"]},
-    {"name": "Digital Marketing", "icon": "ri-megaphone-line", "hue": 300, "children": ["Social media"]},
-    {"name": "Accounting & Finance", "icon": "ri-calculator-line", "hue": 155, "children": ["Accounting software", "Taxation"]},
-    {"name": "Hospitality", "icon": "ri-cup-line", "hue": 50, "children": ["Coffee & Barista", "Hotel operations", "Culinary"]},
-    {"name": "Beauty & Wellness", "icon": "ri-sparkling-2-line", "hue": 350, "children": ["Makeup"]},
-    {"name": "Language Training", "icon": "ri-translate-2", "hue": 270, "children": ["English tests", "Japanese"]},
-    {"name": "Professional Skills", "icon": "ri-briefcase-4-line", "hue": 205, "children": ["Excel", "Soft skills"]},
-    {"name": "Technical & Vocational", "icon": "ri-tools-line", "hue": 75, "children": ["Equipment maintenance", "Electrical"]},
-    {"name": "Healthcare", "icon": "ri-heart-pulse-line", "hue": 20, "children": ["Caregiving"]},
-    {"name": "Driving & Automobile", "icon": "ri-steering-2-line", "hue": 110, "children": ["Car driving", "Scooter & bike"]},
-    {"name": "Graphic Design", "icon": "ri-palette-line", "hue": 325, "children": ["Graphic design", "UI/UX"]},
-    {"name": "Entrepreneurship", "icon": "ri-lightbulb-flash-line", "hue": 90, "children": ["Startup basics"]},
-    {"name": "Other Skills", "icon": "ri-apps-2-line", "hue": 250, "children": []}
+    {
+      "name": "IT & Computer",
+      "icon": "ri-computer-line",
+      "hue": 235,
+      "children": ["Web development", "Office skills", "Data"]
+    },
+    {
+      "name": "Digital Marketing",
+      "icon": "ri-megaphone-line",
+      "hue": 300,
+      "children": ["Social media"]
+    },
+    {
+      "name": "Accounting & Finance",
+      "icon": "ri-calculator-line",
+      "hue": 155,
+      "children": ["Accounting software", "Taxation"]
+    },
+    {
+      "name": "Hospitality",
+      "icon": "ri-cup-line",
+      "hue": 50,
+      "children": ["Coffee & Barista", "Hotel operations", "Culinary"]
+    },
+    {
+      "name": "Beauty & Wellness",
+      "icon": "ri-sparkling-2-line",
+      "hue": 350,
+      "children": ["Makeup"]
+    },
+    {
+      "name": "Language Training",
+      "icon": "ri-translate-2",
+      "hue": 270,
+      "children": ["English tests", "Japanese"]
+    },
+    {
+      "name": "Professional Skills",
+      "icon": "ri-briefcase-4-line",
+      "hue": 205,
+      "children": ["Excel", "Soft skills"]
+    },
+    {
+      "name": "Technical & Vocational",
+      "icon": "ri-tools-line",
+      "hue": 75,
+      "children": ["Equipment maintenance", "Electrical"]
+    },
+    {
+      "name": "Healthcare",
+      "icon": "ri-heart-pulse-line",
+      "hue": 20,
+      "children": ["Caregiving"]
+    },
+    {
+      "name": "Driving & Automobile",
+      "icon": "ri-steering-2-line",
+      "hue": 110,
+      "children": ["Car driving", "Scooter & bike"]
+    },
+    {
+      "name": "Graphic Design",
+      "icon": "ri-palette-line",
+      "hue": 325,
+      "children": ["Graphic design", "UI/UX"]
+    },
+    {
+      "name": "Entrepreneurship",
+      "icon": "ri-lightbulb-flash-line",
+      "hue": 90,
+      "children": ["Startup basics"]
+    },
+    {
+      "name": "Other Skills",
+      "icon": "ri-apps-2-line",
+      "hue": 250,
+      "children": []
+    }
   ]
   ```
 
@@ -201,8 +266,8 @@ same words. Unpublished and Cancelled have no UI yet.
 
 - [x] App created, installed (`apps.training` in `LOCAL_APPS`), models written, migration generated.
 - [x] Constants. Version 1 put them in `apps/catalog/constants.py`; with a separate app they belong in the training app
-  (the migration does not mention them, so moving is free). Create `apps/training/constants.py` and delete the training
-  parts from `apps/catalog/constants.py` (keep `LocationLevel`, `MunicipalityType` and the two cache keys there):
+      (the migration does not mention them, so moving is free). Create `apps/training/constants.py` and delete the training
+      parts from `apps/catalog/constants.py` (keep `LocationLevel`, `MunicipalityType` and the two cache keys there):
 
   ```python
   class TrainingMode:
@@ -262,8 +327,8 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Replace `apps/training/models.py`. Changes from what you wrote: `short_description`, `skills`, the contact fields,
-  `duration_weeks`; levels and duration units from the UI; a session is a weekly slot; constraint and index names use the
-  app's own prefix (index names must be 30 characters or fewer):
+      `duration_weeks`; levels and duration units from the UI; a session is a weekly slot; constraint and index names use the
+      app's own prefix (index names must be 30 characters or fewer):
 
   ```python
   from django.contrib.postgres.fields import ArrayField
@@ -390,15 +455,15 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Regenerate the migration (it is not applied and not committed, so this is safe): delete
-  `apps/training/migrations/0001_initial.py`, run `python manage.py makemigrations training`, read it, then `migrate`.
-  If you had already applied it on a database, use `migrate training zero` first, then delete and regenerate.
+      `apps/training/migrations/0001_initial.py`, run `python manage.py makemigrations training`, read it, then `migrate`.
+      If you had already applied it on a database, use `migrate training zero` first, then delete and regenerate.
 - [x] Institutes follow-up, the map link (decision 16). In `apps/institutes/models.py`, class `InstituteLocation`:
-  `map_url = models.URLField(blank=True)`; add `"map_url"` to `InstituteLocationSerializer.Meta.fields`, to the public
-  location dictionaries in `PublicInstituteListSerializer.get_location` and `PublicInstituteDetailSerializer.get_locations`,
-  run `makemigrations institutes`, and add one test that a location saves and returns its link.
+      `map_url = models.URLField(blank=True)`; add `"map_url"` to `InstituteLocationSerializer.Meta.fields`, to the public
+      location dictionaries in `PublicInstituteListSerializer.get_location` and `PublicInstituteDetailSerializer.get_locations`,
+      run `makemigrations institutes`, and add one test that a location saves and returns its link.
 - [x] Read-only admin for `Training` in `apps/training/admin.py`; no inlines.
 - [x] Test helpers, `apps/training/tests/helpers.py`. They reuse the institutes helpers and use `timezone.localdate()`,
-  never `date.today()`:
+      never `date.today()`:
 
   ```python
   from datetime import time, timedelta
@@ -445,14 +510,14 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Constraint tests, `apps/training/tests/test_models.py`: online with a location is rejected; end before start; deadline after
-  start; negative fee; zero seats; zero duration; a duration with no unit; a session that ends before it starts; a draft with only
-  the required fields saves fine; `class_days` rejects an unknown day.
+      start; negative fee; zero seats; zero duration; a duration with no unit; a session that ends before it starts; a draft with only
+      the required fields saves fine; `class_days` rejects an unknown day.
 - [x] **C2 done when:** `check` and `makemigrations --check` are clean, the constraint tests pass, the whole suite passes.
 
 ## C3 – Services (rules, workflow, search, expiry)
 
 - [x] `apps/training/services.py`, part 1: derived values, the search vector and the checks. Verified on your database:
-  `SearchVector(Value(text), config="simple")` builds a vector without joins.
+      `SearchVector(Value(text), config="simple")` builds a vector without joins.
 
   ```python
   from django.contrib.postgres.search import SearchVector
@@ -497,7 +562,7 @@ same words. Unpublished and Cancelled have no UI yet.
 
   def refresh_search_vectors(queryset):
       for training in queryset.select_related(
-              "institute", "category__parent", "institute_location__location__district").iterator():
+              "institute", "category__parent", "venue__location__district").iterator():
           refresh_search_vector(training)
 
 
@@ -511,7 +576,7 @@ same words. Unpublished and Cancelled have no UI yet.
           raise ValidationError({"category": "This category is not available."})
 
 
-  def _check_location(institute, mode, location):
+  def _check_venue(institute, mode, location):
       if mode == TrainingMode.ONLINE:
           if location is not None:
               raise ValidationError({"institute_location": "An online training has no location."})
@@ -555,7 +620,7 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Part 2: workflow. `only_from` is what keeps every action honest: the transition table alone would let an admin "approve"
-  an unpublished training, because `UNPUBLISHED` also lists `APPROVED`. Every move runs under a row lock:
+      an unpublished training, because `UNPUBLISHED` also lists `APPROVED`. Every move runs under a row lock:
 
   ```python
   def _transition(training, to, *, only_from=None, reason="", check=None):
@@ -673,7 +738,7 @@ same words. Unpublished and Cancelled have no UI yet.
   def create_training(institute, *, sessions=None, modules=None, outcomes=None, **fields):
       _require_approved_institute(institute)
       _check_category(fields["category"])
-      _check_location(institute, fields["mode"], fields.get("institute_location"))
+      _check_venue(institute, fields["mode"], fields.get("institute_location"))
       _check_dates(fields.get("start_date"), fields.get("end_date"), fields.get("registration_deadline"))
       if sessions is not None:
           _check_sessions(sessions)
@@ -697,7 +762,7 @@ same words. Unpublished and Cancelled have no UI yet.
       if mode == TrainingMode.ONLINE and "institute_location" not in fields:
           fields["institute_location"] = None               # switching to online clears the location
       _check_category(fields.get("category", training.category))
-      _check_location(training.institute, mode, fields.get("institute_location", training.institute_location))
+      _check_venue(training.institute, mode, fields.get("institute_location", training.institute_location))
       _check_dates(fields.get("start_date", training.start_date), fields.get("end_date", training.end_date),
                    fields.get("registration_deadline", training.registration_deadline))
       if sessions is not None:
@@ -810,7 +875,7 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Finish the old `TODO(catalog)` in `deactivate_location` (`apps/institutes/services.py`): a location that a live training uses
-  cannot be retired:
+      cannot be retired:
 
   ```python
   from apps.training.constants import TrainingStatus     # constants only, so there is no import cycle
@@ -835,8 +900,8 @@ same words. Unpublished and Cancelled have no UI yet.
 ## C4 – Public API: list, detail, search and filters
 
 - [x] Wire the URLs. Prefixes live only in `apps/api/v1/urls.py`; the `institute/` include from `institutes` has no `trainings/`
-  route, so that one is reached by falling through (keep it after). `admin/` now has three includes, which is fine because
-  their routes differ:
+      route, so that one is reached by falling through (keep it after). `admin/` now has three includes, which is fine because
+      their routes differ:
 
   ```python
   path("trainings/", include("apps.training.api.v1.urls.trainings")),
@@ -926,9 +991,9 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Filters and search, `apps/training/api/v1/filters.py`. Prefix search turns every word into `word:*` after stripping everything
-  that is not a letter or digit, so user input can never break the query. An online training has no location, so a location filter
-  excludes it. The duration buckets are the hub's own: under 4 weeks, 4 to 12, 13 or more. `registration_open` is derived: the
-  deadline has not passed, or there is no deadline and the training has not started:
+      that is not a letter or digit, so user input can never break the query. An online training has no location, so a location filter
+      excludes it. The duration buckets are the hub's own: under 4 weeks, 4 to 12, 13 or more. `registration_open` is derived: the
+      deadline has not passed, or there is no deadline and the training has not started:
 
   ```python
   import re
@@ -954,7 +1019,7 @@ same words. Unpublished and Cancelled have no UI yet.
       category = django_filters.NumberFilter(method="filter_category")           # a category or any of its sub-categories
       sub_category = django_filters.NumberFilter(field_name="category_id")
       province = django_filters.NumberFilter(field_name="institute_location__location__province_id")
-      district = django_filters.NumberFilter(field_name="institute_location__location__district_id")
+      district = django_filters.NumberFilter(field_name="venue__location__district_id")
       municipality = django_filters.NumberFilter(field_name="institute_location__location_id")
       fee_min = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="gte")
       fee_max = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="lte")
@@ -995,8 +1060,8 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Public viewset and URLs, `apps/training/api/v1/views.py`. The list needs no prefetch (cards show no schedule); the
-  detail loads its children with three prefetches. Sort mapping for the UI: Newest is `-published_at`, Upcoming is `start_date`,
-  Price is `fee_npr` or `-fee_npr`; Relevance is the default when `search` is set:
+      detail loads its children with three prefetches. Sort mapping for the UI: Newest is `-published_at`, Upcoming is `start_date`,
+      Price is `fee_npr` or `-fee_npr`; Relevance is the default when `search` is set:
 
   ```python
   from django.db.models import Prefetch
@@ -1025,7 +1090,7 @@ same words. Unpublished and Cancelled have no UI yet.
           queryset = (
               Training.objects.filter(status=TrainingStatus.APPROVED, institute__status=InstituteStatus.APPROVED)
               .select_related("institute", "category__parent",
-                              "institute_location__location__district", "institute_location__location__province")
+                              "venue__location__district", "institute_location__location__province")
           )
           if self.action == "retrieve":
               return queryset.prefetch_related(
@@ -1060,8 +1125,8 @@ same words. Unpublished and Cancelled have no UI yet.
 ## C5 – Institute portal and admin review
 
 - [x] Portal serializers, appended to `apps/training/api/v1/serializers.py` (add `Q`, `serializers`, `validate_image_file`, the models
-  and `services` imports). A nested list replaces the whole list and leaving it out keeps it. The cover image has its own endpoint,
-  because nested lists and files do not mix in one multipart request:
+      and `services` imports). A nested list replaces the whole list and leaving it out keeps it. The cover image has its own endpoint,
+      because nested lists and files do not mix in one multipart request:
 
   ```python
   class TrainingSessionSerializer(serializers.ModelSerializer):
@@ -1137,7 +1202,7 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Portal viewset and URLs, `apps/training/api/v1/views.py`. Staff of the institute can do everything here; other institutes'
-  rows are a 404. A `PATCH` on an approved training sends it back to review (decision 5):
+      rows are a 404. A `PATCH` on an approved training sends it back to review (decision 5):
 
   ```python
   class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
@@ -1210,7 +1275,7 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Admin review API (`users.manage_trainings`), appended to the same files. A reviewer lists with `?status=SUBMITTED`; the list
-  serializer already shows the feedback column:
+      serializer already shows the feedback column:
 
   ```python
   # serializers.py
@@ -1296,8 +1361,8 @@ same words. Unpublished and Cancelled have no UI yet.
   ```
 
 - [x] Imports the new view code needs: `MultiPartParser`, `FormParser` (`rest_framework.parsers`), `SearchFilter` (`rest_framework.filters`),
-  `Response` and `action`, `CustomModelViewSet` (`apps.common.viewsets`), `InstituteScopedMixin` and `IsInstituteMember`
-  (`apps.institutes.permissions`), `HasPlatformPermission` (`apps.users.permissions`), and `services` (`apps.training`).
+      `Response` and `action`, `CustomModelViewSet` (`apps.common.viewsets`), `InstituteScopedMixin` and `IsInstituteMember`
+      (`apps.institutes.permissions`), `HasPlatformPermission` (`apps.users.permissions`), and `services` (`apps.training`).
 - [x] Tests, `apps/training/tests/test_api_portal.py` and `test_api_admin.py`:
   - Portal permissions for every endpoint: anonymous 401, an admin 403, institute staff 200, staff of institute B gets a 404 on institute A's training.
   - Create with nested sessions (class days and times), modules and outcomes in one request; the response shows them in order; `status`, `slug` and `duration_weeks` in the payload are ignored; another institute's location, an inactive location, an inactive category and a pending institute are 400; a top-level category is accepted.
@@ -1312,16 +1377,16 @@ same words. Unpublished and Cancelled have no UI yet.
 ## C6 – Docs and wrap-up
 
 - [x] `CLAUDE.md`: the `training` app in Layout (Training, TrainingSession as a weekly slot, modules, outcomes, `services.py`,
-  `tasks.py`, `expire_trainings`); `catalog` now holds locations and categories; the new endpoints and prefixes; the
-  `load_categories` and `expire_trainings` commands; the tests line; `django.contrib.postgres` is installed (ArrayField, search);
-  and these landmines: trainings feed a search vector kept by services, so never write `Training` rows directly or use
-  `QuerySet.update()` on content; content is editable only as described in decision 5 and an edit of an approved training
-  hides it until re-approved; `expire_trainings` must be scheduled (Django Q schedule, daily) or the expiry never happens; the
-  category tree is cached and `update()` skips the signals.
+      `tasks.py`, `expire_trainings`); `catalog` now holds locations and categories; the new endpoints and prefixes; the
+      `load_categories` and `expire_trainings` commands; the tests line; `django.contrib.postgres` is installed (ArrayField, search);
+      and these landmines: trainings feed a search vector kept by services, so never write `Training` rows directly or use
+      `QuerySet.update()` on content; content is editable only as described in decision 5 and an edit of an approved training
+      hides it until re-approved; `expire_trainings` must be scheduled (Django Q schedule, daily) or the expiry never happens; the
+      category tree is cached and `update()` skips the signals.
 - [x] `docs/System Design.md`: Training and Category as built (the fields above), the decisions table rows (the sixteen), the final
-  state machine and labels, the endpoint table (section 3.6), build step 4 progress, and the answered questions removed from
-  section 8 (category depth, completion and cancellation, editing an approved training, duration, training levels, search scope).
-  Change the "multiple sessions" wording to weekly slots, and add the UI findings to the PRD mapping if you keep one.
+      state machine and labels, the endpoint table (section 3.6), build step 4 progress, and the answered questions removed from
+      section 8 (category depth, completion and cancellation, editing an approved training, duration, training levels, search scope).
+      Change the "multiple sessions" wording to weekly slots, and add the UI findings to the PRD mapping if you keep one.
 - [x] `README.md`: `load_categories` and the daily expiry in setup, and the new endpoint tables.
 - [x] Notion review page: the diagram for trainings, and section 19.
 - [x] Definition of done: `check` clean; `makemigrations --check --dry-run` clean; all tests pass; no hand-edited migrations; docs updated in the same change.

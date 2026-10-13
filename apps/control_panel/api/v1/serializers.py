@@ -187,7 +187,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     institute = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     sub_category = serializers.SerializerMethodField()
-    institute_location = serializers.SerializerMethodField()
+    venue = serializers.SerializerMethodField()
     sessions = TrainingSessionSerializer(many=True, read_only=True)
     modules = TrainingModuleSerializer(many=True, read_only=True)
     outcomes = LearningOutcomeSerializer(many=True, read_only=True)
@@ -213,14 +213,15 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
             "parent": parent.name if parent else None,
         }
 
-    def get_institute_location(self, obj):
-        place = obj.institute_location
-        if place is None:
+    def get_venue(self, obj):
+        venue = getattr(obj, "venue", None)
+        if venue is None:
             return None
         return {
-            "id": place.id,
-            "municipality": place.location.name,
-            "address": place.address,
+            "municipality": venue.location.name if venue.location_id else None,
+            "address": venue.address,
+            "map_url": venue.map_url,
+            "contact_phone": venue.contact_phone,
         }
 
     def get_sub_category(self, obj):

@@ -161,7 +161,7 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
     queryset = Training.objects.select_related(
-        "institute", "category__parent", "institute_location__location"
+        "institute", "category__parent", "venue__location"
     ).order_by("-created_at", "-pk")
 
     def get_serializer_class(self):

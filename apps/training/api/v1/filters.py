@@ -27,16 +27,10 @@ class TrainingFilter(django_filters.FilterSet):
     # a top-level id also finds the trainings of its sub-categories
     category = django_filters.NumberFilter(method="filter_category")
     sub_category = django_filters.NumberFilter(field_name="category_id")
-    # an online training has no location, so a location filter excludes it
-    province = django_filters.NumberFilter(
-        field_name="institute_location__location__province_id"
-    )
-    district = django_filters.NumberFilter(
-        field_name="institute_location__location__district_id"
-    )
-    municipality = django_filters.NumberFilter(
-        field_name="institute_location__location_id"
-    )
+    # an online training has no municipality, so a location filter excludes it
+    province = django_filters.NumberFilter(field_name="venue__location__province_id")
+    district = django_filters.NumberFilter(field_name="venue__location__district_id")
+    municipality = django_filters.NumberFilter(field_name="venue__location_id")
     fee_min = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="gte")
     fee_max = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="lte")
     start_from = django_filters.DateFilter(field_name="start_date", lookup_expr="gte")

@@ -17,9 +17,9 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Providers | Verified **Institutes** only (no individual instructors) |
 | Institute users | An Institute has many staff users (owner + staff). The owner can invite more staff after registration |
 | Staff membership | A staff user belongs to **one institute only** (unique `InstituteMember.user`) |
-| Training location | A physical / hybrid training is held at **exactly one** of its institute's locations |
+| Training location | A training has **exactly one** venue (`TrainingLocation`): a municipality plus an address for a physical training, only an address text for an online one |
 | Availability | A training is available while `seats` minus its `CONVERTED` enquiries is above zero. An institute-maintained seat count may be added later |
-| Institute locations | An institute can have **several locations**; each physical / hybrid training is held at one of them (see 3.3) |
+| Institute locations | An institute can have **several locations** (its offices); a training's venue is separate and can be anywhere (see 3.3) |
 | Roles | `SUPER_ADMIN` (exactly one), `ADMIN`, `INSTITUTE_STAFF` |
 | Admin permissions | A Super Admin can do everything and grants admins limited rights per area (see 3.1) |
 | Auth | Own accounts, email + password. JWT via simplejwt, RS256 with a key pair (`manage.py generate_rsa_keys`), Bearer header. Suspended accounts (`is_active=False`) are rejected at the authentication layer |
@@ -29,7 +29,7 @@ The reviewed design with class diagrams per subsystem is in the Notion page "Tra
 | Async jobs / cache | django-q2 + Redis (Redis broker) |
 | Files | Local `media/` now, S3 later. Use Django's storage API only; no hard-coded paths |
 | Abuse protection | Google reCAPTCHA (verified server-side) + DRF rate limiting on public submit endpoints |
-| Training mode | `PHYSICAL`, `ONLINE`, `HYBRID` |
+| Training mode | `PHYSICAL`, `ONLINE` |
 | Reviews & ratings | **Out of MVP** (needs learner login). `reviews` app deferred |
 | "My enquiries" | Tracked by a browser-stored device token; lost if browser data is cleared. A device sees its enquiries for **90 days**. Revisit when learner login is added |
 | Location data | The team keeps the Nepal location data itself and documents where it came from. The files are in `apps/common/data/` (`provinces.json` 7, `districts.json` 77, `cities.json` 752 local governments; checked: no orphan parents, no duplicate `(district, name)`). Loaded with a `load_locations` management command, not a fixture |
@@ -92,7 +92,8 @@ Phase 2: `applications` (reuses Training capacity fields), `learners`.
 - **InstituteDocument**: institute, name, file, status (pending / verified / rejected).
 - **Category**: name, parent (sub-category; two levels, checked in the service), icon (Remix icon name), hue (0 to 360), is_active. Names are unique among siblings, ignoring case.
 - **Location**: province / district / municipality hierarchy (managed list): one table with `level`, `parent`, a `code` (id from the source data), `type` for municipalities (metropolitan, sub-metropolitan, municipality, rural municipality), `is_active`, and denormalised `province` / `district` set in one place.
-- **Training** (`apps/training`): institute, category (a category or a sub-category: the column holds the leaf, and the portal API splits it into `category` + `sub_category`), title, short description (160 characters, on the cards), mode (`PHYSICAL`, `ONLINE`, `HYBRID`), level, `shifts` (array of Morning / Day / Evening, required to submit), duration value and unit plus derived `duration_weeks`, fee (NPR, 0 = free), seats (empty = unlimited), start / end date, registration deadline, `institute_location` (nullable FK to one of the same institute's locations; empty for `ONLINE`, required to submit `PHYSICAL` / `HYBRID`), cover image, status, review feedback, `published_at` (first approval), `search_vector` (GIN index, kept by the services). Drafts may be incomplete; check constraints cover online-without-location, date order, deadline before start, non-negative fee, positive seats and duration, and a unit with every duration.
+- **Training** (`apps/training`): institute, category (a category or a sub-category: the column holds the leaf, and the portal API splits it into `category` + `sub_category`), title, short description (160 characters, on the cards), mode (`PHYSICAL`, `ONLINE`), level, `shifts` (array of Morning / Day / Evening, required to submit), duration value and unit plus derived `duration_weeks`, fee (NPR, 0 = free), seats (empty = unlimited), start / end date, registration deadline, cover image, status, review feedback, `published_at` (first approval), `search_vector` (GIN index, kept by the services). Drafts may be incomplete; check constraints cover date order, deadline before start, non-negative fee, positive seats and duration, and a unit with every duration.
+- **TrainingLocation** (`apps/training`): training (one-to-one, `venue`), location (nullable FK to any active municipality of the common `Location` list; empty for `ONLINE`), address (the street address, or for `ONLINE` plain text such as the platform or a link), `map_url`, `contact_phone`. Create requires it; an edit checks it only when `venue` or `mode` is sent; submit needs a complete one. "Online has no municipality" is a service rule, not a database constraint.
 - **TrainingDetail** (one-to-one with a training, created with it): overview (the detailed description), eligibility, certification (text), skills (list). **TrainingContact** (one-to-one, created with it): contact person / phone / email, all optional. The API shows both as flat fields on the training (`overview`, `skills`, `contact_person`, ...); only the tables are split.
 - **TrainingSession**: a weekly slot (class days, start / end time, NPT); a training may have several (for example a morning and an evening batch). **TrainingModule** (curriculum: title, description), **LearningOutcome** (text); both come back in the order they were sent (ordered by pk, no position column).
 - **Enquiry**: training, name, phone, email (optional), message, status, device_token, created_at. "My enquiries" returns only a device's enquiries from the last 90 days; older ones stay visible to the institute.
@@ -141,9 +142,9 @@ Implemented in `apps/users`, except the admins CRUD (`apps/control_panel`). `adm
 ### 3.3 Institute locations
 
 - A location is picked from the managed `Location` list (province → district → municipality) and given an address, so an institute can run trainings in several cities.
-- A training points to one `InstituteLocation` of its own institute (validated in the model / serializer). Online trainings have none.
-- Public location filtering uses the training's location (city, district or province). The institute card in the design (city, province) is derived from its main office.
-- A location cannot be deactivated while a training that is not cancelled or expired uses it. Changing a location's municipality refreshes the search vectors of the trainings held there (queued task).
+- A training has one `TrainingLocation` (its venue): physical takes a municipality from the managed list plus an address, online takes only an address text. It is not tied to the institute's own locations.
+- Public location filtering uses the training's venue municipality (city, district or province); an online training matches no location filter. The institute card in the design (city, province) is derived from its main office.
+- Deactivating an institute location does not affect trainings. A venue's municipality and district are part of the training's search vector, refreshed when the training is saved.
 
 ### 3.4 Engineering conventions (the `users` app already follows them)
 
@@ -255,13 +256,13 @@ The `admin/categories/` and `admin/trainings/` endpoints are implemented in `app
 
 ## 9. Decision log (answered questions)
 
-- Reviews: skipped for now; needs login first. Hybrid mode: included. "My enquiries": browser-stored token accepted. Enquiry statuses: `NEW` / `CONTACTED` / `CONVERTED` / `CLOSED`, changeable later.
+- Reviews: skipped for now; needs login first. Hybrid mode: dropped (2026-10-13); a training is physical or online. "My enquiries": browser-stored token accepted. Enquiry statuses: `NEW` / `CONTACTED` / `CONVERTED` / `CLOSED`, changeable later.
 - Admin roles: Super Admin does everything and grants limited permissions (e.g. handling enquiries, account status) to other users.
 - Location: managed Nepal list. Price: single fee in NPR. Search: PostgreSQL full-text. Time: NPT everywhere, multiple sessions. Certification: text field.
 - Merojob integration: on hold. Email: SMTP. Captcha: reCAPTCHA. Deployment: Docker, later.
 - Learner model: enquiry now, application in phase 2. Auth: only institutes and admins log in. Providers: institutes only, with multiple staff users. Services: email, Redis + django-q2, local media (S3 later). Abuse protection: captcha + rate limiting. Stale `authentication.py` from another project: rewritten for TrainingHub.
 - Admin creation: the Super Admin sets the initial password; a "set your own password" email is sent later with `notifications`. There is exactly one Super Admin. Institute owners can invite more staff. The frontend calls the API from the browser (may change). "My enquiries" is kept 90 days per device. The Nepal location list already exists. An institute can have several locations and trainings are held at one of them.
-- Answered (review of the Notion design page, 2026-10-01): a training is held at **exactly one** institute location. A staff member belongs to **one institute only** (unique `InstituteMember.user`). The "availability" filter means **seats minus `CONVERTED` enquiries is above zero** (option b, confirmed); an institute-maintained seat count (option c) may be added later. The Nepal location file will be provided by the team. Many remaining questions will be answered during development, so expect the design to change.
+- Answered (review of the Notion design page, 2026-10-01): a training is held at **exactly one** venue (changed 2026-10-13: the venue is its own row and can be anywhere, not one of the institute's locations). A staff member belongs to **one institute only** (unique `InstituteMember.user`). The "availability" filter means **seats minus `CONVERTED` enquiries is above zero** (option b, confirmed); an institute-maintained seat count (option c) may be added later. The Nepal location file will be provided by the team. Many remaining questions will be answered during development, so expect the design to change.
 - Users API (2026-10-01): admin management is Super Admin only and admins are suspended, not deleted. Only the Super Admin may change an admin's status (our assumption, kept). The user admin site is read-only; the API and services are the only way to change users. `me/password/` is `PUT`.
 - Institutes and locations (2026-10-02): the third location level is **Municipality**, and names stay as in the data. The team keeps the location data and documents its source. The institute type is a fixed list the team will provide. The institute profile uses plain columns (option A). A rejected institute can re-apply (`REJECTED` → `PENDING`); only `APPROVED` institutes are publicly visible.
 - Institute types and location data (2026-10-02): the seven institute types are fixed (see the decisions table). The location data files are in `apps/catalog/data/`; the empty `catalog` app is scaffolded and installed, its models and loader are not written yet.

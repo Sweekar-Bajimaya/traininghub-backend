@@ -27,7 +27,6 @@ from apps.institutes.models import (
     InstituteSocialLink,
 )
 from apps.institutes.validators import validate_institute_location
-from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
 from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
@@ -190,15 +189,6 @@ def update_location(instance, **fields):
     for name, value in fields.items():
         setattr(instance, name, value)
     instance.save(update_fields=[*fields, "modified_at"])
-    if "location" in fields:
-        # the municipality and district are part of the search vector of trainings held here
-        transaction.on_commit(
-            lambda: async_task(
-                "apps.training.tasks.refresh_location_trainings",
-                instance.pk,
-                save=False,
-            )
-        )
     return instance
 
 
@@ -224,10 +214,6 @@ def deactivate_location(location):
     location = InstituteLocation.objects.get(pk=location.pk)
     if location.is_main:
         raise ValidationError("Choose another main office first.")
-    if location.trainings.exclude(status__in=TrainingStatus.FINISHED).exists():
-        raise ValidationError(
-            "Move or cancel the trainings held at this location first."
-        )
     location.is_active = False
     location.save(update_fields=["is_active", "modified_at"])
     return location

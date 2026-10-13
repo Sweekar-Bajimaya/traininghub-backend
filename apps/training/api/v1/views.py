@@ -51,8 +51,8 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
         ).select_related(
             "institute",
             "category__parent",
-            "institute_location__location__district",
-            "institute_location__location__province",
+            "venue__location__district",
+            "venue__location__province",
             "institute__contact",
             "detail",  # the cards show the skills
         )
@@ -86,7 +86,7 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     filter_backends = (DjangoFilterBackend,)
     filterset_fields = ("status",)
     queryset = Training.objects.select_related(
-        "category__parent", "institute_location__location"
+        "category__parent", "venue__location"
     ).order_by("-created_at", "-pk")
 
     def get_serializer_class(self):
