@@ -153,6 +153,8 @@ apps/
   templates/email/        HTML email templates (`base_email`, `otp_email`, `registration_otp_email`);
                           `TEMPLATES["DIRS"]` points at `apps/templates`
 docs/  design/            see "Source of truth"
+.graphifyignore           what the knowledge graph leaves out; see "Knowledge graph scope"
+graphify-out/             the generated knowledge graph (graph.json, GRAPH_REPORT.md, graph.html); written by graphify, never hand-edited; only graph.json and GRAPH_REPORT.md are committed
 ```
 
 Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
@@ -182,6 +184,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
 | tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
+| query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
+| refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |
 
 ## Conventions
 
@@ -318,3 +322,38 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - `python manage.py check` and `python manage.py makemigrations --check --dry-run` before committing.
 - Swagger UI at `/api/root/` and Redoc at `/redoc/` - only mounted when `DEBUG=True`. The site root `/` has no route (404).
 - Every package under `apps/` needs an `__init__.py`, or test discovery silently finds zero tests.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
+
+## Knowledge graph scope
+
+`.graphifyignore` (repo root, `.gitignore` syntax) decides what the graph covers. The section above is written by graphify; the
+project's own notes are here.
+
+- **In the graph:** application code, the test files (`test_*.py`, `tests.py`; their method names record what is already
+  tested, so check the graph before writing a test), `docs/System Design.md`, the PRD and `requirements/`.
+- **Left out:** migrations, `**/tests/helpers.py`, `apps.py` / `admin.py` / `__init__.py` / `wsgi.py` / `asgi.py` / `manage.py`,
+  the email templates, `README.md`, `docs/*-checklist.md`, `docs/control_panel_migration.md`, `design/` (bundled base64, no
+  readable text) and this file. The Landmines and the command table exist only here, so `graphify query` does not find
+  them; read them in this file.
+- A pattern with a slash in the middle only matches from the repo root: write `**/tests/helpers.py`, not `tests/helpers.py`
+  (the second matched nothing, and the helpers stayed in the graph).
+- Imported libraries (`django_db`, `rest_framework`, `atomic`) appear as nodes with no source file; a pattern cannot remove
+  them. `INFERRED` edges are the extractor's guess, so check the code before relying on one. Test classes that import a
+  shared name (`Role`, `Institute`) add many `uses` edges to it, which inflates its connections.
+- **Committed:** only `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` (see `.gitignore`). `graph.html`, `cache/`,
+  `cost.json`, `manifest.json` (file mtimes) and `.graphify_python` / `.graphify_root` (this machine's paths) are not shared;
+  none of the committed files contains an absolute path.
+- **Per clone:** the git hooks and the merge driver for `graph.json` (`.gitattributes`) live in `.git`, not in the repo, so each
+  clone runs `graphify hook install` once (`graphify hook status` checks it). The post-commit hook rebuilds the code graph in
+  the background after a commit that touches files outside `graphify-out/`, so expect `graph.json` to show as modified
+  afterwards and commit it with the next change; `GRAPHIFY_SKIP_HOOK=1` skips the hook.
