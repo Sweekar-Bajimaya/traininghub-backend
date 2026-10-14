@@ -261,7 +261,8 @@ class PortalContactView(RetrieveUpdateAPIView):
 
     def get_object(self):
         return get_object_or_404(
-            InstituteContact, institute_id=self.request.user.membership.institute_id
+            InstituteContact.objects.prefetch_related("institute__social_links"),
+            institute_id=self.request.user.membership.institute_id,
         )
 
 

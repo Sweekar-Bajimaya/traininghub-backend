@@ -16,12 +16,6 @@ def refresh_category_trainings(category_id):
     )
 
 
-def refresh_location_trainings(institute_location_id):
-    services.refresh_search_vectors(
-        Training.objects.filter(institute_location_id=institute_location_id)
-    )
-
-
 def expire_trainings():
     """Schedule daily (Django admin > Django Q > Scheduled tasks)."""
     return services.expire_trainings()

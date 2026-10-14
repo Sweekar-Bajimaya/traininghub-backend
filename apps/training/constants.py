@@ -1,6 +1,6 @@
 class TrainingMode:
-    PHYSICAL, ONLINE, HYBRID = "PHYSICAL", "ONLINE", "HYBRID"
-    CHOICES = ((PHYSICAL, "Physical"), (ONLINE, "Online"), (HYBRID, "Hybrid"))
+    PHYSICAL, ONLINE = "PHYSICAL", "ONLINE"
+    CHOICES = ((PHYSICAL, "Physical"), (ONLINE, "Online"))
 
 
 class TrainingLevel:

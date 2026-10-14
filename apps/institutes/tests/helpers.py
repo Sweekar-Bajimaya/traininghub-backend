@@ -1,4 +1,5 @@
 import io
+import itertools
 import tempfile
 from unittest import mock
 
@@ -19,6 +20,13 @@ from apps.users.constants import OTPPurpose, Role
 User = get_user_model()
 PASSWORD = "Str0ng-pass-123!"
 OWNER_EMAIL = "owner@example.com"  # the owner's login, which is the institute's email
+PAN_VAT_NUMBER = "123456789"  # for payloads; make_institute never hands this one out
+_generated_pan_vat_numbers = itertools.count(900000001)
+
+
+def next_pan_vat_number():
+    """A nine-digit PAN/VAT number no other test institute has (the column is unique)."""
+    return str(next(_generated_pan_vat_numbers))
 
 
 def make_municipality(code=1, name="Municipality"):
@@ -37,9 +45,13 @@ def make_institute(
     name="Alpha Institute",
     status=InstituteStatus.PENDING,
     email=OWNER_EMAIL,
+    pan_vat_number=None,
 ):
     institute = Institute.objects.create(
-        name=name, type=InstituteType.COMPANY, status=status
+        name=name,
+        type=InstituteType.COMPANY,
+        status=status,
+        pan_vat_number=pan_vat_number or next_pan_vat_number(),
     )
     owner = User.objects.create_user(
         email, PASSWORD, full_name="Owner", role=Role.INSTITUTE_STAFF

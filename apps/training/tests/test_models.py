@@ -28,9 +28,6 @@ class TrainingConstraintTests(TestCase):
         self.assertEqual(training.status, "DRAFT")
         self.assertEqual(TrainingDetail.objects.create(training=training).skills, [])
 
-    def test_online_training_cannot_have_a_location(self):
-        self.assertRejected(institute_location=self.location)
-
     def test_end_before_start_is_rejected(self):
         self.assertRejected(start_date=self.today, end_date=self.today - timedelta(days=1))
 

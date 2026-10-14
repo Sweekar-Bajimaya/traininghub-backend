@@ -22,6 +22,7 @@ from apps.training.models import (
     Training,
     TrainingContact,
     TrainingDetail,
+    TrainingLocation,
     TrainingSession,
 )
 from apps.users import services as user_services
@@ -50,7 +51,8 @@ def make_training(
     institute, *, category=None, location=None, status=TrainingStatus.APPROVED, **overrides
 ):
     """Writes the rows directly (any status, no checks) and then builds the search vector.
-    The detail and contact fields can be overridden here like the training's own."""
+    The detail and contact fields can be overridden here like the training's own. `location` is an
+    InstituteLocation to copy the venue from; without one the training is held online."""
     today = timezone.localdate()
     fields = dict(
         title="Python Bootcamp",
@@ -82,11 +84,16 @@ def make_training(
     training = Training.objects.create(
         institute=institute,
         category=category or make_category(),
-        institute_location=location,
         **fields,
     )
     TrainingDetail.objects.create(training=training, **detail)
     TrainingContact.objects.create(training=training, **contact)
+    TrainingLocation.objects.create(
+        training=training,
+        location=location.location if location else None,
+        address=location.address if location else "Zoom link sent after enrolment",
+        map_url=location.map_url if location else "",
+    )
     TrainingSession.objects.create(
         training=training,
         class_days=["SUN", "MON", "TUE"],
@@ -99,7 +106,7 @@ def make_training(
 
 
 def training_payload(category, **overrides):
-    """A complete portal create body (online, so no location needed). `category` may be a
+    """A complete portal create body (online, so only an address text). `category` may be a
     sub-category, as `make_category` returns: it is sent as `category` plus `sub_category`."""
     today = timezone.localdate()
     top = category.parent or category
@@ -109,6 +116,7 @@ def training_payload(category, **overrides):
         "short_description": "Coffee basics",
         "overview": "Espresso, milk and latte art",
         "mode": "ONLINE",
+        "venue": {"address": "Zoom link sent after enrolment"},
         "level": "BEGINNER",
         "shifts": [TrainingShift.MORNING],
         "duration_value": 6,

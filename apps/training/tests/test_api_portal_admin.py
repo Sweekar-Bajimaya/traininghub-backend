@@ -10,7 +10,6 @@ from apps.training.tests.helpers import (
     PASSWORD,
     TempMediaMixin,
     User,
-    add_location,
     approved_institute,
     count_queries,
     make_admin,
@@ -169,19 +168,51 @@ class PortalCreateTests(PortalTestCase):
             with self.subTest(shifts=shifts):
                 self.assertEqual(self.create(shifts=shifts).status_code, 400)
 
-    def test_physical_training_at_own_location(self):
-        res = self.create(mode="PHYSICAL", institute_location=self.location.pk)
+    def test_physical_training_takes_a_municipality_and_an_address(self):
+        venue = {
+            "location": self.location.location_id,
+            "address": "Lakeside, Pokhara",
+            "map_url": "https://maps.example/lakeside",
+        }
+        res = self.create(mode="PHYSICAL", venue=venue)
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["venue"]["location"], self.location.location_id)
+        self.assertEqual(res.data["venue"]["address"], "Lakeside, Pokhara")
+
+    def test_online_training_takes_only_an_address_text(self):
+        res = self.create(venue={"address": "Zoom, link sent after enrolment"})
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(
+            (res.data["venue"]["location"], res.data["venue"]["address"]),
+            (None, "Zoom, link sent after enrolment"),
+        )
+
+    def test_the_municipality_can_be_anywhere_not_only_the_institutes_own(self):
+        elsewhere = make_municipality(9, "Elsewhere")
+        res = self.create(mode="PHYSICAL", venue={"location": elsewhere.pk, "address": "Far Road"})
         self.assertEqual(res.status_code, 201, res.data)
 
     def test_refused(self):
-        _, _, other_location = approved_institute("Beta", "beta@example.com", code=2)
-        inactive = add_location(self.institute, make_municipality(3, "M3"), is_active=False)
+        inactive = make_municipality(3, "M3")
+        inactive.is_active = False
+        inactive.save()
+        district = self.location.location.parent
         retired = make_category("Retired", "Old")
         retired.is_active = False
         retired.save()
         cases = {
-            "another institute's location": dict(mode="PHYSICAL", institute_location=other_location.pk),
-            "inactive location": dict(mode="PHYSICAL", institute_location=inactive.pk),
+            "physical without a municipality": dict(mode="PHYSICAL"),
+            "physical without a venue": dict(mode="PHYSICAL", venue=None),
+            "online with a municipality": dict(
+                venue={"location": self.location.location_id, "address": "Main Road"}
+            ),
+            "inactive municipality": dict(
+                mode="PHYSICAL", venue={"location": inactive.pk, "address": "Main Road"}
+            ),
+            "a district, not a municipality": dict(
+                mode="PHYSICAL", venue={"location": district.pk, "address": "Main Road"}
+            ),
+            "no address": dict(venue={"address": ""}),
             "inactive category": dict(category=retired.pk),
             "inactive sub-category": dict(sub_category=retired.pk),
             "unknown day": dict(sessions=[{"class_days": ["XYZ"], "start_time": "07:00", "end_time": "08:00"}]),
@@ -207,6 +238,23 @@ class PortalEditTests(PortalTestCase):
         self.assertEqual(len(res.data["sessions"]), 1)
         res = self.client.patch(self.url(training), {"modules": []}, format="json")
         self.assertEqual(res.data["modules"], [])
+
+    def test_patch_replaces_the_venue_and_keeps_it_when_left_out(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        res = self.client.patch(self.url(training), {"title": "Renamed"}, format="json")
+        self.assertEqual(res.data["venue"]["address"], "Zoom link sent after enrolment")
+        venue = {"location": self.location.location_id, "address": "Lakeside"}
+        res = self.client.patch(self.url(training), {"mode": "PHYSICAL", "venue": venue}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["venue"]["location"], self.location.location_id)
+
+    def test_changing_the_mode_needs_the_new_venue(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        res = self.client.patch(self.url(training), {"mode": "PHYSICAL"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("venue", res.data)
+        training.refresh_from_db()
+        self.assertEqual(training.mode, "ONLINE")
 
     def test_patch_changes_only_the_fields_it_sends_on_the_detail_and_contact_rows(self):
         training = make_training(

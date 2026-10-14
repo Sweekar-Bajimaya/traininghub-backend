@@ -18,6 +18,7 @@ from apps.training.models import (
     Training,
     TrainingContact,
     TrainingDetail,
+    TrainingLocation,
     TrainingModule,
     TrainingSession,
 )
@@ -36,10 +37,9 @@ def _build_search_vector(training):
     category_names = (
         f"{category.parent.name if category.parent_id else ''} {category.name}"
     )
-    place = training.institute_location
-    place_names = (
-        f"{place.location.name} {place.location.district.name}" if place else ""
-    )
+    venue = getattr(training, "venue", None)  # a draft may not have one yet
+    place = venue.location if venue else None
+    place_names = f"{place.name} {place.district.name}" if place else ""
     detail = getattr(
         training, "detail", None
     )  # a row made without the services has none
@@ -70,7 +70,7 @@ def refresh_search_vector(training):
     training = Training.objects.select_related(
         "institute",
         "category__parent",
-        "institute_location__location__district",
+        "venue__location__district",
         "detail",
     ).get(pk=training.pk)
     Training.objects.filter(pk=training.pk).update(
@@ -96,19 +96,32 @@ def _check_category(category):
         raise ValidationError({"category": "This category is not available."})
 
 
-def _check_location(institute, mode, location):
+def _check_venue(mode, location, address):
+    """`location` is the municipality or None; `address` is the street address, or the plain text
+    for an online training."""
     if mode == TrainingMode.ONLINE:
         if location is not None:
             raise ValidationError(
-                {"institute_location": "An online training has no location."}
+                {
+                    "venue": "An online training has no municipality: send only the address text."
+                }
             )
-        return
-    if location is not None and (
-        location.institute_id != institute.pk or not location.is_active
-    ):
+    elif location is None:
         raise ValidationError(
-            {"institute_location": "Choose one of your active locations."}
+            {"venue": "Choose the municipality where the training is held."}
         )
+    if not address:
+        raise ValidationError({"venue": "Enter the address."})
+
+
+def _save_venue(training, venue):
+    """The one-to-one row holds where it is held. None leaves it alone; a dict replaces it whole."""
+    if venue is None:
+        return
+    training.venue, _ = TrainingLocation.objects.update_or_create(  # keeps the cached row current
+        training=training,
+        defaults={"location": None, "map_url": "", "contact_phone": "", **venue},
+    )
 
 
 def _check_dates(start, end, deadline):
@@ -188,11 +201,14 @@ def _ready_for_submission(training):
     for name, value in required.items():
         if value in (None, "", []):
             errors[name] = "This is required before submitting."
-    if training.mode != TrainingMode.ONLINE:
-        if training.institute_location_id is None:
-            errors["institute_location"] = "Choose where the training is held."
-        elif not training.institute_location.is_active:
-            errors["institute_location"] = "The selected location is no longer active."
+    venue = getattr(training, "venue", None)
+    if venue is None or not venue.address:
+        errors["venue"] = "Add where the training is held."
+    elif training.mode == TrainingMode.PHYSICAL:
+        if venue.location_id is None:
+            errors["venue"] = "Choose where the training is held."
+        elif not venue.location.is_active:
+            errors["venue"] = "The selected location is no longer active."
     if not training.sessions.exists():
         errors["sessions"] = "Add at least one class day and time."
     if training.start_date and training.start_date < timezone.localdate():
@@ -206,7 +222,7 @@ def _transition(training, to, *, only_from=None, reason="", check=None):
     """Caller must be inside transaction.atomic()."""
     training = (
         Training.objects.select_for_update(of=("self",))
-        .select_related("institute", "institute_location")
+        .select_related("institute", "venue__location")
         .get(pk=training.pk)
     )
     # The table alone is not enough: UNPUBLISHED -> APPROVED is a republish, not an admin approval.
@@ -327,6 +343,7 @@ def create_training(
     outcomes=None,
     detail=None,
     contact=None,
+    venue=None,
     **fields,
 ):
     Institute.objects.select_for_update().get(
@@ -334,7 +351,8 @@ def create_training(
     )  # an admin may be suspending it right now
     _require_approved_institute(institute)
     _check_category(fields["category"])
-    _check_location(institute, fields["mode"], fields.get("institute_location"))
+    venue = venue or {}
+    _check_venue(fields["mode"], venue.get("location"), venue.get("address"))
     _check_dates(
         fields.get("start_date"),
         fields.get("end_date"),
@@ -347,6 +365,7 @@ def create_training(
     )
     training = Training.objects.create(institute=institute, **fields)
     _save_extras(training, detail or {}, contact or {})  # every training has both rows
+    _save_venue(training, venue)  # create requires one, so this is never skipped
     _replace_children(training, sessions, modules, outcomes)
     refresh_search_vector(training)
     return training
@@ -361,6 +380,7 @@ def update_training(
     outcomes=None,
     detail=None,
     contact=None,
+    venue=None,
     **fields,
 ):
     """DRAFT, CHANGES_REQUESTED and REJECTED are saved as they are. APPROVED and UNPUBLISHED go
@@ -368,9 +388,7 @@ def update_training(
     ready to submit; the whole edit then rolls back."""
     training = (
         Training.objects.select_for_update(of=("self",))
-        .select_related(
-            "institute", "category__parent", "institute_location", "detail", "contact"
-        )
+        .select_related("institute", "category__parent", "venue", "detail", "contact")
         .get(pk=training.pk)
     )
     back_to_review = training.status in TrainingStatus.REVIEWED_EDIT
@@ -379,14 +397,18 @@ def update_training(
             f"A {training.get_status_display().lower()} training cannot be edited."
         )
     mode = fields.get("mode", training.mode)
-    if mode == TrainingMode.ONLINE and "institute_location" not in fields:
-        fields["institute_location"] = None  # switching to online clears the location
+    if venue is None and mode != training.mode:
+        raise ValidationError({"venue": "Send the venue when you change the mode."})
+    if venue is not None or "mode" in fields:  # a title-only edit of an old draft stays allowed
+        current = getattr(training, "venue", None)
+        if venue is not None:
+            location, address = venue.get("location"), venue["address"]
+        elif current is not None:
+            location, address = current.location, current.address
+        else:
+            location, address = None, ""
+        _check_venue(mode, location, address)
     _check_category(fields.get("category", training.category))
-    _check_location(
-        training.institute,
-        mode,
-        fields.get("institute_location", training.institute_location),
-    )
     _check_dates(
         fields.get("start_date", training.start_date),
         fields.get("end_date", training.end_date),
@@ -406,6 +428,7 @@ def update_training(
         setattr(training, name, value)
     training.save(update_fields=[*fields, "modified_at"])
     _save_extras(training, detail, contact)
+    _save_venue(training, venue)
     _replace_children(training, sessions, modules, outcomes)
     refresh_search_vector(training)
     if back_to_review:

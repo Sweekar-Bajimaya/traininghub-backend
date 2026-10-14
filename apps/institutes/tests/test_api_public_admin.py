@@ -15,6 +15,7 @@ from apps.institutes.models import (
 )
 from apps.institutes.tests.helpers import (
     OWNER_EMAIL,
+    PAN_VAT_NUMBER,
     PASSWORD,
     TempMediaMixin,
     User,
@@ -60,6 +61,7 @@ class RegistrationApiTests(APITestCase):
         data = {
             "name": "New Institute",
             "registration_number": "REG-123",
+            "pan_vat_number": PAN_VAT_NUMBER,
             "type": "COMPANY",
             "otp": otp,
             "owner": owner,
@@ -103,6 +105,95 @@ class RegistrationApiTests(APITestCase):
         owner = institute.members.get().user
         self.assertEqual(owner.role, Role.INSTITUTE_STAFF)
         self.assertFalse(owner.is_staff)
+
+    def test_the_pan_vat_number_is_saved_and_echoed(self):
+        res = self.post()
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["pan_vat_number"], PAN_VAT_NUMBER)
+        institute = Institute.objects.get(slug=res.data["slug"])
+        self.assertEqual(institute.pan_vat_number, PAN_VAT_NUMBER)
+
+    def test_the_pan_vat_number_is_required(self):
+        payload = self.payload()
+        del payload["pan_vat_number"]
+        res = self.client.post(REGISTER_URL, payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("pan_vat_number", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_a_malformed_pan_vat_number_is_a_400(self):
+        for value in (
+            "12345678",  # eight digits
+            "1234567890",  # ten digits
+            "12345678a",
+            "123-45-678",
+            "१२३४५६७८९",  # nine Devanagari digits
+            "",
+            "   ",
+        ):
+            with self.subTest(value=value):
+                reset_throttles()  # five registrations an hour, failed ones count
+                res = self.post(pan_vat_number=value)
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("pan_vat_number", res.data)
+        self.assertFalse(Institute.objects.exists())
+
+    def test_spaces_around_the_pan_vat_number_are_trimmed(self):
+        res = self.post(pan_vat_number=f"  {PAN_VAT_NUMBER} ")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["pan_vat_number"], PAN_VAT_NUMBER)
+
+    def test_a_pan_vat_number_already_in_use_is_a_400(self):
+        make_institute(
+            name="First", email="first@example.com", pan_vat_number=PAN_VAT_NUMBER
+        )
+        res = self.post()
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("pan_vat_number", res.data)
+        self.assertEqual(Institute.objects.count(), 1)
+
+    def test_the_contact_telephone_number_is_saved(self):
+        contact = {
+            "contact_person": "Contact Person",
+            "contact_phone": "9811111111",
+            "contact_email": "contact@example.com",
+            "telephone_number": "014123456",
+        }
+        res = self.post(contact=contact)
+        self.assertEqual(res.status_code, 201, res.data)
+        institute = Institute.objects.get(slug=res.data["slug"])
+        self.assertEqual(institute.contact.telephone_number, "014123456")
+
+    def test_the_contact_telephone_number_is_optional(self):
+        res = self.post()  # the payload's contact has none
+        self.assertEqual(res.status_code, 201, res.data)
+        institute = Institute.objects.get(slug=res.data["slug"])
+        self.assertEqual(institute.contact.telephone_number, "")
+
+    def test_a_blank_contact_telephone_number_is_accepted(self):
+        contact = {
+            "contact_person": "Contact Person",
+            "contact_phone": "9811111111",
+            "contact_email": "contact@example.com",
+            "telephone_number": "",
+        }
+        res = self.post(contact=contact)
+        self.assertEqual(res.status_code, 201, res.data)
+
+    def test_a_bad_contact_telephone_number_is_a_400(self):
+        for value in ("abc", "12345", "0141234567890123"):
+            with self.subTest(value=value):
+                reset_throttles()
+                contact = {
+                    "contact_person": "Contact Person",
+                    "contact_phone": "9811111111",
+                    "contact_email": "contact@example.com",
+                    "telephone_number": value,
+                }
+                res = self.post(contact=contact)
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("telephone_number", res.data["contact"])
+        self.assertFalse(Institute.objects.exists())
 
     def test_locations_are_required(self):
         payload = self.payload()
@@ -153,9 +244,17 @@ class RegistrationApiTests(APITestCase):
 
     def test_the_sixth_registration_in_an_hour_is_throttled(self):
         for i in range(5):
-            res = self.post(name=f"Institute {i}", owner=self.owner(f"owner{i}@example.com"))
+            res = self.post(
+                name=f"Institute {i}",
+                pan_vat_number=f"10000000{i}",  # each institute needs its own
+                owner=self.owner(f"owner{i}@example.com"),
+            )
             self.assertEqual(res.status_code, 201)
-        res = self.post(name="One more", owner=self.owner("owner9@example.com"))
+        res = self.post(
+            name="One more",
+            pan_vat_number="100000009",
+            owner=self.owner("owner9@example.com"),
+        )
         self.assertEqual(res.status_code, 429)
 
     # password confirmation
@@ -510,6 +609,7 @@ class PublicInstituteApiTests(TempMediaMixin, APITestCase):
         InstituteContact.objects.create(
             institute=institute, contact_person="Ram",
             contact_phone="9811111111", contact_email="ram@example.com",
+            telephone_number="014123456",
         )
         InstituteCEO.objects.create(institute=institute, name="Sita", message="Welcome")
         InstituteSocialLink.objects.create(
@@ -518,6 +618,8 @@ class PublicInstituteApiTests(TempMediaMixin, APITestCase):
         institute.gallery.create(image=png("g.png"), caption="Lab")
         data = self.client.get(f"{PUBLIC_URL}{institute.slug}/").data
         self.assertEqual(data["contact"]["contact_email"], "ram@example.com")
+        self.assertEqual(data["contact"]["telephone_number"], "014123456")
+        self.assertNotIn("pan_vat_number", data)  # a tax id is not public
         self.assertEqual(data["ceo"]["name"], "Sita")
         self.assertEqual(data["social_links"][0]["platform"], "facebook")
         self.assertEqual(data["locations"][0]["municipality"], "Kathmandu")
@@ -583,6 +685,31 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         self.assertNotIn("file", row["documents"][0])
         self.assertNotIn("private_media", str(row))
 
+    def test_list_shows_what_the_institute_gave_at_registration(self):
+        add_location(self.institute, self.municipality, is_main=True)
+        add_location(self.institute, self.municipality, is_active=False)
+        InstituteContact.objects.create(
+            institute=self.institute,
+            contact_person="Contact Person",
+            contact_phone="9811111111",
+            contact_email="contact@example.com",
+        )
+        self.client.force_authenticate(self.reviewer)
+        row = self.client.get(ADMIN_URL).data["results"][0]
+        self.assertEqual(row["pan_vat_number"], self.institute.pan_vat_number)
+        self.assertIn("registration_number", row)
+        self.assertEqual(row["contact"]["contact_person"], "Contact Person")
+        self.assertIsNone(row["ceo"])
+        self.assertEqual(row["social_links"], [])
+        self.assertEqual(
+            [(l["municipality_name"], l["district_name"], l["province_name"], l["is_main"], l["is_active"])
+             for l in row["locations"]],
+            [
+                ("Municipality", "District", "Province", True, True),
+                ("Municipality", "District", "Province", False, False),
+            ],
+        )
+
     def test_list_filter_by_status(self):
         make_institute(name="Beta", email="beta@example.com", status=InstituteStatus.APPROVED)
         self.client.force_authenticate(self.reviewer)
@@ -594,7 +721,17 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         self.client.get(ADMIN_URL)  # warm-up: the user's permissions are loaded once, then cached
         one = count_queries(lambda: self.client.get(ADMIN_URL))
         for i in range(8):
-            make_institute(name=f"Institute {i}", email=f"i{i}@example.com")
+            other, _ = make_institute(name=f"Institute {i}", email=f"i{i}@example.com")
+            add_location(other, self.municipality, is_main=True)
+            InstituteContact.objects.create(
+                institute=other,
+                contact_person="Person",
+                contact_phone="9811111111",
+                contact_email=f"c{i}@example.com",
+            )
+            InstituteSocialLink.objects.create(
+                institute=other, platform="WEBSITE", url=f"https://i{i}.example.com"
+            )
         many = count_queries(lambda: self.client.get(ADMIN_URL))
         self.assertEqual(one, many)
 

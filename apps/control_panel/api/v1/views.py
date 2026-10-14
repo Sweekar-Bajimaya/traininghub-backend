@@ -23,7 +23,12 @@ from apps.control_panel.api.v1.serializers import (
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
 from apps.institutes.constants import MemberRole
-from apps.institutes.models import Institute, InstituteDocument, InstituteMember
+from apps.institutes.models import (
+    Institute,
+    InstituteDocument,
+    InstituteLocation,
+    InstituteMember,
+)
 from apps.training import services as training_services
 from apps.training.api.v1.views import with_content
 from apps.training.models import Training
@@ -72,8 +77,15 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_fields = ("status", "type")
     search_fields = ("name",)
-    queryset = Institute.objects.prefetch_related(
+    queryset = Institute.objects.select_related("contact", "ceo").prefetch_related(
         "documents",
+        "social_links",
+        Prefetch(
+            "locations",
+            queryset=InstituteLocation.objects.select_related(
+                "location", "location__district", "location__province"
+            ).order_by("-is_main", "pk"),
+        ),
         Prefetch(
             "members",
             queryset=InstituteMember.objects.filter(
@@ -161,7 +173,7 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
     queryset = Training.objects.select_related(
-        "institute", "category__parent", "institute_location__location"
+        "institute", "category__parent", "venue__location"
     ).order_by("-created_at", "-pk")
 
     def get_serializer_class(self):
