@@ -74,16 +74,18 @@ or an open question gets answered. Rules:
 - Institute types (fixed list): Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School,
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
-  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute, owner
-  with a verified email, contact person, at least one location); the owner then logs in (even while `PENDING`) and
+  (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute with its
+  registration number and a unique nine-digit PAN/VAT number, owner with a verified email, contact person, at least one
+  location); the owner then logs in (even while `PENDING`) and
   uploads verification documents. Approval needs at least one active location and one document. A suspended institute's staff keep their accounts.
 - Registration email: the institute's login is `owner.email` + `owner.password` (there is no separate institute email
   column). It is verified with a one-time code: `POST institute/register/send-otp/` emails the code to that address (400 if
   a user already has it), then the code goes in `POST institute/register/` as `otp` (`verify-otp/` is an optional check in
   between). Codes are six digits, valid 5 minutes, one per address per minute, 5 wrong guesses lock a code (limits in
   `apps/users/constants.py`).
-- Institute profile: the institute's own columns (name, type, registration number, established year, description, logo) are
-  edited with `PATCH institute/profile/`; the required contact person, the optional CEO and the social links (one per
+- Institute profile: the institute's own columns (name, type, registration number, PAN/VAT number, established year,
+  description, logo) are edited with `PATCH institute/profile/` (the registration and PAN/VAT numbers are shown there but
+  read-only); the required contact person (with an optional telephone number), the optional CEO and the social links (one per
   platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
   `institute/social-links/`. The public detail shows them, the locations and the gallery, never the owner's login.
 - Reviews & ratings are out of the MVP.
@@ -273,6 +275,15 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   nullable side of an outer join"); the training services lock with `of=("self",)`.
 - A training's venue is its own row, not an `InstituteLocation`: deactivating an institute location never touches
   trainings. "An online training has no municipality" is checked in `training/services._check_venue`, not by the database.
+- **`training/0004` drops `Training.institute_location` without copying it** into `TrainingLocation`. On a database that
+  already has trainings, they have no venue row: the public `location` is `null`, an edit that sends neither `venue` nor
+  `mode` still works, but submitting, or editing an `APPROVED` / `UNPUBLISHED` training (it goes back to review), is refused
+  until the request carries a `venue`. Their search vectors keep the old place names until the training is saved again.
+- **`institutes/0003` gives every existing institute a random, unique `pan_vat_number`** so the unique index can be built.
+  They are placeholders, not real PANs, and the profile API makes the number read-only, so replace them with a data fix.
+- **The PAN/VAT format (nine `[0-9]` digits) is checked in `InstituteRegistrationSerializer`**
+  (`apps.common.validators.validate_pan_vat_number`), not on the model: `services.register`, the shell and test factories
+  skip it, so only the unique index guards those paths.
 - **Verification documents are private.** They are stored under `PRIVATE_MEDIA_ROOT` (`private_media/` in the project
   root, gitignored; note `BASE_DIR` is `config/`, so it is `BASE_DIR.parent`), `PrivateStorage` raises on `.url`, and
   they are only served by `private_file_response` after a permission check. `InstituteDocument` is deliberately not

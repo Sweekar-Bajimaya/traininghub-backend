@@ -5,6 +5,7 @@ from unittest import mock
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
@@ -28,6 +29,7 @@ from apps.institutes.models import (
 )
 from apps.institutes.tests.helpers import (
     OWNER_EMAIL,
+    PAN_VAT_NUMBER,
     PASSWORD,
     TempMediaMixin,
     User,
@@ -150,7 +152,11 @@ class RegistrationTests(TestCase):
             "contact_phone": "9811111111",
             "contact_email": "contact@example.com",
         }
-        self.data = {"name": "New Institute", "type": "COMPANY"}
+        self.data = {
+            "name": "New Institute",
+            "type": "COMPANY",
+            "pan_vat_number": PAN_VAT_NUMBER,
+        }
         self.otp = issue_registration_otp(OWNER_EMAIL)
 
     def register(self, **kwargs):
@@ -196,6 +202,28 @@ class RegistrationTests(TestCase):
         self.assertFalse(Institute.objects.exists())
         self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
         self.assertTrue(self.code_is_alive())  # the user can fix the form and submit again
+
+    def test_the_pan_vat_number_is_saved(self):
+        self.assertEqual(self.register().pan_vat_number, PAN_VAT_NUMBER)
+
+    def test_the_contact_telephone_number_is_saved(self):
+        institute = self.register(
+            contact={**self.contact, "telephone_number": "014123456"}
+        )
+        self.assertEqual(institute.contact.telephone_number, "014123456")
+
+    def test_the_contact_telephone_number_is_optional(self):
+        self.assertEqual(self.register().contact.telephone_number, "")
+
+    def test_a_pan_vat_number_in_use_writes_nothing_and_keeps_the_code(self):
+        make_institute(
+            name="First", email="first@example.com", pan_vat_number=PAN_VAT_NUMBER
+        )
+        with self.assertRaises(IntegrityError):
+            self.register()
+        self.assertEqual(Institute.objects.count(), 1)
+        self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
+        self.assertTrue(self.code_is_alive())
 
     def test_a_province_is_not_a_valid_location(self):
         province = Location.objects.get(level="PROVINCE")

@@ -7,6 +7,7 @@ from apps.common.api.v1.serializers import (
     active_municipalities,
 )
 from apps.common.serializers import DynamicFieldsModelSerializer
+from apps.common.validators import validate_pan_vat_number
 from apps.institutes import services
 from apps.institutes.models import (
     Institute,
@@ -29,9 +30,19 @@ User = get_user_model()
 
 
 class InstituteContactSerializer(DynamicFieldsModelSerializer):
+    website = serializers.SerializerMethodField()
     class Meta:
         model = InstituteContact
-        fields = ("contact_person", "contact_phone", "contact_email")
+        fields = ("contact_person", "contact_phone", "contact_email", "telephone_number", "website")
+
+    def get_website(self, obj):
+        link = next(
+            (l for l in obj.institute.social_links.all()
+                if l.platform == SocialPlatform.WEBSITE),
+            None,
+        )
+        return link.url if link else None
+
 
 
 class InstituteCEOSerializer(DynamicFieldsModelSerializer):
@@ -87,6 +98,7 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
             "status",
             "name",
             "registration_number",
+            "pan_vat_number",
             "type",
             "otp",
             "established_year",
@@ -121,6 +133,9 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
             otp=validated_data.pop("otp"),
             institute_data=validated_data,
         )
+
+    def validate_pan_vat_number(self, value):
+        return validate_pan_vat_number(value)
 
 
 # public pages
@@ -200,6 +215,7 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
             "slug",
             "name",
             "registration_number",
+            "pan_vat_number",
             "type",
             "status",
             "status_reason",
@@ -214,6 +230,7 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
             "id",
             "slug",
             "registration_number",
+            "pan_vat_number",
             "status",
             "status_reason",
         )

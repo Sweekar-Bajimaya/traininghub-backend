@@ -24,6 +24,7 @@ from apps.institutes.models import (
     InstituteSocialLink,
 )
 from apps.institutes.tests.helpers import (
+    PAN_VAT_NUMBER,
     PASSWORD,
     TempMediaMixin,
     User,
@@ -132,6 +133,23 @@ class ProfileTests(PortalTestCase):
         self.institute.refresh_from_db()
         self.assertEqual(self.institute.registration_number, "REG-1")
 
+    def test_the_profile_shows_the_pan_vat_number(self):
+        Institute.objects.filter(pk=self.institute.pk).update(pan_vat_number="111111111")
+        for user in (self.owner, self.staff):
+            with self.subTest(user=user.email):
+                res = self.as_(user).get(BASE + "profile/")
+                self.assertEqual(res.data["pan_vat_number"], "111111111")
+
+    def test_the_pan_vat_number_cannot_be_changed(self):
+        Institute.objects.filter(pk=self.institute.pk).update(pan_vat_number="111111111")
+        res = self.as_(self.owner).patch(
+            BASE + "profile/", {"pan_vat_number": "222222222"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["pan_vat_number"], "111111111")
+        self.institute.refresh_from_db()
+        self.assertEqual(self.institute.pan_vat_number, "111111111")
+
     def test_another_institute_is_untouched(self):
         self.as_(self.owner).patch(BASE + "profile/", {"description": "Mine"}, format="json")
         self.other.refresh_from_db()
@@ -222,6 +240,50 @@ class ContactTests(PortalTestCase):
         for body in ({"contact_phone": "abc"}, {"contact_email": "nope"}):
             with self.subTest(body=body):
                 self.assertEqual(self.as_(self.owner).patch(self.URL, body, format="json").status_code, 400)
+
+    def test_get_shows_the_telephone_number_blank_until_it_is_set(self):
+        self.assertEqual(self.as_(self.owner).get(self.URL).data["telephone_number"], "")
+        InstituteContact.objects.filter(pk=self.contact.pk).update(telephone_number="014123456")
+        self.assertEqual(
+            self.as_(self.staff).get(self.URL).data["telephone_number"], "014123456"
+        )
+
+    def test_patch_sets_and_clears_the_telephone_number(self):
+        res = self.as_(self.owner).patch(
+            self.URL, {"telephone_number": "014123456"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "014123456")
+        self.assertEqual(self.contact.contact_phone, "9811111111")  # untouched
+        res = self.as_(self.owner).patch(self.URL, {"telephone_number": ""}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "")
+
+    def test_put_replaces_the_telephone_number(self):
+        res = self.as_(self.owner).put(
+            self.URL, {**self.DATA, "telephone_number": "014123456"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "014123456")
+
+    def test_a_bad_telephone_number_is_a_400(self):
+        for value in ("abc", "12345", "0141234567890123"):
+            with self.subTest(value=value):
+                res = self.as_(self.owner).patch(
+                    self.URL, {"telephone_number": value}, format="json"
+                )
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("telephone_number", res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "")
+
+    def test_the_telephone_number_of_another_institute_is_untouched(self):
+        self.as_(self.owner).patch(self.URL, {"telephone_number": "014123456"}, format="json")
+        other = InstituteContact.objects.get(institute=self.other)
+        self.assertEqual(other.telephone_number, "")
 
     def test_an_institute_without_a_contact_gets_404(self):
         InstituteContact.objects.filter(institute=self.institute).delete()
@@ -691,6 +753,7 @@ class EndToEndTests(TempMediaMixin, APITestCase):
             {
                 "name": "Journey Academy",
                 "registration_number": "REG-9",
+                "pan_vat_number": PAN_VAT_NUMBER,
                 "type": "LANGUAGE_SCHOOL",
                 "otp": code,
                 "owner": {

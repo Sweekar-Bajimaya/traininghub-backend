@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import OneToOneField
 from django.db.models.functions import Lower
@@ -21,6 +22,7 @@ from apps.users.constants import SocialPlatform
 class Institute(BaseModel, SlugModel):
     name = models.CharField(max_length=255)
     registration_number = models.CharField(max_length=50)
+    pan_vat_number = models.CharField(max_length=9, unique=True)
     type = models.CharField(max_length=30, choices=InstituteType.CHOICES)
     established_year = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
@@ -180,6 +182,11 @@ class InstituteContact(BaseModel):
     contact_person = models.CharField(max_length=150)
     contact_phone = models.CharField(max_length=25, validators=[validate_phone_number])
     contact_email = models.EmailField()
+    telephone_number = models.CharField(
+        max_length=25,
+        blank=True,
+        validators=[validate_phone_number],
+    )
 
     def __str__(self):
         return f"{self.contact_person} - {self.institute.name}"
@@ -216,7 +223,9 @@ class InstituteSocialLink(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["institute", "platform"],
-                condition=~models.Q(platform=SocialPlatform.OTHER),  # any number of "other" links
+                condition=~models.Q(
+                    platform=SocialPlatform.OTHER
+                ),  # any number of "other" links
                 name="institutes_unique_social_platform",
             )
         ]
