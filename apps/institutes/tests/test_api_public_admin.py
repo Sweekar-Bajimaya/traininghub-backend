@@ -685,6 +685,31 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         self.assertNotIn("file", row["documents"][0])
         self.assertNotIn("private_media", str(row))
 
+    def test_list_shows_what_the_institute_gave_at_registration(self):
+        add_location(self.institute, self.municipality, is_main=True)
+        add_location(self.institute, self.municipality, is_active=False)
+        InstituteContact.objects.create(
+            institute=self.institute,
+            contact_person="Contact Person",
+            contact_phone="9811111111",
+            contact_email="contact@example.com",
+        )
+        self.client.force_authenticate(self.reviewer)
+        row = self.client.get(ADMIN_URL).data["results"][0]
+        self.assertEqual(row["pan_vat_number"], self.institute.pan_vat_number)
+        self.assertIn("registration_number", row)
+        self.assertEqual(row["contact"]["contact_person"], "Contact Person")
+        self.assertIsNone(row["ceo"])
+        self.assertEqual(row["social_links"], [])
+        self.assertEqual(
+            [(l["municipality_name"], l["district_name"], l["province_name"], l["is_main"], l["is_active"])
+             for l in row["locations"]],
+            [
+                ("Municipality", "District", "Province", True, True),
+                ("Municipality", "District", "Province", False, False),
+            ],
+        )
+
     def test_list_filter_by_status(self):
         make_institute(name="Beta", email="beta@example.com", status=InstituteStatus.APPROVED)
         self.client.force_authenticate(self.reviewer)
@@ -696,7 +721,17 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         self.client.get(ADMIN_URL)  # warm-up: the user's permissions are loaded once, then cached
         one = count_queries(lambda: self.client.get(ADMIN_URL))
         for i in range(8):
-            make_institute(name=f"Institute {i}", email=f"i{i}@example.com")
+            other, _ = make_institute(name=f"Institute {i}", email=f"i{i}@example.com")
+            add_location(other, self.municipality, is_main=True)
+            InstituteContact.objects.create(
+                institute=other,
+                contact_person="Person",
+                contact_phone="9811111111",
+                contact_email=f"c{i}@example.com",
+            )
+            InstituteSocialLink.objects.create(
+                institute=other, platform="WEBSITE", url=f"https://i{i}.example.com"
+            )
         many = count_queries(lambda: self.client.get(ADMIN_URL))
         self.assertEqual(one, many)
 

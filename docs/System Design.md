@@ -176,7 +176,7 @@ Implemented in `apps/users`, except the admins CRUD (`apps/control_panel`). `adm
 | `admin/institutes/` and `.../{id}/{approve,reject,request-info,suspend,reinstate}/` | `users.manage_institutes` | Reject, request-info and suspend need a reason; approve needs one active location and one document |
 | `admin/institutes/{id}/documents/{doc}/` (PATCH) and `.../download/` | `users.manage_institutes` | Document review: `VERIFIED` or `REJECTED` |
 
-The `admin/institutes/` endpoints are implemented in `apps/control_panel`. Rows of another institute return 404. Verification documents live under `PRIVATE_MEDIA_ROOT`, outside `MEDIA_ROOT`, and never get a URL. Invitation tokens are stored as a sha256 hash only. Renaming an institute queues a refresh of its trainings' search vectors.
+The `admin/institutes/` endpoints are implemented in `apps/control_panel`. Each row is read-only and shows the registration and PAN/VAT numbers, the owner's email, the contact person, the CEO, the social links, every location (retired ones with `is_active: false`) and the documents. Rows of another institute return 404. Verification documents live under `PRIVATE_MEDIA_ROOT`, outside `MEDIA_ROOT`, and never get a URL. Invitation tokens are stored as a sha256 hash only. Renaming an institute queues a refresh of its trainings' search vectors.
 
 ### 3.6 Categories and trainings API (built)
 

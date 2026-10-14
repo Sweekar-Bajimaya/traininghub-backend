@@ -9,6 +9,12 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.institutes.api.v1.serializers import (
+    InstituteCEOSerializer,
+    InstituteContactSerializer,
+    InstituteLocationSerializer,
+    InstituteSocialLinkSerializer,
+)
 from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import Institute, InstituteDocument
 from apps.training.api.v1.serializers import (
@@ -149,8 +155,15 @@ class DocumentReviewSerializer(serializers.Serializer):
 
 
 class AdminInstituteSerializer(DynamicFieldsModelSerializer):
+    """Read-only view of an institute for the reviewer: what it gave at registration (locations,
+    contact person) and what it added since, with every location, retired ones included."""
+
     documents = AdminDocumentSerializer(many=True, read_only=True)
     owner_email = serializers.SerializerMethodField()
+    contact = InstituteContactSerializer(read_only=True, allow_null=True)
+    ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
+    social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
+    locations = InstituteLocationSerializer(many=True, read_only=True)
 
     class Meta:
         model = Institute
@@ -158,6 +171,8 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "id",
             "slug",
             "name",
+            "registration_number",
+            "pan_vat_number",
             "type",
             "status",
             "status_reason",
@@ -165,6 +180,10 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "description",
             "created_at",
             "owner_email",
+            "contact",
+            "ceo",
+            "social_links",
+            "locations",
             "documents",
         )
 
