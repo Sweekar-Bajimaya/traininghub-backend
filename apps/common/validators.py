@@ -7,7 +7,9 @@ from rest_framework import serializers
 
 from apps.common.utils.helpers import combine_date_parts, get_today
 
-PHONE_NUMBER_REGEX = re.compile(r"^(([+]?\d{3})-?)?\d{7,10}$")
+# Mobile / plain numbers with an optional country code, or a landline written with its
+# area code: 0 + 1-2 digit area code, a hyphen, then 6-7 digits (01-4122234, 061-523456).
+PHONE_NUMBER_REGEX = re.compile(r"^((([+]?\d{3})-?)?\d{7,10}|0\d{1,2}-\d{6,7})$")
 PAN_VAT_NUMBER_REGEX = re.compile(r"[0-9]{9}")
 
 
@@ -35,7 +37,7 @@ def validate_phone_number(number):
         raise serializers.ValidationError(
             _(
                 "Phone Number format is not valid. Some examples of supported"
-                " phone numbers are numbers are 9811111111, 08256666,"
+                " phone numbers are 9811111111, 08256666, 01-4122234,"
                 " 977-9833333333, +977-9833333333, 977-08256666"
             )
         )
