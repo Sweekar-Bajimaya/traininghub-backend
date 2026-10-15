@@ -9,6 +9,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.generics import (
     CreateAPIView,
     GenericAPIView,
+    RetrieveAPIView,
     RetrieveUpdateAPIView,
     RetrieveUpdateDestroyAPIView,
 )
@@ -32,6 +33,7 @@ from apps.institutes.api.v1.serializers import (
     AcceptInvitationSerializer,
     GalleryImageSerializer,
     GalleryReorderSerializer,
+    InstituteActionRequiredSerializer,
     InstituteCEOSerializer,
     InstituteContactSerializer,
     InstituteDocumentSerializer,
@@ -257,11 +259,13 @@ class PortalInvitationViewSet(InstituteScopedMixin, CreateListDestroyViewSet):
 class PortalContactView(RetrieveUpdateAPIView):
     serializer_class = InstituteContactSerializer
     permission_classes = [IsInstituteMember]
-    http_method_names = ["get", "put", "patch", "head", "options"]
+    http_method_names = ["get", "patch", "head", "options"]
 
     def get_object(self):
+        # no prefetch of the social links: the website is read after an update, and a prefetch
+        # made before it would still hold the old link
         return get_object_or_404(
-            InstituteContact.objects.prefetch_related("institute__social_links"),
+            InstituteContact.objects.select_related("institute"),
             institute_id=self.request.user.membership.institute_id,
         )
 
@@ -286,3 +290,17 @@ class PortalSocialLinkViewSet(InstituteScopedMixin, CreateListUpdateDestroyViewS
     lookup_value_regex = r"[0-9]+"
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     queryset = InstituteSocialLink.objects.order_by("pk")
+
+
+class InstituteActionRequiredView(RetrieveAPIView):
+    """Profile completeness of the caller's own institute, all sections in one query. Each key is
+    `true` when the section is filled in and `false` when the institute still has to fill it."""
+
+    serializer_class = InstituteActionRequiredSerializer
+    permission_classes = [IsInstituteMember]
+    queryset = services.annotate_profile_completion(Institute.objects.only("id"))
+
+    def get_object(self):
+        return get_object_or_404(
+            self.get_queryset(), pk=self.request.user.membership.institute_id
+        )

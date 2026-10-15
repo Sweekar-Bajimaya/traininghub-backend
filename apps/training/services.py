@@ -358,6 +358,8 @@ def create_training(
         fields.get("end_date"),
         fields.get("registration_deadline"),
     )
+    if "shifts" in fields:
+        fields["shifts"] = _clean_shifts(fields["shifts"])
     if sessions is not None:
         _check_sessions(sessions)
     fields["duration_weeks"] = duration_in_weeks(

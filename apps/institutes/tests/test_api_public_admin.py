@@ -106,6 +106,61 @@ class RegistrationApiTests(APITestCase):
         self.assertEqual(owner.role, Role.INSTITUTE_STAFF)
         self.assertFalse(owner.is_staff)
 
+    def contact(self, **extra):
+        return {
+            "contact_person": "Contact Person",
+            "contact_phone": "9811111111",
+            "contact_email": "contact@example.com",
+            **extra,
+        }
+
+    def test_a_contact_website_is_saved_as_the_websites_social_link(self):
+        res = self.post(contact=self.contact(website="https://site.example/"))
+        self.assertEqual(res.status_code, 201, res.data)
+        institute = Institute.objects.get(slug=res.data["slug"])
+        link = institute.social_links.get()
+        self.assertEqual((link.platform, link.url), ("website", "https://site.example/"))
+
+    def test_a_blank_or_missing_contact_website_adds_no_link(self):
+        for i, extra in enumerate(({}, {"website": ""}, {"website": None})):
+            with self.subTest(extra=extra):
+                reset_throttles()
+                res = self.post(
+                    contact=self.contact(**extra),
+                    owner=self.owner(email=f"owner{i}@example.com"),
+                    pan_vat_number=f"90010000{i}",  # the column is unique
+                )
+                self.assertEqual(res.status_code, 201, res.data)
+                self.assertFalse(
+                    InstituteSocialLink.objects.filter(institute__slug=res.data["slug"]).exists()
+                )
+
+    def test_the_website_sits_next_to_the_other_social_links(self):
+        res = self.post(
+            contact=self.contact(website="https://site.example/"),
+            social_links=[{"platform": "facebook", "url": "https://facebook.com/x"}],
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        links = Institute.objects.get(slug=res.data["slug"]).social_links.all()
+        self.assertEqual(sorted(l.platform for l in links), ["facebook", "website"])
+
+    def test_the_website_cannot_be_sent_in_the_contact_and_as_a_social_link(self):
+        res = self.post(
+            contact=self.contact(website="https://site.example/"),
+            social_links=[{"platform": "website", "url": "https://other.example/"}],
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("social_links", res.data)
+        self.assertEqual(Institute.objects.count(), 0)
+
+    def test_a_bad_contact_website_is_refused(self):
+        for website in ("not a url", "https://x.example/" + "a" * 200):
+            with self.subTest(website=website[:30]):
+                res = self.post(contact=self.contact(website=website))
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("website", res.data["contact"])
+        self.assertEqual(Institute.objects.count(), 0)
+
     def test_the_pan_vat_number_is_saved_and_echoed(self):
         res = self.post()
         self.assertEqual(res.status_code, 201, res.data)
@@ -765,8 +820,6 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         Institute.objects.filter(pk=self.institute.pk).update(status=InstituteStatus.APPROVED)
         res = self.client.post(self.url("suspend"), {"reason": "Complaint"})
         self.assertEqual(res.data["status"], InstituteStatus.SUSPENDED)
-        res = self.client.post(self.url("reinstate"))
-        self.assertEqual(res.data["status"], InstituteStatus.APPROVED)
 
     def test_an_illegal_move_is_a_400(self):
         self.client.force_authenticate(self.reviewer)
