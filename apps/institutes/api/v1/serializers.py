@@ -30,18 +30,36 @@ User = get_user_model()
 
 
 class InstituteContactSerializer(DynamicFieldsModelSerializer):
-    website = serializers.SerializerMethodField()
+    # Not a column of the contact row: it is the institute's "website" social link. Output is
+    # filled in `to_representation`, input is written by `services.update_contact` / `register`.
+    # Blank or null means "no website".
+    website = serializers.URLField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=InstituteSocialLink._meta.get_field("url").max_length,
+    )
+
     class Meta:
         model = InstituteContact
         fields = ("contact_person", "contact_phone", "contact_email", "telephone_number", "website")
 
-    def get_website(self, obj):
-        link = next(
-            (l for l in obj.institute.social_links.all()
-                if l.platform == SocialPlatform.WEBSITE),
-            None,
-        )
-        return link.url if link else None
+    def to_representation(self, instance):
+        data = super().to_representation(instance)  # the contact has no `website`: null for now
+        if "website" in data:  # `fields` / `exclude_fields` may have dropped it
+            link = next(
+                (
+                    l
+                    for l in instance.institute.social_links.all()
+                    if l.platform == SocialPlatform.WEBSITE
+                ),
+                None,
+            )
+            data["website"] = link.url if link else None
+        return data
+
+    def update(self, instance, validated_data):
+        return services.update_contact(instance, **validated_data)
 
 
 
@@ -122,6 +140,17 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
         if len(platforms) != len(set(platforms)):
             raise serializers.ValidationError("Each platform can be added only once.")
         return value
+
+    def validate(self, attrs):
+        sends_website_link = any(
+            link["platform"] == SocialPlatform.WEBSITE
+            for link in attrs.get("social_links", [])
+        )
+        if attrs["contact"].get("website") and sends_website_link:
+            raise serializers.ValidationError(
+                {"social_links": "The website is already sent in contact; add it only once."}
+            )
+        return attrs
 
     def create(self, validated_data):
         return services.register(
@@ -237,6 +266,17 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
 
     def update(self, instance, validated_data):
         return services.update_profile(instance, **validated_data)  # unchanged
+
+
+class InstituteActionRequiredSerializer(serializers.Serializer):
+    """One boolean per profile section: `true` = filled in, `false` = the institute still has
+    to fill it. Reads the `has_*` annotations of `services.annotate_profile_completion`."""
+
+    description = serializers.BooleanField(source="has_description", read_only=True)
+    ceo = serializers.BooleanField(source="has_ceo", read_only=True)
+    gallery = serializers.BooleanField(source="has_gallery", read_only=True)
+    contact = serializers.BooleanField(source="has_contact", read_only=True)
+    social_links = serializers.BooleanField(source="has_social_links", read_only=True)
 
 
 class InstituteLocationSerializer(DynamicFieldsModelSerializer):

@@ -37,6 +37,11 @@ urlpatterns = [
         name="invitation-accept",
     ),
     path("profile/", views.InstituteProfileView.as_view(), name="profile"),
+    path(
+        "action-required/",
+        views.InstituteActionRequiredView.as_view(),
+        name="action-required",
+    ),
     path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),
     path(
         "documents/<int:pk>/download/",

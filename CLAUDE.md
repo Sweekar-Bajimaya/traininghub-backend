@@ -85,9 +85,11 @@ or an open question gets answered. Rules:
   `apps/users/constants.py`).
 - Institute profile: the institute's own columns (name, type, registration number, PAN/VAT number, established year,
   description, logo) are edited with `PATCH institute/profile/` (the registration and PAN/VAT numbers are shown there but
-  read-only); the required contact person (with an optional telephone number), the optional CEO and the social links (one per
-  platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
-  `institute/social-links/`. The public detail shows them, the locations and the gallery, never the owner's login.
+  read-only); the required contact person (with an optional telephone number and website), the optional CEO and the social
+  links (one per platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
+  `institute/social-links/`. The contact's `website` has no column: it is the `website` social link, written through
+  `services.update_contact` / `register` (`InstituteContactSerializer.to_representation` only reads it). The public detail shows them, the
+  locations and the gallery, never the owner's login.
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
   on client IP.
@@ -138,9 +140,9 @@ apps/
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
-                          (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
-                          social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
-                          `control_panel`
+                          (register, `register/send-otp/`, `register/verify-otp/`, profile, `action-required/`,
+                          contact, ceo, social-links, locations, documents, gallery, staff, invitations, resubmit); the
+                          admin review API is in `control_panel`
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
                           `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they
                           grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),

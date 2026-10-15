@@ -77,23 +77,27 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_fields = ("status", "type")
     search_fields = ("name",)
-    queryset = Institute.objects.select_related("contact", "ceo").prefetch_related(
-        "documents",
-        "social_links",
-        Prefetch(
-            "locations",
-            queryset=InstituteLocation.objects.select_related(
-                "location", "location__district", "location__province"
-            ).order_by("-is_main", "pk"),
-        ),
-        Prefetch(
-            "members",
-            queryset=InstituteMember.objects.filter(
-                role=MemberRole.OWNER
-            ).select_related("user"),
-            to_attr="owner_members",
-        ),
-    ).order_by("-created_at", "-pk")
+    queryset = (
+        Institute.objects.select_related("contact", "ceo")
+        .prefetch_related(
+            "documents",
+            "social_links",
+            Prefetch(
+                "locations",
+                queryset=InstituteLocation.objects.select_related(
+                    "location", "location__district", "location__province"
+                ).order_by("-is_main", "pk"),
+            ),
+            Prefetch(
+                "members",
+                queryset=InstituteMember.objects.filter(
+                    role=MemberRole.OWNER
+                ).select_related("user"),
+                to_attr="owner_members",
+            ),
+        )
+        .order_by("-created_at", "-pk")
+    )
 
     def _review(self, request, service, *, with_reason):
         kwargs = {}
@@ -123,9 +127,11 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     def suspend(self, request, pk=None):
         return self._review(request, institute_services.suspend, with_reason=True)
 
-    @action(detail=True, methods=["post"])
-    def reinstate(self, request, pk=None):
-        return self._review(request, institute_services.reinstate, with_reason=False)
+    # Disabled until it is decided what suspending an institute means and whether it can be undone.
+    # `institute_services.reinstate` and `InstituteStatus.TRANSITIONS[SUSPENDED]` are unchanged.
+    # @action(detail=True, methods=["post"])
+    # def reinstate(self, request, pk=None):
+    #     return self._review(request, institute_services.reinstate, with_reason=False)
 
 
 class AdminDocumentView(GenericAPIView):
