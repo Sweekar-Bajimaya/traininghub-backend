@@ -15,10 +15,9 @@ from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.training import services, tasks
 from apps.training.api.v1.filters import prefix_query
-from apps.training.constants import SEARCH_CONFIG, TrainingStatus
+from apps.training.constants import SEARCH_CONFIG, TrainingShift, TrainingStatus
 from apps.training.models import Training
 from apps.training.tests.helpers import (
-    add_location,
     approved_institute,
     make_category,
     make_municipality,
@@ -46,7 +45,9 @@ class TrainingTestCase(TestCase):
             category=self.category,
             short_description="Coffee basics",
             mode="ONLINE",
+            venue={"address": "Zoom link sent after enrolment"},
             level="BEGINNER",
+            shifts=[TrainingShift.MORNING],
             duration_value=6,
             duration_unit="WEEKS",
             fee_npr=Decimal("18500"),
@@ -151,23 +152,33 @@ class CreateTests(TrainingTestCase):
         training = self.create(category=self.category.parent)
         self.assertEqual(training.category, self.category.parent)
 
-    def test_refused(self):
-        other_institute, _, other_location = approved_institute(
-            name="Beta", email="beta@example.com", code=2
+    def test_shifts_are_stored_once_each_in_day_order(self):
+        training = self.create(
+            shifts=[TrainingShift.EVENING, TrainingShift.MORNING, TrainingShift.EVENING]
         )
+        training.refresh_from_db()
+        self.assertEqual(training.shifts, [TrainingShift.MORNING, TrainingShift.EVENING])
+
+    def test_a_draft_may_have_no_shifts(self):
+        training = self.create(shifts=[])
+        self.assertEqual((training.status, training.shifts), (S.DRAFT, []))
+
+    def test_refused(self):
         retired = make_category("Retired", parent="Old")
         retired.is_active = False
         retired.save()
         orphan = make_category("Orphan", parent="Gone")
         orphan.parent.is_active = False
         orphan.parent.save()
-        inactive_location = add_location(self.institute, make_municipality(3, "M3"), is_active=False)
         cases = {
             "inactive category": dict(category=retired),
             "sub-category of an inactive parent": dict(category=orphan),
-            "another institute's location": dict(mode="PHYSICAL", institute_location=other_location),
-            "inactive location": dict(mode="PHYSICAL", institute_location=inactive_location),
-            "online with a location": dict(institute_location=self.location),
+            "physical without a municipality": dict(mode="PHYSICAL"),
+            "online with a municipality": dict(
+                venue={"location": self.location.location, "address": "Main Road"}
+            ),
+            "no address": dict(venue={"address": ""}),
+            "no venue": dict(venue=None),
             "end before start": dict(end_date=self.today),
             "deadline after start": dict(registration_deadline=self.today + timedelta(days=31)),
         }
@@ -176,7 +187,6 @@ class CreateTests(TrainingTestCase):
                 with self.assertRaises(ValidationError):
                     self.create(**overrides)
         self.assertFalse(Training.objects.filter(institute=self.institute).exists())
-        self.assertFalse(other_institute.trainings.exists())
 
     def test_refused_for_an_institute_that_is_not_approved(self):
         for status in (InstituteStatus.PENDING, InstituteStatus.SUSPENDED):
@@ -219,6 +229,22 @@ class EditTests(TrainingTestCase):
         training.refresh_from_db()
         self.assertEqual((training.status, training.title), (S.APPROVED, "Python Bootcamp"))
 
+    def test_shifts_are_cleaned_on_edit(self):
+        training = make_training(self.institute, status=S.DRAFT)
+        training = services.update_training(
+            training, shifts=[TrainingShift.EVENING, TrainingShift.DAY, TrainingShift.EVENING]
+        )
+        training.refresh_from_db()
+        self.assertEqual(training.shifts, [TrainingShift.DAY, TrainingShift.EVENING])
+
+    def test_clearing_the_shifts_of_a_published_training_is_refused_and_rolled_back(self):
+        training = make_training(self.institute, status=S.APPROVED)
+        with self.assertRaises(ValidationError) as caught:
+            services.update_training(training, shifts=[])
+        self.assertEqual(set(caught.exception.message_dict), {"shifts"})
+        training.refresh_from_db()
+        self.assertEqual((training.status, training.shifts), (S.APPROVED, [TrainingShift.MORNING]))
+
     def test_some_statuses_cannot_be_edited(self):
         for status in (S.SUBMITTED, S.CANCELLED, S.EXPIRED):
             with self.subTest(status=status):
@@ -226,10 +252,28 @@ class EditTests(TrainingTestCase):
                 with self.assertRaises(ValidationError):
                     services.update_training(training, title="x")
 
-    def test_switching_to_online_clears_the_location(self):
+    def test_switching_the_mode_needs_the_new_venue(self):
         training = make_training(self.institute, status=S.DRAFT, location=self.location)
-        training = services.update_training(training, mode="ONLINE")
-        self.assertIsNone(training.institute_location)
+        with self.assertRaises(ValidationError):
+            services.update_training(training, mode="ONLINE")
+        training = services.update_training(
+            training, mode="ONLINE", venue={"address": "Zoom"}
+        )
+        self.assertEqual((training.venue.location, training.venue.address), (None, "Zoom"))
+
+    def test_a_venue_edit_replaces_the_whole_row(self):
+        training = make_training(self.institute, status=S.DRAFT, location=self.location)
+        training = services.update_training(
+            training, mode="PHYSICAL", venue={"location": self.location.location, "address": "New Road"}
+        )
+        self.assertEqual(
+            (training.venue.address, training.venue.map_url), ("New Road", "")
+        )
+
+    def test_an_edit_that_leaves_the_venue_alone_keeps_it(self):
+        training = make_training(self.institute, status=S.DRAFT, location=self.location)
+        services.update_training(training, title="kept")
+        self.assertEqual(training.venue.location, self.location.location)
 
     def test_changing_the_unit_recomputes_the_weeks(self):
         training = make_training(self.institute, status=S.DRAFT)
@@ -257,14 +301,17 @@ class EditTests(TrainingTestCase):
 class SubmitTests(TrainingTestCase):
     def test_every_missing_field_is_reported_at_once(self):
         training = services.create_training(
-            self.institute, title="Empty", category=self.category, mode="PHYSICAL"
+            self.institute, title="Empty", category=self.category, mode="PHYSICAL",
+            venue={"location": self.location.location, "address": "Main Road"},
         )
+        training.venue.delete()  # a draft made before the venue was required
+        training = Training.objects.get(pk=training.pk)
         with self.assertRaises(ValidationError) as caught:
             services.submit(training, by=self.owner)
         self.assertEqual(
             set(caught.exception.message_dict),
-            {"short_description", "level", "duration_value", "duration_unit", "fee_npr",
-             "start_date", "end_date", "institute_location", "sessions"},
+            {"short_description", "level", "shifts", "duration_value", "duration_unit", "fee_npr",
+             "start_date", "end_date", "venue", "sessions"},
         )
 
     def test_a_start_date_in_the_past_is_refused(self):
@@ -273,6 +320,14 @@ class SubmitTests(TrainingTestCase):
         )
         with self.assertRaises(ValidationError):
             services.submit(training, by=self.owner)
+
+    def test_shifts_are_required_to_submit(self):
+        training = self.create(shifts=[])
+        with self.assertRaises(ValidationError) as caught:
+            services.submit(training, by=self.owner)
+        self.assertEqual(set(caught.exception.message_dict), {"shifts"})
+        training = services.update_training(training, shifts=[TrainingShift.DAY])
+        self.assertEqual(services.submit(training, by=self.owner).status, S.SUBMITTED)
 
     def test_a_free_training_can_be_submitted(self):
         training = services.submit(self.create(fee_npr=Decimal("0")), by=self.owner)
@@ -356,24 +411,9 @@ class SearchVectorTests(TrainingTestCase):
         tasks.refresh_category_trainings(self.category.parent_id)
         self.assertEqual(found("computing"), ["Python Bootcamp"])
 
-    def test_follows_a_location_change(self):
-        make_training(self.institute, location=self.location)
-        other = make_municipality(5, "Pokhara")
-        with mock.patch("apps.institutes.services.async_task") as task, self.captureOnCommitCallbacks(
-            execute=True
-        ):
-            institute_services.update_location(self.location, location=other)
-        task.assert_called_once()
-        tasks.refresh_location_trainings(self.location.pk)
+    def test_follows_a_venue_change(self):
+        training = make_training(self.institute, status=S.DRAFT, location=self.location)
+        services.update_training(
+            training, venue={"location": make_municipality(5, "Pokhara"), "address": "Lakeside"}
+        )
         self.assertEqual(found("pokhara"), ["Python Bootcamp"])
-
-
-class DeactivateLocationTests(TrainingTestCase):
-    def test_refused_while_a_live_training_uses_it(self):
-        branch = add_location(self.institute, make_municipality(4, "Branch"))
-        training = make_training(self.institute, status=S.APPROVED, location=branch)
-        with self.assertRaises(ValidationError):
-            institute_services.deactivate_location(branch)
-        services.cancel(training, by=self.owner)
-        location = institute_services.deactivate_location(branch)
-        self.assertFalse(location.is_active)

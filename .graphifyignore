@@ -1,0 +1,24 @@
+# generated schema migrations
+migrations/
+
+# test helpers (keep the test_*.py files: their names record what was tested)
+**/tests/helpers.py
+
+# boilerplate
+apps.py
+admin.py
+__init__.py
+/manage.py
+wsgi.py
+asgi.py
+
+# non-code
+apps/templates/
+# design/*.html are bundled base64 (about 2.7 MB each, no readable text): left in, a rebuild would send them to the extraction agent
+design/
+
+# duplicate or stale docs (keep docs/System Design.md and the PRD)
+/README.md
+/CLAUDE.md
+docs/*-checklist.md
+docs/control_panel_migration.md

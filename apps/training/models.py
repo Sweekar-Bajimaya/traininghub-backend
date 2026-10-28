@@ -8,12 +8,13 @@ from apps.common.models.base import BaseModel, SlugModel
 from apps.common.models.category import Category
 from apps.common.utils.helpers import get_upload_path
 from apps.common.validators import validate_phone_number
-from apps.institutes.models import Institute, InstituteLocation
+from apps.institutes.models import Institute
 from apps.institutes.validators import validate_image_file
 from apps.training.constants import (
     DurationUnit,
     TrainingLevel,
     TrainingMode,
+    TrainingShift,
     TrainingStatus,
     WeekDay,
 )
@@ -29,13 +30,6 @@ class Training(BaseModel, SlugModel):
     category = models.ForeignKey(
         Category, on_delete=models.PROTECT, related_name="trainings"
     )
-    institute_location = models.ForeignKey(
-        InstituteLocation,
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="trainings",
-    )
     title = models.CharField(max_length=255)
     short_description = models.CharField(
         max_length=160, blank=True
@@ -45,6 +39,12 @@ class Training(BaseModel, SlugModel):
     )
     mode = models.CharField(max_length=10, choices=TrainingMode.CHOICES)
     level = models.CharField(max_length=15, choices=TrainingLevel.CHOICES, blank=True)
+    shifts = ArrayField(
+        models.CharField(max_length=10, choices=TrainingShift.CHOICES),
+        size=3,
+        blank=True,
+        default=list,
+    )
     duration_value = models.PositiveSmallIntegerField(null=True, blank=True)
     duration_unit = models.CharField(
         max_length=10, choices=DurationUnit.CHOICES, blank=True
@@ -69,14 +69,6 @@ class Training(BaseModel, SlugModel):
 
     class Meta:
         constraints = [
-            # drafts may be incomplete, so only "online has no location" is a database rule;
-            # "physical and hybrid need a location" is checked when submitting
-            models.CheckConstraint(
-                condition=~models.Q(
-                    mode=TrainingMode.ONLINE, institute_location__isnull=False
-                ),
-                name="training_online_has_no_location",
-            ),
             models.CheckConstraint(
                 condition=models.Q(start_date__isnull=True)
                 | models.Q(end_date__isnull=True)
@@ -195,3 +187,20 @@ class LearningOutcome(BaseModel):
 
     class Meta:
         ordering = ("pk",)
+
+
+class TrainingLocation(BaseModel):
+    """Where one training is held. Physical: a municipality plus an address. Online: `location`
+    stays empty and `address` is plain text (the platform, a meeting link)."""
+
+    training = models.OneToOneField(
+        Training, on_delete=models.CASCADE, related_name="venue"
+    )
+    location = models.ForeignKey(
+        "common.Location", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    address = models.CharField(max_length=255)
+    map_url = models.URLField(blank=True)
+    contact_phone = models.CharField(
+        max_length=25, blank=True, validators=[validate_phone_number]
+    )

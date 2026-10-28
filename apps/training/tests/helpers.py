@@ -17,11 +17,12 @@ from apps.institutes.tests.helpers import (  # noqa: F401  (re-exported for the 
     reset_throttles,
 )
 from apps.training import services
-from apps.training.constants import TrainingStatus
+from apps.training.constants import TrainingShift, TrainingStatus
 from apps.training.models import (
     Training,
     TrainingContact,
     TrainingDetail,
+    TrainingLocation,
     TrainingSession,
 )
 from apps.users import services as user_services
@@ -50,13 +51,15 @@ def make_training(
     institute, *, category=None, location=None, status=TrainingStatus.APPROVED, **overrides
 ):
     """Writes the rows directly (any status, no checks) and then builds the search vector.
-    The detail and contact fields can be overridden here like the training's own."""
+    The detail and contact fields can be overridden here like the training's own. `location` is an
+    InstituteLocation to copy the venue from; without one the training is held online."""
     today = timezone.localdate()
     fields = dict(
         title="Python Bootcamp",
         short_description="Learn Python from scratch",
         mode="ONLINE",
         level="BEGINNER",
+        shifts=[TrainingShift.MORNING],
         duration_value=8,
         duration_unit="WEEKS",
         duration_weeks=8,
@@ -81,11 +84,16 @@ def make_training(
     training = Training.objects.create(
         institute=institute,
         category=category or make_category(),
-        institute_location=location,
         **fields,
     )
     TrainingDetail.objects.create(training=training, **detail)
     TrainingContact.objects.create(training=training, **contact)
+    TrainingLocation.objects.create(
+        training=training,
+        location=location.location if location else None,
+        address=location.address if location else "Zoom link sent after enrolment",
+        map_url=location.map_url if location else "",
+    )
     TrainingSession.objects.create(
         training=training,
         class_days=["SUN", "MON", "TUE"],
@@ -98,15 +106,19 @@ def make_training(
 
 
 def training_payload(category, **overrides):
-    """A complete portal create body (online, so no location needed)."""
+    """A complete portal create body (online, so only an address text). `category` may be a
+    sub-category, as `make_category` returns: it is sent as `category` plus `sub_category`."""
     today = timezone.localdate()
+    top = category.parent or category
     data = {
         "title": "Barista Course",
-        "category": category.pk,
+        "category": top.pk,
         "short_description": "Coffee basics",
         "overview": "Espresso, milk and latte art",
         "mode": "ONLINE",
+        "venue": {"address": "Zoom link sent after enrolment"},
         "level": "BEGINNER",
+        "shifts": [TrainingShift.MORNING],
         "duration_value": 6,
         "duration_unit": "WEEKS",
         "fee_npr": "18500.00",
@@ -119,5 +131,7 @@ def training_payload(category, **overrides):
         "modules": [{"title": "Espresso"}, {"title": "Milk", "description": "Steaming"}],
         "outcomes": [{"text": "Pull a shot"}],
     }
+    if category.parent_id:
+        data["sub_category"] = category.pk
     data.update(overrides)
     return data

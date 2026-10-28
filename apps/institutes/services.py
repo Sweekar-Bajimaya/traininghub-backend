@@ -6,10 +6,16 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Q
+from django.db.models.functions import Length
+from django.db.models.lookups import GreaterThanOrEqual
 from django.utils import timezone
 from django_q.tasks import async_task
 
 from apps.institutes.constants import (
+    DESCRIPTION_MIN_LENGTH,
+    GALLERY_MIN_PHOTOS,
+    SOCIAL_LINKS_MIN,
     DocumentStatus,
     InstituteStatus,
     InvitationStatus,
@@ -27,7 +33,6 @@ from apps.institutes.models import (
     InstituteSocialLink,
 )
 from apps.institutes.validators import validate_institute_location
-from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
 from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
@@ -156,12 +161,19 @@ def _create_registration(*, institute_data, owner, contact, locations, ceo, soci
             for i, item in enumerate(locations)
         ]
     )
+    contact = dict(contact)
+    website = contact.pop("website", None)  # not a column: it is the "website" social link
     InstituteContact.objects.create(institute=institute, **contact)
     if ceo:
         InstituteCEO.objects.create(institute=institute, **ceo)
-    InstituteSocialLink.objects.bulk_create(
-        [InstituteSocialLink(institute=institute, **link) for link in social_links]
-    )
+    links = [InstituteSocialLink(institute=institute, **link) for link in social_links]
+    if website:
+        links.append(
+            InstituteSocialLink(
+                institute=institute, platform=SocialPlatform.WEBSITE, url=website
+            )
+        )
+    InstituteSocialLink.objects.bulk_create(links)
     return institute
 
 
@@ -190,15 +202,6 @@ def update_location(instance, **fields):
     for name, value in fields.items():
         setattr(instance, name, value)
     instance.save(update_fields=[*fields, "modified_at"])
-    if "location" in fields:
-        # the municipality and district are part of the search vector of trainings held here
-        transaction.on_commit(
-            lambda: async_task(
-                "apps.training.tasks.refresh_location_trainings",
-                instance.pk,
-                save=False,
-            )
-        )
     return instance
 
 
@@ -224,10 +227,6 @@ def deactivate_location(location):
     location = InstituteLocation.objects.get(pk=location.pk)
     if location.is_main:
         raise ValidationError("Choose another main office first.")
-    if location.trainings.exclude(status__in=TrainingStatus.FINISHED).exists():
-        raise ValidationError(
-            "Move or cancel the trainings held at this location first."
-        )
     location.is_active = False
     location.save(update_fields=["is_active", "modified_at"])
     return location
@@ -418,3 +417,77 @@ def update_social_link(link, **fields):
         setattr(link, name, value)
     link.save()
     return link
+
+
+@transaction.atomic
+def update_contact(contact, **fields):
+    """Change the contact row. `website` is not one of its columns: it is the institute's
+    "website" social link, set when given and removed when blank. Only the keys sent are changed."""
+    Institute.objects.select_for_update().get(
+        pk=contact.institute_id
+    )  # serialise per institute
+    sets_website = "website" in fields
+    website = fields.pop("website", None)
+    for name, value in fields.items():
+        setattr(contact, name, value)
+    if fields:
+        contact.save(update_fields=[*fields, "modified_at"])
+    if sets_website:
+        _set_website(contact.institute_id, website)
+    return contact
+
+
+def _set_website(institute_id, url):
+    """One website link per institute (the unique index allows one per platform but `other`)."""
+    links = InstituteSocialLink.objects.filter(
+        institute_id=institute_id, platform=SocialPlatform.WEBSITE
+    )
+    if url:
+        InstituteSocialLink.objects.update_or_create(
+            institute_id=institute_id,
+            platform=SocialPlatform.WEBSITE,
+            defaults={"url": url},
+        )
+    else:
+        links.delete()
+
+
+# profile completion (read only)
+def _at_least(queryset, count):
+    """EXISTS that is true only when the subquery has `count` rows or more
+    (`LIMIT 1 OFFSET count-1`), so a count threshold needs no join or GROUP BY."""
+    return Exists(queryset.values("pk")[count - 1 : count])
+
+
+def annotate_profile_completion(queryset):
+    """Annotate institutes with one boolean per profile section: `True` when the section is
+    filled in, `False` when the institute still has to fill it. One query for all sections.
+
+    The text columns are NOT NULL, so "empty" is `""`. The API strips surrounding whitespace
+    on write, so a stored description's length is its trimmed length.
+    """
+    mine = {"institute": OuterRef("pk")}
+    return queryset.annotate(
+        has_description=GreaterThanOrEqual(
+            Length("description"), DESCRIPTION_MIN_LENGTH
+        ),
+        # the row can exist without a message or photo: both are blank=True
+        has_ceo=Exists(
+            InstituteCEO.objects.filter(**mine).exclude(Q(message="") | Q(photo=""))
+        ),
+        has_gallery=_at_least(
+            InstituteGalleryImage.objects.filter(**mine), GALLERY_MIN_PHOTOS
+        ),
+        # registration fills the first three; only the landline is optional
+        has_contact=Exists(
+            InstituteContact.objects.filter(**mine).exclude(
+                Q(contact_person="")
+                | Q(contact_phone="")
+                | Q(contact_email="")
+                | Q(telephone_number="")
+            )
+        ),
+        has_social_links=_at_least(
+            InstituteSocialLink.objects.filter(**mine), SOCIAL_LINKS_MIN
+        ),
+    )

@@ -9,6 +9,12 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.institutes.api.v1.serializers import (
+    InstituteCEOSerializer,
+    InstituteContactSerializer,
+    InstituteLocationSerializer,
+    InstituteSocialLinkSerializer,
+)
 from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import Institute, InstituteDocument
 from apps.training.api.v1.serializers import (
@@ -149,8 +155,15 @@ class DocumentReviewSerializer(serializers.Serializer):
 
 
 class AdminInstituteSerializer(DynamicFieldsModelSerializer):
+    """Read-only view of an institute for the reviewer: what it gave at registration (locations,
+    contact person) and what it added since, with every location, retired ones included."""
+
     documents = AdminDocumentSerializer(many=True, read_only=True)
     owner_email = serializers.SerializerMethodField()
+    contact = InstituteContactSerializer(read_only=True, allow_null=True)
+    ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
+    social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
+    locations = InstituteLocationSerializer(many=True, read_only=True)
 
     class Meta:
         model = Institute
@@ -158,6 +171,8 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "id",
             "slug",
             "name",
+            "registration_number",
+            "pan_vat_number",
             "type",
             "status",
             "status_reason",
@@ -165,6 +180,10 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "description",
             "created_at",
             "owner_email",
+            "contact",
+            "ceo",
+            "social_links",
+            "locations",
             "documents",
         )
 
@@ -186,10 +205,12 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
 
     institute = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
-    institute_location = serializers.SerializerMethodField()
+    sub_category = serializers.SerializerMethodField()
+    venue = serializers.SerializerMethodField()
     sessions = TrainingSessionSerializer(many=True, read_only=True)
     modules = TrainingModuleSerializer(many=True, read_only=True)
     outcomes = LearningOutcomeSerializer(many=True, read_only=True)
+    
 
     class Meta:
         model = Training
@@ -211,12 +232,18 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
             "parent": parent.name if parent else None,
         }
 
-    def get_institute_location(self, obj):
-        place = obj.institute_location
-        if place is None:
+    def get_venue(self, obj):
+        venue = getattr(obj, "venue", None)
+        if venue is None:
             return None
         return {
-            "id": place.id,
-            "municipality": place.location.name,
-            "address": place.address,
+            "municipality": venue.location.name if venue.location_id else None,
+            "address": venue.address,
+            "map_url": venue.map_url,
+            "contact_phone": venue.contact_phone,
         }
+
+    def get_sub_category(self, obj):
+        if obj.category.parent_id is None:
+            return None
+        return {"id": obj.category_id, "name": obj.category.name}
