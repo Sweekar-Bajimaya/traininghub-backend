@@ -51,3 +51,12 @@ SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"] = timedelta(days=15)
 
 
 CORS_ORIGIN_ALLOW_ALL = True
+
+
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=sandbox.smtp.mailtrap.io
+EMAIL_PORT=2525
+EMAIL_HOST_USER=your_mailtrap_username
+EMAIL_HOST_PASSWORD=your_mailtrap_password
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL=TrainingHub <no-reply@traininghub.com.np>
