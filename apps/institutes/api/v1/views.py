@@ -23,7 +23,7 @@ from apps.common.viewsets import (
     CreateListDestroyViewSet,
     CreateListRetrieveUpdateViewSet,
     CreateListUpdateDestroyViewSet,
-    CreateListViewSet,
+    CreateListUpdateViewSet,
     DestroyViewSet,
     ListViewSet,
     ReadOnlyViewSet,
@@ -200,9 +200,11 @@ class PortalLocationViewSet(InstituteScopedMixin, CreateListRetrieveUpdateViewSe
         return Response(self.get_serializer(location).data)
 
 
-class PortalDocumentViewSet(InstituteScopedMixin, CreateListViewSet):
+class PortalDocumentViewSet(InstituteScopedMixin, CreateListUpdateViewSet):
     serializer_class = InstituteDocumentSerializer
     permission_classes = [IsInstituteMember]
+    lookup_value_regex = r"[0-9]+"
+    http_method_names = ["get", "post", "patch", "head", "options"]
     queryset = InstituteDocument.objects.order_by("-created_at", "-pk")
 
 

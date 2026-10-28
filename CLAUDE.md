@@ -78,6 +78,11 @@ or an open question gets answered. Rules:
   registration number and a unique nine-digit PAN/VAT number, owner with a verified email, contact person, at least one
   location); the owner then logs in (even while `PENDING`) and
   uploads verification documents. Approval needs at least one active location and one document. A suspended institute's staff keep their accounts.
+- Verification documents: one row per name per institute (`Lower(name)` is unique in the database). `POST institute/documents/`
+  only adds (a name the institute already has is a 400, in any status). A rejected document is uploaded again with
+  `PATCH institute/documents/{id}/` (only `file`; same id, status `RE_UPLOADED`, the rejected file deleted after commit);
+  any other status is a 400. No `PUT` or `DELETE`. Statuses: `PENDING`, `VERIFIED`, `REJECTED`, `RE_UPLOADED`; an admin
+  reviews with `VERIFIED` or `REJECTED`.
 - Registration email: the institute's login is `owner.email` + `owner.password` (there is no separate institute email
   column). It is verified with a one-time code: `POST institute/register/send-otp/` emails the code to that address (400 if
   a user already has it), then the code goes in `POST institute/register/` as `otp` (`verify-otp/` is an optional check in
@@ -287,6 +292,10 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   until the request carries a `venue`. Their search vectors keep the old place names until the training is saved again.
 - **`institutes/0003` gives every existing institute a random, unique `pan_vat_number`** so the unique index can be built.
   They are placeholders, not real PANs, and the profile API makes the number read-only, so replace them with a data fix.
+- **`institutes/0004` deletes rows.** Before it adds the unique index on (institute, `Lower(name)`) for documents, it collapses
+  an institute's documents of one name to the newest row (marked `RE_UPLOADED` if that row is `PENDING` and an older one was
+  `REJECTED`) and deletes the older rows and their files. It cannot be undone (the reverse step does nothing), so back up the
+  database before applying it to one that holds real documents.
 - **The PAN/VAT format (nine `[0-9]` digits) is checked in `InstituteRegistrationSerializer`**
   (`apps.common.validators.validate_pan_vat_number`), not on the model: `services.register`, the shell and test factories
   skip it, so only the unique index guards those paths.

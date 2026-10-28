@@ -729,6 +729,87 @@ class DocumentTests(PortalTestCase):
         self.assertEqual([r["name"] for r in res.data["results"]], ["License"])
         self.assertNotIn("file", res.data["results"][0])
 
+    def reject(self, document_id):
+        admin = User.objects.create_user("admin@example.com", PASSWORD, role=Role.ADMIN)
+        services.review_document(
+            InstituteDocument.objects.get(pk=document_id),
+            status="REJECTED",
+            by=admin,
+        )
+
+    def reupload(self, document_id, user=None, **data):
+        return self.as_(user or self.owner).patch(
+            f"{BASE}documents/{document_id}/", data, format="multipart"
+        )
+
+    def test_patching_a_rejected_document_keeps_one_row(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        res = self.reupload(first.data["id"], file=pdf("second.pdf"))
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["id"], first.data["id"])
+        self.assertEqual(res.data["status"], "RE_UPLOADED")
+        self.assertNotIn("file", res.data)
+        rows = self.client.get(BASE + "documents/").data["results"]
+        self.assertEqual([(r["name"], r["status"]) for r in rows], [("PAN/VAT", "RE_UPLOADED")])
+
+    def test_staff_can_upload_a_rejected_document_again(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        self.assertEqual(self.reupload(first.data["id"], self.staff, file=pdf()).status_code, 200)
+
+    def test_patch_cannot_rename_the_document(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        res = self.reupload(first.data["id"], name="Something else", file=pdf())
+        self.assertEqual(res.data["name"], "PAN/VAT")
+
+    def test_patch_without_a_file_is_a_400(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        res = self.reupload(first.data["id"], name="PAN/VAT")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("file", res.data)
+        self.assertEqual(InstituteDocument.objects.get(pk=first.data["id"]).status, "REJECTED")
+
+    def test_patching_a_document_that_is_not_rejected_is_a_400_and_the_file_is_kept(self):
+        first = self.upload(name="PAN/VAT")
+        res = self.reupload(first.data["id"], file=pdf("second.pdf"))
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(InstituteDocument.objects.get(pk=first.data["id"]).status, "PENDING")
+        download = self.client.get(f"{BASE}documents/{first.data['id']}/download/")
+        self.assertEqual(b"".join(download.streaming_content), b"%PDF-1.4 test")
+
+    def test_a_bad_file_leaves_the_rejected_document_as_it_was(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        exe = SimpleUploadedFile("run.exe", b"MZ", content_type="application/octet-stream")
+        self.assertEqual(self.reupload(first.data["id"], file=exe).status_code, 400)
+        self.assertEqual(InstituteDocument.objects.get(pk=first.data["id"]).status, "REJECTED")
+
+    def test_patching_another_institutes_document_is_a_404(self):
+        theirs = services.add_document(self.other, name="Theirs", file=pdf())
+        self.reject(theirs.pk)
+        res = self.reupload(theirs.pk, file=pdf())
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(InstituteDocument.objects.get(pk=theirs.pk).status, "REJECTED")
+
+    def test_patch_needs_a_login_and_put_and_delete_are_not_allowed(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        url = f"{BASE}documents/{first.data['id']}/"
+        self.assertEqual(APIClient().patch(url, {"file": pdf()}, format="multipart").status_code, 401)
+        self.assertEqual(self.client.put(url, {"name": "PAN/VAT", "file": pdf()}, format="multipart").status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+
+    def test_posting_a_name_that_is_already_there_is_a_400_even_when_rejected(self):
+        first = self.upload(name="PAN/VAT")
+        self.reject(first.data["id"])
+        res = self.upload(name="pan/vat", file=pdf("second.pdf"))
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("name", res.data)
+        self.assertEqual(self.institute.documents.count(), 1)
+
     def test_download_my_own_document(self):
         document = self.institute.documents.create(name="X", file=pdf())
         res = self.as_(self.owner).get(f"{BASE}documents/{document.pk}/download/")

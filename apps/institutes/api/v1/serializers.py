@@ -315,16 +315,27 @@ class InstituteLocationSerializer(DynamicFieldsModelSerializer):
 
 
 class InstituteDocumentSerializer(DynamicFieldsModelSerializer):
+    """POST adds a document; PATCH takes only a new `file`, for a rejected document."""
+
     class Meta:
         model = InstituteDocument
         fields = ("id", "name", "file", "status", "created_at")
         read_only_fields = ("id", "status", "created_at")
+        create_only_fields = ("name",)
         extra_kwargs = {"file": {"write_only": True}}  # never echoed back
+
+    def validate(self, attrs):
+        if self.instance is not None and "file" not in attrs:  # a PATCH is partial
+            raise serializers.ValidationError({"file": "This field is required."})
+        return attrs
 
     def create(self, validated_data):
         return services.add_document(
             self.request.user.membership.institute, **validated_data
         )
+
+    def update(self, instance, validated_data):
+        return services.reupload_document(instance, **validated_data)
 
 
 class GalleryImageSerializer(DynamicFieldsModelSerializer):

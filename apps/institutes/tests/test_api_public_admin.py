@@ -839,6 +839,20 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         self.assertEqual(res.data["status"], "VERIFIED")
         self.assertEqual(self.client.patch(url, {"status": "PENDING"}).status_code, 400)
 
+    def test_a_re_uploaded_document_is_one_row_and_can_be_reviewed_again(self):
+        document = self.ready()
+        url = f"{ADMIN_URL}{self.institute.pk}/documents/{document.pk}/"
+        self.client.force_authenticate(self.reviewer)
+        self.assertEqual(self.client.patch(url, {"status": "REJECTED"}).status_code, 200)
+        services.reupload_document(document, file=pdf("again.pdf"))
+        row = self.client.get(f"{ADMIN_URL}{self.institute.pk}/").data
+        self.assertEqual(
+            [(d["id"], d["status"]) for d in row["documents"]],
+            [(document.pk, "RE_UPLOADED")],
+        )
+        res = self.client.patch(url, {"status": "VERIFIED"})
+        self.assertEqual(res.data["status"], "VERIFIED")
+
     def test_document_download_streams_the_file(self):
         document = self.ready()
         self.client.force_authenticate(self.reviewer)

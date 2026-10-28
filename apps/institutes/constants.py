@@ -50,7 +50,13 @@ class MemberRole:
 
 class DocumentStatus:
     PENDING, VERIFIED, REJECTED = "PENDING", "VERIFIED", "REJECTED"
-    CHOICES = ((PENDING, "Pending"), (VERIFIED, "Verified"), (REJECTED, "Rejected"))
+    RE_UPLOADED = "RE_UPLOADED"  # a rejected document the institute has uploaded again
+    CHOICES = (
+        (PENDING, "Pending"),
+        (VERIFIED, "Verified"),
+        (REJECTED, "Rejected"),
+        (RE_UPLOADED, "Re-uploaded"),
+    )
 
 
 class InvitationStatus:

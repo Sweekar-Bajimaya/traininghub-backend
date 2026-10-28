@@ -1,15 +1,24 @@
-from django.db import IntegrityError, transaction
+from importlib import import_module
+
+from django.apps import apps as django_apps
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.institutes.constants import InvitationStatus, MemberRole
-from apps.institutes.models import InstituteInvitation, InstituteMember
+from apps.institutes.constants import DocumentStatus, InvitationStatus, MemberRole
+from apps.institutes.models import (
+    InstituteDocument,
+    InstituteInvitation,
+    InstituteMember,
+)
 from apps.institutes.tests.helpers import (
     PASSWORD,
+    TempMediaMixin,
     User,
     add_location,
     make_institute,
     make_municipality,
+    pdf,
 )
 
 
@@ -64,3 +73,54 @@ class InstituteConstraintTests(TestCase):
             make("A@Example.com", InvitationStatus.PENDING)
         make("b@example.com", InvitationStatus.REVOKED)  # revoked ones do not block
         make("B@example.com", InvitationStatus.PENDING)
+
+    def test_duplicate_document_name_rejected_case_insensitively(self):
+        self.institute.documents.create(name="PAN/VAT", file="a.pdf")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.institute.documents.create(name="pan/vat", file="b.pdf")
+        other, _ = make_institute(name="Beta", email="beta@example.com")
+        other.documents.create(name="PAN/VAT", file="c.pdf")  # another institute may reuse it
+
+
+class CollapseDuplicateDocumentsTests(TempMediaMixin, TestCase):
+    """The data step of migration 0004, run on the rows an institute got before the constraint
+    existed: a rejected document and the upload that followed it."""
+
+    def setUp(self):
+        super().setUp()
+        self.institute, _ = make_institute()
+        collapse = import_module(
+            "apps.institutes.migrations.0004_document_one_row_per_name"
+        ).collapse_duplicate_documents
+        constraint = InstituteDocument._meta.constraints[0]
+        with connection.schema_editor() as editor:  # rolled back with the test (Postgres DDL)
+            editor.remove_constraint(InstituteDocument, constraint)
+            self.collapse = lambda: collapse(django_apps, editor)
+
+    def make(self, name, status):
+        return InstituteDocument.objects.create(
+            institute=self.institute, name=name, status=status, file=pdf()
+        )
+
+    def test_the_newest_row_is_kept_and_marked_re_uploaded(self):
+        self.make("PAN/VAT", DocumentStatus.REJECTED)
+        newest = self.make("pan/vat", DocumentStatus.PENDING)
+        self.make("License", DocumentStatus.VERIFIED)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.collapse()
+        rows = InstituteDocument.objects.order_by("name")
+        self.assertEqual(
+            [(r.pk, r.status) for r in rows if r.name.lower() == "pan/vat"],
+            [(newest.pk, DocumentStatus.RE_UPLOADED)],
+        )
+        self.assertEqual(rows.count(), 2)  # the License is untouched
+        self.assertEqual(rows.get(name="License").status, DocumentStatus.VERIFIED)
+
+    def test_a_newer_row_that_is_already_reviewed_keeps_its_status(self):
+        self.make("PAN/VAT", DocumentStatus.REJECTED)
+        newest = self.make("PAN/VAT", DocumentStatus.VERIFIED)
+        self.collapse()
+        self.assertEqual(
+            list(InstituteDocument.objects.values_list("pk", "status")),
+            [(newest.pk, DocumentStatus.VERIFIED)],
+        )

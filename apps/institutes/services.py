@@ -235,7 +235,36 @@ def deactivate_location(location):
 # documents and gallery
 @transaction.atomic
 def add_document(institute, *, name, file):
+    """Upload a new verification document. An institute has one row per document name (any case),
+    so a name it already used is refused; a rejected document is uploaded again with
+    `reupload_document`."""
+    name = name.strip()
+    # one upload per institute at a time, so two requests cannot both find "no such name"
+    Institute.objects.select_for_update().get(pk=institute.pk)
+    if InstituteDocument.objects.filter(institute=institute, name__iexact=name).exists():
+        raise ValidationError(
+            {
+                "name": "A document with this name already exists. If it was rejected, "
+                "upload the file again to that document instead of adding a new one."
+            }
+        )
     return InstituteDocument.objects.create(institute=institute, name=name, file=file)
+
+
+@transaction.atomic
+def reupload_document(document, *, file):
+    """Replace the file of a `REJECTED` document and send it back to review as `RE_UPLOADED`. The
+    row, and so its id, stays. Any other status is refused, so a file an admin may be reading, or
+    has verified, is never swapped underneath them."""
+    document = InstituteDocument.objects.select_for_update().get(pk=document.pk)
+    if document.status != DocumentStatus.REJECTED:
+        raise ValidationError("Only a rejected document can be uploaded again.")
+    old_name, storage = document.file.name, document.file.storage
+    document.file = file
+    document.status = DocumentStatus.RE_UPLOADED
+    document.save(update_fields=["file", "status", "modified_at"])
+    transaction.on_commit(lambda: storage.delete(old_name))  # the rejected file is not kept
+    return document
 
 
 @transaction.atomic
