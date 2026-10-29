@@ -1,7 +1,8 @@
 from django.contrib.postgres.search import SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Value
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.institutes.constants import InstituteStatus
@@ -468,4 +469,22 @@ def institute_counts(trainings):
         total=Count("pk"),
         active=Count("pk", filter=Q(status=TrainingStatus.APPROVED)),
         pending_review=Count("pk", filter=Q(status=TrainingStatus.SUBMITTED)),
+    )
+
+def annotate_category_training_count(categories):
+    """Annotate categories with `training_count`: the trainings the public can see (`APPROVED`,
+    of an `APPROVED` institute) in the category itself and, for a top-level one, in its
+    sub-categories. The same rule as the public `category` filter. One query, however many rows."""
+    visible = (
+        Training.objects.filter(
+            status=TrainingStatus.APPROVED, institute__status=InstituteStatus.APPROVED
+        )
+        .filter(Q(category=OuterRef("pk")) | Q(category__parent=OuterRef("pk")))
+        .order_by()  # no ordering inside the subquery
+        .values(group=Value(1))  # one group, so the subquery answers a single row
+        .annotate(n=Count("pk"))
+        .values("n")
+    )
+    return categories.annotate(
+        training_count=Coalesce(Subquery(visible, output_field=IntegerField()), 0)
     )
