@@ -1,3 +1,5 @@
+from rest_framework import status
+from rest_framework.generics import CreateAPIView
 from rest_framework.mixins import (
     CreateModelMixin,
     DestroyModelMixin,
@@ -6,6 +8,16 @@ from rest_framework.mixins import (
     UpdateModelMixin,
 )
 from rest_framework.viewsets import GenericViewSet
+
+
+class ActionAPIView(CreateAPIView):
+    """A POST that does something (send a code, check a code) instead of creating a resource:
+    the serializer's `create()` runs as usual, but the answer is 200, not 201."""
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        response.status_code = status.HTTP_200_OK
+        return response
 
 
 class BaseViewSet(GenericViewSet):

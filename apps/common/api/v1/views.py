@@ -5,13 +5,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.api.v1.filters import AdminCategoryFilter, LocationFilter
-from apps.common.api.v1.serializers import AdminCategorySerializer, LocationSerializer
+from apps.common.api.v1.filters import LocationFilter
+from apps.common.api.v1.serializers import LocationSerializer
 from apps.common.constants import CATEGORY_TREE_CACHE_KEY, TREE_CACHE_KEY
 from apps.common.models.category import Category
 from apps.common.models.location import Location
-from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
-from apps.users.permissions import HasPlatformPermission
+from apps.common.viewsets import ReadOnlyViewSet
 
 
 class LocationViewSet(ReadOnlyViewSet):
@@ -85,17 +84,3 @@ class CategoryTreeView(APIView):
         return Response(
             cache.get_or_set(CATEGORY_TREE_CACHE_KEY, build_category_tree, timeout=None)
         )
-
-
-class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
-    """No DELETE: deactivate with PATCH {"is_active": false}."""
-
-    serializer_class = AdminCategorySerializer
-    permission_classes = [HasPlatformPermission]
-    required_permission = "users.manage_categories"
-    lookup_value_regex = r"[0-9]+"
-    http_method_names = ["get", "post", "patch", "head", "options"]
-    filter_backends = (DjangoFilterBackend, SearchFilter)
-    filterset_class = AdminCategoryFilter
-    search_fields = ("name",)
-    queryset = Category.objects.select_related("parent").order_by("name", "pk")

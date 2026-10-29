@@ -1,23 +1,33 @@
+import re
 from datetime import timedelta
 from unittest import mock
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.utils.module_loading import import_string
 from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.institutes import services
+from apps.institutes.api.v1.serializers import InstituteContactSerializer
 from apps.institutes.constants import InstituteStatus, InvitationStatus, MemberRole
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteMember,
+    InstituteSocialLink,
 )
 from apps.institutes.tests.helpers import (
+    PAN_VAT_NUMBER,
     PASSWORD,
     TempMediaMixin,
     User,
@@ -27,6 +37,7 @@ from apps.institutes.tests.helpers import (
     make_municipality,
     pdf,
     png,
+    reset_otps,
     reset_throttles,
 )
 from apps.users import services as user_services
@@ -60,7 +71,13 @@ class PortalTestCase(TempMediaMixin, APITestCase):
 
 
 class PermissionMatrixTests(PortalTestCase):
-    MEMBER_ENDPOINTS = ("profile/", "locations/", "documents/", "gallery/")
+    MEMBER_ENDPOINTS = (
+        "profile/",
+        "action-required/",
+        "locations/",
+        "documents/",
+        "gallery/",
+    )
     OWNER_ENDPOINTS = ("staff/", "invitations/")
 
     def test_member_endpoints(self):
@@ -98,13 +115,13 @@ class ProfileTests(PortalTestCase):
             with self.subTest(user=user.email):
                 res = self.as_(user).patch(
                     BASE + "profile/",
-                    {"ceo_name": f"CEO {user.email}", "website": "https://example.com"},
+                    {"description": f"By {user.email}", "established_year": 1999},
                     format="json",
                 )
                 self.assertEqual(res.status_code, 200, res.data)
         self.institute.refresh_from_db()
-        self.assertEqual(self.institute.ceo_name, "CEO staff@example.com")
-        self.assertEqual(self.institute.website, "https://example.com")
+        self.assertEqual(self.institute.description, "By staff@example.com")
+        self.assertEqual(self.institute.established_year, 1999)
 
     def test_status_and_slug_cannot_be_changed(self):
         slug = self.institute.slug
@@ -116,10 +133,73 @@ class ProfileTests(PortalTestCase):
         self.assertEqual(self.institute.status, InstituteStatus.PENDING)
         self.assertEqual(self.institute.slug, slug)
 
+    def test_the_registration_number_cannot_be_changed(self):
+        Institute.objects.filter(pk=self.institute.pk).update(registration_number="REG-1")
+        res = self.as_(self.owner).patch(
+            BASE + "profile/", {"registration_number": "REG-2"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.institute.refresh_from_db()
+        self.assertEqual(self.institute.registration_number, "REG-1")
+
+    def test_the_profile_shows_the_pan_vat_number(self):
+        Institute.objects.filter(pk=self.institute.pk).update(pan_vat_number="111111111")
+        for user in (self.owner, self.staff):
+            with self.subTest(user=user.email):
+                res = self.as_(user).get(BASE + "profile/")
+                self.assertEqual(res.data["pan_vat_number"], "111111111")
+
+    def test_the_pan_vat_number_cannot_be_changed(self):
+        Institute.objects.filter(pk=self.institute.pk).update(pan_vat_number="111111111")
+        res = self.as_(self.owner).patch(
+            BASE + "profile/", {"pan_vat_number": "222222222"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["pan_vat_number"], "111111111")
+        self.institute.refresh_from_db()
+        self.assertEqual(self.institute.pan_vat_number, "111111111")
+
     def test_another_institute_is_untouched(self):
-        self.as_(self.owner).patch(BASE + "profile/", {"ceo_name": "Mine"}, format="json")
+        self.as_(self.owner).patch(BASE + "profile/", {"description": "Mine"}, format="json")
         self.other.refresh_from_db()
-        self.assertEqual(self.other.ceo_name, "")
+        self.assertEqual(self.other.description, "")
+
+    def test_a_rename_queues_a_search_refresh_but_other_edits_do_not(self):
+        with mock.patch("apps.institutes.services.async_task") as queued, \
+                self.captureOnCommitCallbacks(execute=True):
+            self.as_(self.owner).patch(BASE + "profile/", {"description": "x"}, format="json")
+            queued.assert_not_called()
+            self.as_(self.owner).patch(BASE + "profile/", {"name": "Zenith"}, format="json")
+        queued.assert_called_once_with(
+            "apps.training.tasks.refresh_institute_trainings", self.institute.pk, save=False
+        )
+
+    def test_the_profile_shows_contact_ceo_and_social_links(self):
+        InstituteContact.objects.create(
+            institute=self.institute, contact_person="Ram",
+            contact_phone="9811111111", contact_email="ram@example.com",
+        )
+        InstituteCEO.objects.create(institute=self.institute, name="Sita")
+        InstituteSocialLink.objects.create(
+            institute=self.institute, platform="facebook", url="https://facebook.com/alpha"
+        )
+        data = self.as_(self.owner).get(BASE + "profile/").data
+        self.assertEqual(data["contact"]["contact_person"], "Ram")
+        self.assertEqual(data["ceo"]["name"], "Sita")
+        self.assertEqual([l["platform"] for l in data["social_links"]], ["facebook"])
+
+    def test_missing_contact_and_ceo_are_null_not_a_500(self):
+        data = self.as_(self.owner).get(BASE + "profile/").data
+        self.assertIsNone(data["contact"])
+        self.assertIsNone(data["ceo"])
+        self.assertEqual(data["social_links"], [])
+
+    def test_nested_sections_cannot_be_written_through_the_profile(self):
+        res = self.as_(self.owner).patch(
+            BASE + "profile/", {"ceo": {"name": "Sneaky"}, "social_links": []}, format="json"
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(InstituteCEO.objects.exists())
 
     def test_a_logo_with_a_bad_extension_is_refused(self):
         bad = SimpleUploadedFile("logo.exe", b"MZ", content_type="application/octet-stream")
@@ -128,6 +208,418 @@ class ProfileTests(PortalTestCase):
 
     def test_put_is_not_allowed(self):
         self.assertEqual(self.as_(self.owner).put(BASE + "profile/", {}).status_code, 405)
+
+
+class ActionRequiredTests(PortalTestCase):
+    """`institute/action-required/`: one boolean per profile section, true = filled in."""
+
+    URL = BASE + "action-required/"
+    NOTHING = {
+        "description": False,
+        "ceo": False,
+        "gallery": False,
+        "contact": False,
+        "social_links": False,
+    }
+    CONTACT = {
+        "contact_person": "Ram",
+        "contact_phone": "9811111111",
+        "contact_email": "ram@example.com",
+        "telephone_number": "014444444",
+    }
+
+    def result(self, user=None):
+        res = self.as_(user or self.owner).get(self.URL)
+        self.assertEqual(res.status_code, 200, res.data)
+        return dict(res.data)
+
+    def expect(self, **filled):
+        return {**self.NOTHING, **filled}
+
+    def set_description(self, length, institute=None):
+        Institute.objects.filter(pk=(institute or self.institute).pk).update(
+            description="x" * length
+        )
+
+    def set_ceo(self, institute=None, **fields):
+        InstituteCEO.objects.update_or_create(
+            institute=institute or self.institute,
+            defaults={"name": "Sita", "message": "", "photo": "", **fields},
+        )
+
+    def set_contact(self, institute=None, **fields):
+        InstituteContact.objects.update_or_create(
+            institute=institute or self.institute, defaults={**self.CONTACT, **fields}
+        )
+
+    def add_photos(self, count, institute=None):
+        for i in range(count):
+            InstituteGalleryImage.objects.create(
+                institute=institute or self.institute, image=png(f"{i}.png"), position=i
+            )
+
+    def add_links(self, *platforms, institute=None):
+        for platform in platforms:
+            InstituteSocialLink.objects.create(
+                institute=institute or self.institute,
+                platform=platform,
+                url=f"https://{platform}.example/{self.institute.pk}",
+            )
+
+    def fill_everything(self, institute):
+        self.set_description(150, institute)
+        self.set_ceo(institute, message="Welcome", photo=png())
+        self.add_photos(4, institute)
+        self.set_contact(institute)
+        self.add_links("facebook", "linkedin", institute=institute)
+
+    def test_a_new_institute_has_every_section_to_fill(self):
+        self.assertEqual(self.result(), self.NOTHING)
+
+    def test_a_complete_profile_is_all_true_for_owner_and_staff(self):
+        self.fill_everything(self.institute)
+        everything = {key: True for key in self.NOTHING}
+        for user in (self.owner, self.staff):
+            with self.subTest(user=user.email):
+                self.assertEqual(self.result(user), everything)
+
+    def test_the_description_needs_150_characters(self):
+        for length, filled in ((0, False), (149, False), (150, True), (400, True)):
+            with self.subTest(length=length):
+                self.set_description(length)
+                self.assertEqual(self.result(), self.expect(description=filled))
+
+    def test_the_ceo_needs_a_message_and_a_photo(self):
+        cases = (
+            ({}, False),  # a row with only the required name
+            ({"message": "Welcome"}, False),
+            ({"photo": "ceo/photo.png"}, False),
+            ({"message": "Welcome", "photo": "ceo/photo.png"}, True),
+        )
+        for fields, filled in cases:
+            with self.subTest(fields=sorted(fields)):
+                self.set_ceo(**fields)
+                self.assertEqual(self.result(), self.expect(ceo=filled))
+
+    def test_the_gallery_needs_four_photos(self):
+        self.add_photos(3)
+        self.assertEqual(self.result(), self.NOTHING)
+        self.add_photos(1)
+        self.assertEqual(self.result(), self.expect(gallery=True))
+
+    def test_the_contact_needs_every_field(self):
+        self.set_contact()
+        self.assertEqual(self.result(), self.expect(contact=True))
+        for field in self.CONTACT:
+            with self.subTest(blank=field):
+                self.set_contact(**{field: ""})
+                self.assertEqual(self.result(), self.NOTHING)
+
+    def test_a_contact_from_registration_lacks_only_the_optional_telephone(self):
+        self.set_contact(telephone_number="")
+        self.assertEqual(self.result(), self.NOTHING)
+
+    def test_social_links_need_two_accounts(self):
+        self.add_links("facebook")
+        self.assertEqual(self.result(), self.NOTHING)
+        self.add_links("linkedin")
+        self.assertEqual(self.result(), self.expect(social_links=True))
+
+    def test_two_other_links_count(self):
+        self.add_links("other")
+        self.add_links("other")
+        self.assertEqual(self.result(), self.expect(social_links=True))
+
+    def test_another_institutes_data_is_never_counted(self):
+        self.fill_everything(self.other)
+        self.assertEqual(self.result(), self.NOTHING)
+        self.assertEqual(
+            self.result(self.other_owner), {key: True for key in self.NOTHING}
+        )
+
+    def test_each_section_is_independent(self):
+        self.set_description(150)
+        self.add_links("facebook", "linkedin")
+        self.assertEqual(
+            self.result(), self.expect(description=True, social_links=True)
+        )
+
+    def test_it_is_read_only(self):
+        for method in ("post", "put", "patch", "delete"):
+            with self.subTest(method=method):
+                res = getattr(self.as_(self.owner), method)(self.URL, {}, format="json")
+                self.assertEqual(res.status_code, 405)
+
+    def test_all_sections_come_from_one_query(self):
+        def run():
+            owner = User.objects.get(pk=self.owner.pk)  # no cached membership
+            self.client.force_authenticate(owner)
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(self.client.get(self.URL).status_code, 200)
+            return [q["sql"] for q in queries]
+
+        for label, prepare in (("empty", lambda: None), ("full", lambda: self.fill_everything(self.institute))):
+            with self.subTest(profile=label):
+                prepare()
+                sql = run()
+                institute_queries = [q for q in sql if 'FROM "institutes_institute" ' in q]
+                self.assertEqual(len(sql), 2, sql)  # the membership lookup + this one
+                self.assertEqual(len(institute_queries), 1)
+                self.assertEqual(institute_queries[0].count("EXISTS"), 4)
+
+
+class ContactTests(PortalTestCase):
+    URL = BASE + "contact/"
+    DATA = {
+        "contact_person": "Ram",
+        "contact_phone": "9811111111",
+        "contact_email": "ram@example.com",
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.contact = InstituteContact.objects.create(institute=self.institute, **self.DATA)
+        InstituteContact.objects.create(
+            institute=self.other, **{**self.DATA, "contact_person": "Other"}
+        )
+
+    def test_get_returns_my_contact_only(self):
+        for user in (self.owner, self.staff):
+            res = self.as_(user).get(self.URL)
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.data["contact_person"], "Ram")
+
+    def website_links(self, institute=None):
+        return InstituteSocialLink.objects.filter(
+            institute=institute or self.institute, platform="website"
+        )
+
+    def test_patch_creates_the_website_link_and_answers_with_it(self):
+        res = self.as_(self.owner).patch(
+            self.URL, {"website": "https://site.example/"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["website"], "https://site.example/")
+        self.assertEqual(self.website_links().get().url, "https://site.example/")
+        self.assertEqual(self.as_(self.staff).get(self.URL).data["website"], "https://site.example/")
+
+    def test_patch_changes_the_same_link_and_leaves_the_others(self):
+        InstituteSocialLink.objects.create(institute=self.institute, platform="website", url="https://old.example/")
+        InstituteSocialLink.objects.create(institute=self.institute, platform="facebook", url="https://facebook.com/a")
+        InstituteSocialLink.objects.create(
+            institute=self.other, platform="website", url="https://other.example/"
+        )
+        res = self.as_(self.owner).patch(self.URL, {"website": "https://new.example/"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["website"], "https://new.example/")  # not the prefetched old one
+        self.assertEqual(self.website_links().get().url, "https://new.example/")
+        self.assertEqual(self.institute.social_links.count(), 2)
+        self.assertEqual(self.website_links(self.other).get().url, "https://other.example/")
+
+    def test_a_blank_website_removes_the_link(self):
+        for blank in ("", None):
+            with self.subTest(blank=blank):
+                InstituteSocialLink.objects.update_or_create(
+                    institute=self.institute, platform="website", defaults={"url": "https://a.example/"}
+                )
+                res = self.as_(self.owner).patch(self.URL, {"website": blank}, format="json")
+                self.assertEqual(res.status_code, 200, res.data)
+                self.assertIsNone(res.data["website"])
+                self.assertFalse(self.website_links().exists())
+
+    def test_the_website_stays_when_it_is_not_sent(self):
+        InstituteSocialLink.objects.create(institute=self.institute, platform="website", url="https://a.example/")
+        res = self.as_(self.owner).patch(self.URL, {"contact_person": "Sita"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["website"], "https://a.example/")
+        self.assertEqual(self.website_links().get().url, "https://a.example/")
+
+    def test_the_serializer_can_still_leave_the_website_out(self):
+        contact = InstituteContact.objects.select_related("institute").get(pk=self.contact.pk)
+        self.assertIn("website", InstituteContactSerializer(contact).data)
+        self.assertNotIn("website", InstituteContactSerializer(contact, exclude_fields=("website",)).data)
+        only_person = InstituteContactSerializer(contact, fields=("contact_person",)).data
+        self.assertEqual(dict(only_person), {"contact_person": "Ram"})
+
+    def test_a_bad_website_is_refused(self):
+        for website in ("not a url", "https://x.example/" + "a" * 200):
+            with self.subTest(website=website[:30]):
+                res = self.as_(self.owner).patch(self.URL, {"website": website}, format="json")
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("website", res.data)
+        self.assertFalse(self.website_links().exists())
+
+    def test_patch_changes_only_what_is_sent_and_only_for_my_institute(self):
+        res = self.as_(self.staff).patch(self.URL, {"contact_phone": "9822222222"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.contact_phone, "9822222222")
+        self.assertEqual(self.contact.contact_person, "Ram")
+        self.assertEqual(InstituteContact.objects.get(institute=self.other).contact_person, "Other")
+
+    def test_put_is_not_allowed(self):
+        res = self.as_(self.owner).put(self.URL, {**self.DATA, "contact_person": "New"}, format="json")
+        self.assertEqual(res.status_code, 405)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.contact_person, "Ram")
+
+    def test_a_bad_phone_or_email_is_a_400(self):
+        for body in ({"contact_phone": "abc"}, {"contact_email": "nope"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.as_(self.owner).patch(self.URL, body, format="json").status_code, 400)
+
+    def test_get_shows_the_telephone_number_blank_until_it_is_set(self):
+        self.assertEqual(self.as_(self.owner).get(self.URL).data["telephone_number"], "")
+        InstituteContact.objects.filter(pk=self.contact.pk).update(telephone_number="014123456")
+        self.assertEqual(
+            self.as_(self.staff).get(self.URL).data["telephone_number"], "014123456"
+        )
+
+    def test_patch_sets_and_clears_the_telephone_number(self):
+        res = self.as_(self.owner).patch(
+            self.URL, {"telephone_number": "014123456"}, format="json"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "014123456")
+        self.assertEqual(self.contact.contact_phone, "9811111111")  # untouched
+        res = self.as_(self.owner).patch(self.URL, {"telephone_number": ""}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "")
+
+    def test_a_bad_telephone_number_is_a_400(self):
+        for value in ("abc", "12345", "0141234567890123"):
+            with self.subTest(value=value):
+                res = self.as_(self.owner).patch(
+                    self.URL, {"telephone_number": value}, format="json"
+                )
+                self.assertEqual(res.status_code, 400)
+                self.assertIn("telephone_number", res.data)
+        self.contact.refresh_from_db()
+        self.assertEqual(self.contact.telephone_number, "")
+
+    def test_the_telephone_number_of_another_institute_is_untouched(self):
+        self.as_(self.owner).patch(self.URL, {"telephone_number": "014123456"}, format="json")
+        other = InstituteContact.objects.get(institute=self.other)
+        self.assertEqual(other.telephone_number, "")
+
+    def test_an_institute_without_a_contact_gets_404(self):
+        InstituteContact.objects.filter(institute=self.institute).delete()
+        self.assertEqual(self.as_(self.owner).get(self.URL).status_code, 404)
+
+    def test_anonymous_and_admins_are_refused(self):
+        admin = User.objects.create_user("admin@example.com", PASSWORD, role=Role.ADMIN)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.assertEqual(self.as_(admin).get(self.URL).status_code, 403)
+
+
+class CEOTests(PortalTestCase):
+    URL = BASE + "ceo/"
+
+    def test_get_is_404_until_one_exists(self):
+        self.assertEqual(self.as_(self.owner).get(self.URL).status_code, 404)
+
+    def test_put_creates_then_replaces_through_the_service(self):
+        with mock.patch(
+            "apps.institutes.services.save_ceo", wraps=services.save_ceo
+        ) as save:
+            res = self.as_(self.owner).put(self.URL, {"name": "Sita", "message": "Hi"}, format="json")
+            self.assertEqual(res.status_code, 200, res.data)
+            res = self.as_(self.staff).put(self.URL, {"name": "Gita"}, format="json")
+            self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(save.call_count, 2)
+        ceo = InstituteCEO.objects.get(institute=self.institute)  # still exactly one
+        self.assertEqual(ceo.name, "Gita")
+        self.assertEqual(ceo.message, "Hi")  # not sent the second time, so kept
+
+    def test_an_omitted_photo_stays(self):
+        res = self.as_(self.owner).put(
+            self.URL, {"name": "Sita", "photo": png()}, format="multipart"
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        photo = InstituteCEO.objects.get(institute=self.institute).photo.name
+        self.assertTrue(photo)
+        self.as_(self.owner).put(self.URL, {"name": "Sita Devi"}, format="json")
+        ceo = InstituteCEO.objects.get(institute=self.institute)
+        self.assertEqual((ceo.name, ceo.photo.name), ("Sita Devi", photo))
+
+    def test_a_name_is_required_and_a_bad_photo_is_refused(self):
+        self.assertEqual(self.as_(self.owner).put(self.URL, {}, format="json").status_code, 400)
+        bad = SimpleUploadedFile("ceo.exe", b"MZ", content_type="application/octet-stream")
+        res = self.as_(self.owner).put(self.URL, {"name": "Sita", "photo": bad}, format="multipart")
+        self.assertEqual(res.status_code, 400)
+
+    def test_get_and_delete(self):
+        InstituteCEO.objects.create(institute=self.institute, name="Sita")
+        InstituteCEO.objects.create(institute=self.other, name="Other CEO")
+        self.assertEqual(self.as_(self.owner).get(self.URL).data["name"], "Sita")
+        self.assertEqual(self.as_(self.owner).delete(self.URL).status_code, 204)
+        self.assertFalse(InstituteCEO.objects.filter(institute=self.institute).exists())
+        self.assertTrue(InstituteCEO.objects.filter(institute=self.other).exists())
+        self.assertEqual(self.as_(self.owner).delete(self.URL).status_code, 404)
+
+    def test_patch_is_not_allowed(self):
+        self.assertEqual(self.as_(self.owner).patch(self.URL, {}, format="json").status_code, 405)
+
+    def test_anonymous_is_refused(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.put(self.URL, {"name": "x"}, format="json").status_code, 401)
+
+
+class SocialLinkTests(PortalTestCase):
+    URL = BASE + "social-links/"
+
+    def add(self, user=None, **extra):
+        data = {"platform": "facebook", "url": "https://facebook.com/alpha", **extra}
+        return self.as_(user or self.owner).post(self.URL, data, format="json")
+
+    def test_create_and_list_only_my_links(self):
+        self.assertEqual(self.add().status_code, 201)
+        InstituteSocialLink.objects.create(
+            institute=self.other, platform="facebook", url="https://facebook.com/other"
+        )
+        res = self.as_(self.staff).get(self.URL)
+        self.assertEqual([l["url"] for l in res.data["results"]], ["https://facebook.com/alpha"])
+
+    def test_a_platform_can_be_added_once_but_other_any_number_of_times(self):
+        self.assertEqual(self.add().status_code, 201)
+        res = self.add(url="https://facebook.com/second")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("platform", res.data)
+        self.assertEqual(self.add(platform="other", url="https://a.example", label="A").status_code, 201)
+        self.assertEqual(self.add(platform="other", url="https://b.example", label="B").status_code, 201)
+        self.assertEqual(self.institute.social_links.count(), 3)
+
+    def test_the_same_platform_on_another_institute_is_fine(self):
+        InstituteSocialLink.objects.create(
+            institute=self.other, platform="facebook", url="https://facebook.com/other"
+        )
+        self.assertEqual(self.add().status_code, 201)
+
+    def test_patch_cannot_move_a_link_onto_a_taken_platform(self):
+        first = self.add().data["id"]
+        second = self.add(platform="linkedin", url="https://linkedin.com/alpha").data["id"]
+        res = self.as_(self.owner).patch(f"{self.URL}{second}/", {"platform": "facebook"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        res = self.as_(self.owner).patch(f"{self.URL}{first}/", {"label": "Ours"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(InstituteSocialLink.objects.get(pk=first).label, "Ours")
+
+    def test_delete_and_another_institutes_link_is_a_404(self):
+        mine = self.add().data["id"]
+        theirs = InstituteSocialLink.objects.create(
+            institute=self.other, platform="facebook", url="https://facebook.com/other"
+        )
+        self.assertEqual(self.as_(self.owner).delete(f"{self.URL}{theirs.pk}/").status_code, 404)
+        self.assertEqual(self.as_(self.owner).patch(f"{self.URL}{theirs.pk}/", {"label": "x"}, format="json").status_code, 404)
+        self.assertEqual(self.as_(self.owner).delete(f"{self.URL}{mine}/").status_code, 204)
+        self.assertTrue(InstituteSocialLink.objects.filter(pk=theirs.pk).exists())
+
+    def test_an_unknown_platform_or_a_bad_url_is_a_400(self):
+        self.assertEqual(self.add(platform="myspace").status_code, 400)
+        self.assertEqual(self.add(url="not a url").status_code, 400)
 
 
 class LocationTests(PortalTestCase):
@@ -455,6 +947,7 @@ class EndToEndTests(TempMediaMixin, APITestCase):
 
     def test_register_upload_approve_publish_and_invite(self):
         reset_throttles()
+        reset_otps()
         municipality = make_municipality(name="Pokhara")
         reviewer = user_services.create_admin(
             email="reviewer@example.com", password=PASSWORD, full_name="Reviewer",
@@ -462,14 +955,36 @@ class EndToEndTests(TempMediaMixin, APITestCase):
         )
         reviewer = User.objects.get(pk=reviewer.pk)
 
-        # 1. register
+        # 1. verify the login email, then register
         owner_client = APIClient()
+        with mock.patch("apps.users.services.async_task") as queued:
+            res = owner_client.post(
+                BASE + "register/send-otp/", {"email": "boss@example.com"}, format="json"
+            )
+        self.assertEqual(res.status_code, 200, res.data)
+        task_path, address = queued.call_args.args
+        import_string(task_path)(address)  # the qcluster worker would run this
+        self.assertEqual(mail.outbox[-1].to, ["boss@example.com"])
+        code = re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+
         res = owner_client.post(
             BASE + "register/",
             {
                 "name": "Journey Academy",
+                "registration_number": "REG-9",
+                "pan_vat_number": PAN_VAT_NUMBER,
                 "type": "LANGUAGE_SCHOOL",
-                "owner": {"email": "boss@example.com", "full_name": "Boss", "password": PASSWORD},
+                "otp": code,
+                "owner": {
+                    "email": "boss@example.com",
+                    "password": PASSWORD,
+                    "confirm_password": PASSWORD,
+                },
+                "contact": {
+                    "contact_person": "Boss",
+                    "contact_phone": "9811111111",
+                    "contact_email": "boss.contact@example.com",
+                },
                 "locations": [{"location": municipality.pk, "address": "Lakeside"}],
             },
             format="json",

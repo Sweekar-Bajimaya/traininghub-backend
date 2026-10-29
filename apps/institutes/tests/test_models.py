@@ -32,6 +32,14 @@ class InstituteConstraintTests(TestCase):
                 user=self.owner, institute=other_institute, role=MemberRole.STAFF
             )
 
+    def test_duplicate_pan_vat_number_rejected(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            make_institute(
+                name="Beta",
+                email="beta@example.com",
+                pan_vat_number=self.institute.pan_vat_number,
+            )
+
     def test_two_active_main_locations_rejected(self):
         add_location(self.institute, self.municipality, is_main=True)
         with self.assertRaises(IntegrityError), transaction.atomic():

@@ -56,3 +56,10 @@ class DocumentStatus:
 class InvitationStatus:
     PENDING, ACCEPTED, REVOKED = "PENDING", "ACCEPTED", "REVOKED"
     CHOICES = ((PENDING, "Pending"), (ACCEPTED, "Accepted"), (REVOKED, "Revoked"))
+
+
+# what `institute/action-required/` counts as a finished profile section
+DESCRIPTION_MIN_LENGTH = 150  # characters
+GALLERY_MIN_PHOTOS = 4
+SOCIAL_LINKS_MIN = 2
+

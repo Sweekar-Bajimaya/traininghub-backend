@@ -5,11 +5,13 @@ from unittest import mock
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.common.exceptions import TooManyRequests
 from apps.common.models.location import Location
 from apps.institutes import services, tasks
 from apps.institutes.constants import (
@@ -26,15 +28,20 @@ from apps.institutes.models import (
     InstituteMember,
 )
 from apps.institutes.tests.helpers import (
+    OWNER_EMAIL,
+    PAN_VAT_NUMBER,
     PASSWORD,
     TempMediaMixin,
     User,
     add_location,
+    issue_registration_otp,
     make_institute,
     make_municipality,
     pdf,
+    reset_otps,
 )
-from apps.users.constants import Role
+from apps.users import services as user_services
+from apps.users.constants import OTPPurpose, Role
 
 
 class WorkflowTests(TempMediaMixin, TestCase):
@@ -134,24 +141,47 @@ class WorkflowTests(TempMediaMixin, TestCase):
 
 class RegistrationTests(TestCase):
     def setUp(self):
+        reset_otps()
         self.municipality = make_municipality()
         self.owner = {
-            "email": "new@example.com",
+            "email": OWNER_EMAIL,
             "password": PASSWORD,
-            "full_name": "New Owner",
         }
-        self.data = {"name": "New Institute", "type": "COMPANY"}
+        self.contact = {
+            "contact_person": "Contact",
+            "contact_phone": "9811111111",
+            "contact_email": "contact@example.com",
+        }
+        self.data = {
+            "name": "New Institute",
+            "type": "COMPANY",
+            "pan_vat_number": PAN_VAT_NUMBER,
+        }
+        self.otp = issue_registration_otp(OWNER_EMAIL)
+
+    def register(self, **kwargs):
+        kwargs.setdefault("institute_data", self.data)
+        kwargs.setdefault("owner", self.owner)
+        kwargs.setdefault("contact", self.contact)
+        kwargs.setdefault("otp", self.otp)
+        kwargs.setdefault("locations", [{"location": self.municipality, "address": "A"}])
+        return services.register(**kwargs)
+
+    def code_is_alive(self):
+        return (
+            user_services.get_otp(OWNER_EMAIL, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+            is not None
+        )
 
     def test_creates_everything_with_the_first_location_as_main(self):
-        institute = services.register(
-            institute_data=self.data,
-            owner=self.owner,
+        institute = self.register(
             locations=[
                 {"location": self.municipality, "address": "A"},
                 {"location": self.municipality, "address": "B"},
             ],
         )
         self.assertEqual(institute.status, InstituteStatus.PENDING)
+        self.assertEqual(institute.contact.contact_person, "Contact")
         member = institute.members.get()
         self.assertEqual(member.role, MemberRole.OWNER)
         self.assertEqual(member.user.role, Role.INSTITUTE_STAFF)
@@ -163,32 +193,100 @@ class RegistrationTests(TestCase):
             [True, False],
         )
 
-    def test_locations_are_optional(self):
-        institute = services.register(institute_data=self.data, owner=self.owner)
-        self.assertFalse(institute.locations.exists())
-
-    def test_a_failure_leaves_nothing_behind(self):
+    def test_a_failure_leaves_nothing_behind_and_keeps_the_code(self):
         with mock.patch.object(
             InstituteLocation.objects, "bulk_create", side_effect=RuntimeError("boom")
         ):
             with self.assertRaises(RuntimeError):
-                services.register(
-                    institute_data=self.data,
-                    owner=self.owner,
-                    locations=[{"location": self.municipality, "address": "A"}],
-                )
+                self.register()
         self.assertFalse(Institute.objects.exists())
-        self.assertFalse(User.objects.filter(email="new@example.com").exists())
+        self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
+        self.assertTrue(self.code_is_alive())  # the user can fix the form and submit again
+
+    def test_the_pan_vat_number_is_saved(self):
+        self.assertEqual(self.register().pan_vat_number, PAN_VAT_NUMBER)
+
+    def test_the_contact_telephone_number_is_saved(self):
+        institute = self.register(
+            contact={**self.contact, "telephone_number": "014123456"}
+        )
+        self.assertEqual(institute.contact.telephone_number, "014123456")
+
+    def test_the_contact_telephone_number_is_optional(self):
+        self.assertEqual(self.register().contact.telephone_number, "")
+
+    def test_a_pan_vat_number_in_use_writes_nothing_and_keeps_the_code(self):
+        make_institute(
+            name="First", email="first@example.com", pan_vat_number=PAN_VAT_NUMBER
+        )
+        with self.assertRaises(IntegrityError):
+            self.register()
+        self.assertEqual(Institute.objects.count(), 1)
+        self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
+        self.assertTrue(self.code_is_alive())
 
     def test_a_province_is_not_a_valid_location(self):
         province = Location.objects.get(level="PROVINCE")
         with self.assertRaises(ValidationError):
-            services.register(
-                institute_data=self.data,
-                owner=self.owner,
-                locations=[{"location": province, "address": "A"}],
-            )
+            self.register(locations=[{"location": province, "address": "A"}])
         self.assertFalse(Institute.objects.exists())
+        self.assertTrue(self.code_is_alive())
+
+    def test_the_code_is_used_up_by_a_successful_registration(self):
+        self.register()
+        self.assertFalse(self.code_is_alive())
+        with self.assertRaises(ValidationError):
+            user_services.verify_otp(
+                OWNER_EMAIL, self.otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION
+            )
+
+    def test_a_wrong_code_writes_nothing(self):
+        wrong = "000000" if self.otp != "000000" else "111111"
+        with self.assertRaises(ValidationError) as caught:
+            self.register(otp=wrong)
+        self.assertIn("otp", caught.exception.message_dict)
+        self.assertFalse(Institute.objects.exists())
+        self.assertFalse(User.objects.exists())
+        self.assertTrue(self.code_is_alive())
+
+    def test_the_owner_email_is_matched_ignoring_case(self):
+        # the code was sent to the lower-case address; the form is submitted in another case
+        self.register(owner={**self.owner, "email": "OWNER@Example.com"})
+        self.assertTrue(User.objects.filter(email__iexact=OWNER_EMAIL).exists())
+        self.assertFalse(self.code_is_alive())
+
+    def test_a_parallel_request_that_lost_the_race_for_the_code_is_rolled_back(self):
+        # both requests passed the check; the other one used the code up first
+        real = user_services.consume_otp
+
+        def other_request_wins(email, *, purpose):
+            real(email, purpose=purpose)
+            real(email, purpose=purpose)  # ours: the code is already gone
+
+        with mock.patch("apps.institutes.services.user_services.consume_otp", other_request_wins):
+            with self.assertRaises(ValidationError):
+                self.register()
+        self.assertFalse(Institute.objects.exists())
+        self.assertFalse(User.objects.filter(email=OWNER_EMAIL).exists())
+
+
+class RegistrationOtpServiceTests(TestCase):
+    def setUp(self):
+        reset_otps()
+
+    def test_an_address_with_an_account_gets_no_code_but_burns_the_cooldown(self):
+        User.objects.create_user(OWNER_EMAIL, PASSWORD)
+        with mock.patch("apps.users.services.async_task") as queued:
+            with self.assertRaises(ValidationError):
+                user_services.send_registration_otp(OWNER_EMAIL)
+            with self.assertRaises(TooManyRequests):  # the cooldown was claimed first
+                user_services.send_registration_otp(OWNER_EMAIL)
+        queued.assert_not_called()
+
+    def test_codes_are_six_digits_and_may_start_with_zero(self):
+        with mock.patch("apps.users.services.secrets.randbelow", return_value=42):
+            code = issue_registration_otp(OWNER_EMAIL)
+        self.assertEqual(code, "000042")
 
 
 class LocationTests(TestCase):

@@ -70,8 +70,4 @@ class DynamicFieldsModelSerializer(ModelSerializer, DynamicFieldsSerializer):
         return extra_kwargs
 
 
-class DummyObject:
-
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
 

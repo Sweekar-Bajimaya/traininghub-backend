@@ -4,7 +4,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.training.models import Training, TrainingSession
+from apps.training.models import Training, TrainingDetail, TrainingSession
 from apps.training.tests.helpers import approved_institute, make_category
 
 
@@ -26,10 +26,7 @@ class TrainingConstraintTests(TestCase):
     def test_a_draft_with_only_the_required_fields_saves(self):
         training = self.create()
         self.assertEqual(training.status, "DRAFT")
-        self.assertEqual(training.skills, [])
-
-    def test_online_training_cannot_have_a_location(self):
-        self.assertRejected(institute_location=self.location)
+        self.assertEqual(TrainingDetail.objects.create(training=training).skills, [])
 
     def test_end_before_start_is_rejected(self):
         self.assertRejected(start_date=self.today, end_date=self.today - timedelta(days=1))

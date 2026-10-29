@@ -28,3 +28,8 @@ staticfiles/
 
 #private_media
 private_media/
+
+# graphify: only the graph and its report are shared; the rest holds this machine's paths and file mtimes, or can be rebuilt
+graphify-out/*
+!graphify-out/graph.json
+!graphify-out/GRAPH_REPORT.md

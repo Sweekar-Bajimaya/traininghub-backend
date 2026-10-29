@@ -1,0 +1,116 @@
+{% extends "email/base_email.html" %} 
+{% block title %}Verify your email - TrainingHub{% endblock %} 
+{% block icon %}✉️{% endblock %} 
+{% block heading %}Verify your email address{% endblock %} 
+
+{% block content %}
+<p
+  style="margin: 0 0 24px 0; font-size: 15px; color: #5a6478; line-height: 1.6"
+>
+  Thanks for signing up! Enter the code below to confirm your email and finish
+  setting up your TrainingHub account.
+</p>
+{% endblock %} 
+{% block extra %}
+<table
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin-bottom: 24px"
+>
+  <tr>
+    <td
+      style="
+        background-color: #f5f6fa;
+        border: 1px solid #e4e7ed;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+      "
+    >
+      <p
+        style="
+          margin: 0 0 6px 0;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #8891a5;
+        "
+      >
+        Verification Code
+      </p>
+      <p
+        style="
+          margin: 0;
+          font-size: 38px;
+          font-weight: 800;
+          letter-spacing: 0.18em;
+          color: #00a9d5;
+          font-variant-numeric: tabular-nums;
+        "
+      >
+        {{ otp }}
+      </p>
+      <p style="margin: 10px 0 0 0; font-size: 13px; color: #8891a5">
+        Expires in <strong style="color: #5a6478">5 minutes</strong>
+      </p>
+    </td>
+  </tr>
+</table>
+
+<table
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin-bottom: 28px"
+>
+  <tr>
+    <td
+      style="background-color: #ebebff; border-radius: 8px; padding: 16px 20px"
+    >
+      <p
+        style="
+          margin: 0 0 8px 0;
+          font-size: 13px;
+          font-weight: 600;
+          color: #00a9d5;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        "
+      >
+        What happens next
+      </p>
+      <p style="margin: 0; font-size: 14px; color: #3d3c8a; line-height: 1.6">
+        After email verification, you can log in to your institute portal. To post trainings and appear publicly on the platform, your institution must also be approved by our admin team. You'll be notified once approved.
+      </p>
+    </td>
+  </tr>
+</table>
+
+<table
+  cellpadding="0"
+  cellspacing="0"
+  border="0"
+  width="100%"
+  style="margin-bottom: 28px"
+>
+  <tr>
+    <td
+      style="
+        background-color: #fff8ed;
+        border: 1px solid #ffd791;
+        border-radius: 8px;
+        padding: 12px 16px;
+      "
+    >
+      <p style="margin: 0; font-size: 13px; color: #7a4f00; line-height: 1.5">
+        <strong>Didn't create an account?</strong> You can safely ignore this
+        email. No account will be created without completing verification.
+      </p>
+    </td>
+  </tr>
+</table>
+{% endblock %}

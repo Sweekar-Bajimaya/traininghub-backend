@@ -1,6 +1,6 @@
 class TrainingMode:
-    PHYSICAL, ONLINE, HYBRID = "PHYSICAL", "ONLINE", "HYBRID"
-    CHOICES = ((PHYSICAL, "Physical"), (ONLINE, "Online"), (HYBRID, "Hybrid"))
+    PHYSICAL, ONLINE = "PHYSICAL", "ONLINE"
+    CHOICES = ((PHYSICAL, "Physical"), (ONLINE, "Online"))
 
 
 class TrainingLevel:
@@ -67,7 +67,11 @@ class TrainingStatus:
         CANCELLED: set(),
         EXPIRED: set(),
     }
-    EDITABLE = {DRAFT, CHANGES_REQUESTED, REJECTED}  # saved as is; the institute submits when ready
+    EDITABLE = {
+        DRAFT,
+        CHANGES_REQUESTED,
+        REJECTED,
+    }  # saved as is; the institute submits when ready
     REVIEWED_EDIT = {APPROVED, UNPUBLISHED}  # an edit goes straight back to review
     LIVE = {APPROVED, UNPUBLISHED}  # can be cancelled, and expires after end_date
     REASON_REQUIRED = {CHANGES_REQUESTED, REJECTED}
@@ -75,3 +79,9 @@ class TrainingStatus:
 
 
 SEARCH_CONFIG = "simple"  # no stemming: safe for English and romanised Nepali words
+
+
+class TrainingShift:
+    MORNING, DAY, EVENING = "Morning", "Day", "Evening"
+    ORDER = (MORNING, DAY, EVENING)
+    CHOICES = ((MORNING, "Morning"), (DAY, "Day"), (EVENING, "Evening"))
