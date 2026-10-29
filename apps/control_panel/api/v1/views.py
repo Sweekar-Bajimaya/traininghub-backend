@@ -1,8 +1,10 @@
 from django.contrib.auth import get_user_model
-from django.db.models import Prefetch
+from django.db.models import F, Func, IntegerField, OuterRef, Prefetch, Q, Subquery
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import GenericAPIView, get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,6 +13,7 @@ from apps.common.models.category import Category
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
 from apps.control_panel.api.v1.filters import AdminCategoryFilter, AdminTrainingFilter
 from apps.control_panel.api.v1.serializers import (
+    AdminCategoryOptionSerializer,
     AdminCategorySerializer,
     AdminDocumentSerializer,
     AdminInstituteSerializer,
@@ -22,7 +25,7 @@ from apps.control_panel.api.v1.serializers import (
 )
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
-from apps.institutes.constants import MemberRole
+from apps.institutes.constants import InstituteStatus, MemberRole
 from apps.institutes.models import (
     Institute,
     InstituteDocument,
@@ -31,6 +34,7 @@ from apps.institutes.models import (
 )
 from apps.training import services as training_services
 from apps.training.api.v1.views import with_content
+from apps.training.constants import TrainingStatus
 from apps.training.models import Training
 from apps.users.constants import Role
 from apps.users.permissions import HasPlatformPermission
@@ -54,18 +58,74 @@ class AdminViewSet(CreateListRetrieveUpdateViewSet):
 
 
 # categories
-class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
-    """No DELETE: deactivate with PATCH {"is_active": false}."""
+def _live_trainings_count():
+    """Approved trainings of approved institutes in the category (or in any of its sub-categories).
+    A correlated subquery: no join fan-out, and no dependency on the reverse relation name."""
+    live = (
+        Training.objects.filter(
+            status=TrainingStatus.APPROVED, institute__status=InstituteStatus.APPROVED
+        )
+        .filter(Q(category=OuterRef("pk")) | Q(category__parent=OuterRef("pk")))
+        .order_by()
+        .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
+        .values("n")
+    )
+    return Coalesce(Subquery(live, output_field=IntegerField()), 0)
+
+
+class AdminCategoryViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
+    """No DELETE and no PUT. Show/hide on the site: PATCH {"is_active": false}."""
 
     serializer_class = AdminCategorySerializer
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_categories"
     lookup_value_regex = r"[0-9]+"
     http_method_names = ["get", "post", "patch", "head", "options"]
-    filter_backends = (DjangoFilterBackend, SearchFilter)
+    filter_backends = (DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = AdminCategoryFilter
     search_fields = ("name",)
-    queryset = Category.objects.select_related("parent").order_by("name", "pk")
+    ordering_fields = ("name", "created_at", "live_trainings_count")
+    ordering = ("name", "pk")
+
+    def get_queryset(self):
+        return Category.objects.select_related("parent").annotate(
+            live_trainings_count=_live_trainings_count()
+        )
+
+    def get_serializer_class(self):
+        if self.action == "options_list":
+            return AdminCategoryOptionSerializer
+        return super().get_serializer_class()
+
+    def _detail(self, pk):
+        # re-read through the annotated queryset so the response carries live_trainings_count
+        return self.get_serializer(self.get_queryset().get(pk=pk)).data
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        category = serializer.save()
+        return Response(self._detail(category.pk), status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        category = self.get_object()
+        serializer = self.get_serializer(category, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(self._detail(category.pk))
+
+    # named options_list: a method called `options` would replace the HTTP OPTIONS handler
+    @action(detail=False, methods=["get"], url_path="options", pagination_class=None)
+    def options_list(self, request):
+        """Every category, unpaginated, for dropdowns. Accepts the same filters, e.g. ?is_active=true."""
+        queryset = self.filter_queryset(self.get_queryset())
+        return Response(self.get_serializer(queryset, many=True).data)
 
 
 # institutes
