@@ -5,8 +5,9 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.institutes.constants import InstituteStatus
+from apps.institutes.models import InstituteContact
 from apps.training import services
-from apps.training.constants import TrainingStatus
+from apps.training.constants import TrainingShift, TrainingStatus
 from apps.training.models import Training, TrainingSession
 from apps.training.tests.helpers import (
     approved_institute,
@@ -17,6 +18,7 @@ from apps.training.tests.helpers import (
 
 URL = "/api/v1/trainings/"
 S = TrainingStatus
+MORNING, DAY, EVENING = TrainingShift.MORNING, TrainingShift.DAY, TrainingShift.EVENING
 
 
 def titles(res):
@@ -61,13 +63,13 @@ class FilterTests(PublicTrainingTestCase):
         self.python = make_category("Python", parent="Technology")
         self.online = make_training(
             self.institute, title="Online", category=self.python, fee_npr=Decimal("5000"),
-            level="ADVANCED",
+            level="ADVANCED", shifts=[MORNING, EVENING],
         )
         self.physical = make_training(
             self.institute, title="Physical", category=self.coffee, location=self.location,
             fee_npr=Decimal("20000"), duration_value=3, duration_unit="MONTHS", duration_weeks=13,
             start_date=self.today + timedelta(days=60), end_date=self.today + timedelta(days=150),
-            registration_deadline=None,
+            registration_deadline=None, shifts=[DAY],
         )
         self.short = make_training(
             self.institute, title="Short", category=self.coffee.parent, fee_npr=Decimal("1000"),
@@ -78,10 +80,15 @@ class FilterTests(PublicTrainingTestCase):
     def test_each_filter(self):
         place = self.location.location
         cases = (
-            ({"category": self.coffee.parent_id}, ["Physical", "Short"]),
-            ({"sub_category": self.coffee.pk}, ["Physical"]),
+            ({"category": self.coffee.parent.slug}, ["Physical", "Short"]),
+            ({"sub_category": self.coffee.slug}, ["Physical"]),
             ({"mode": "ONLINE"}, ["Online", "Short"]),
             ({"level": "ADVANCED"}, ["Online"]),
+            ({"shifts": MORNING}, ["Online", "Short"]),
+            ({"shifts": DAY}, ["Physical"]),
+            ({"shifts": EVENING}, ["Online"]),
+            ({"shifts": [DAY, EVENING]}, ["Online", "Physical"]),  # any of them
+            ({"shifts": [MORNING, EVENING]}, ["Online", "Short"]),  # no duplicate rows
             ({"province": place.province_id}, ["Physical"]),
             ({"district": place.district_id}, ["Physical"]),
             ({"municipality": place.pk}, ["Physical"]),
@@ -99,6 +106,9 @@ class FilterTests(PublicTrainingTestCase):
         for params, expected in cases:
             with self.subTest(params=params):
                 self.assertEqual(sorted(titles(self.get(**params))), expected)
+
+    def test_an_unknown_shift_is_400(self):
+        self.assertEqual(self.client.get(URL, {"shifts": "Night"}).status_code, 400)
 
     def test_bucket_edges(self):
         for weeks, bucket in ((3, "short"), (4, "mid"), (12, "mid"), (13, "long")):
@@ -163,11 +173,21 @@ class SearchTests(PublicTrainingTestCase):
         self.assertEqual(self.search("python", ordering="fee_npr"), ["Barista Course", "Python Bootcamp"])
 
 
+class ShiftsAreShownTests(PublicTrainingTestCase):
+    def test_list_and_detail_show_the_shifts(self):
+        training = make_training(self.institute, shifts=[MORNING, EVENING])
+        self.assertEqual(self.get().data["results"][0]["shifts"], [MORNING, EVENING])
+        self.assertEqual(self.client.get(f"{URL}{training.slug}/").data["shifts"], [MORNING, EVENING])
+
+
 class DetailTests(PublicTrainingTestCase):
     def test_detail_shape(self):
-        self.institute.contact_phone = "9800000000"
-        self.institute.contact_email = "info@alpha.example"
-        self.institute.save()
+        InstituteContact.objects.create(
+            institute=self.institute,
+            contact_person="Front desk",
+            contact_phone="9800000000",
+            contact_email="info@alpha.example",
+        )
         self.location.map_url = "https://maps.example/alpha"
         self.location.save()
         training = make_training(self.institute, location=self.location, contact_person="Ram")
@@ -177,10 +197,10 @@ class DetailTests(PublicTrainingTestCase):
         TrainingSession.objects.filter(training=training, start_time=time(7)).update(
             class_days=["SUN", "MON", "TUE", "WED", "THU", "FRI"]
         )
-        training.modules.create(title="Advanced", position=1)
-        training.modules.create(title="Basics", position=0)
-        training.outcomes.create(text="Two", position=1)
-        training.outcomes.create(text="One", position=0)
+        training.modules.create(title="Basics")
+        training.modules.create(title="Advanced")
+        training.outcomes.create(text="One")
+        training.outcomes.create(text="Two")
         data = self.client.get(f"{URL}{training.slug}/").data
         self.assertEqual(
             [(s["class_days_text"], str(s["start_time"])) for s in data["schedule"]],

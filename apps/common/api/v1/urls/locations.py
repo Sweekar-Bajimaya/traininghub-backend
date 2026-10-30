@@ -5,9 +5,7 @@ from apps.common.api.v1 import views
 
 app_name = "locations"
 
-# SimpleRouter, not DefaultRouter: DefaultRouter adds an API-root view at "" that would
-# compete with the list route, because this module is mounted under its own prefix.
-router = routers.SimpleRouter()
+router = routers.DefaultRouter()
 router.register("", views.LocationViewSet, basename="location")
 
 urlpatterns = [

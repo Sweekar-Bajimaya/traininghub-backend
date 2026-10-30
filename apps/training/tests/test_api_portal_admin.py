@@ -4,13 +4,12 @@ from rest_framework.test import APITestCase
 
 from apps.institutes.constants import InstituteStatus, MemberRole
 from apps.institutes.models import InstituteMember
-from apps.training.constants import TrainingStatus
-from apps.training.models import Training
+from apps.training.constants import TrainingShift, TrainingStatus
+from apps.training.models import Training, TrainingContact, TrainingDetail
 from apps.training.tests.helpers import (
     PASSWORD,
     TempMediaMixin,
     User,
-    add_location,
     approved_institute,
     count_queries,
     make_admin,
@@ -26,6 +25,7 @@ PORTAL = "/api/v1/institute/trainings/"
 ADMIN = "/api/v1/admin/trainings/"
 PUBLIC = "/api/v1/trainings/"
 S = TrainingStatus
+MORNING, DAY, EVENING = TrainingShift.MORNING, TrainingShift.DAY, TrainingShift.EVENING
 
 
 class PortalTestCase(APITestCase):
@@ -46,7 +46,7 @@ class PortalTestCase(APITestCase):
         return self.client.post(PORTAL, data, format="json")
 
     def url(self, training, action=""):
-        return f"{PORTAL}{training.pk}/{action + '/' if action else ''}"
+        return f"{PORTAL}{training.slug}/{action + '/' if action else ''}"
 
 
 class PortalPermissionTests(PortalTestCase):
@@ -70,6 +70,18 @@ class PortalPermissionTests(PortalTestCase):
         self.client.force_authenticate(other_owner)
         self.assertEqual(self.client.get(PORTAL).data["count"], 0)  # only their own trainings
 
+    def test_portal_slug_lookup_and_numeric_id_404_and_action(self):
+        training = make_training(self.institute, status=S.APPROVED)
+        # retrieve by slug = 200
+        res = self.client.get(f"{PORTAL}{training.slug}/")
+        self.assertEqual(res.status_code, 200)
+        # retrieve by numeric id = 404
+        res_numeric = self.client.get(f"{PORTAL}{training.pk}/")
+        self.assertEqual(res_numeric.status_code, 404)
+        # one action by slug works
+        res_action = self.client.post(f"{PORTAL}{training.slug}/cancel/")
+        self.assertEqual(res_action.status_code, 200)
+
 
 class PortalCreateTests(PortalTestCase):
     def test_create_with_nested_children(self):
@@ -82,24 +94,139 @@ class PortalCreateTests(PortalTestCase):
         self.assertEqual(res.data["sessions"][0]["class_days"][0], "SUN")
         self.assertEqual(res.data["outcomes"], [{"text": "Pull a shot"}])
 
+    def test_detail_and_contact_are_written_to_their_rows_and_answered_flat(self):
+        res = self.create(
+            eligibility="Age 18+",
+            certification="Certificate",
+            contact_person="Ram",
+            contact_phone="9800000000",
+            contact_email="ram@example.com",
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        training = Training.objects.get(pk=res.data["id"])
+        self.assertEqual(
+            (training.detail.overview, training.detail.eligibility, training.detail.skills),
+            ("Espresso, milk and latte art", "Age 18+", ["Espresso", "Latte art"]),
+        )
+        self.assertEqual(
+            (training.contact.contact_person, training.contact.contact_phone),
+            ("Ram", "9800000000"),
+        )
+        for name in ("overview", "eligibility", "certification", "skills", "contact_person", "contact_email"):
+            self.assertIn(name, res.data)
+        self.assertEqual(res.data["skills"], ["Espresso", "Latte art"])
+        self.assertEqual(res.data["contact_person"], "Ram")
+
+    def test_a_create_without_them_still_makes_both_rows(self):
+        res = self.create(overview="")
+        training = Training.objects.get(pk=res.data["id"])
+        self.assertEqual(training.contact.contact_person, "")
+        self.assertTrue(TrainingDetail.objects.filter(training=training).exists())
+
+    def test_a_bad_phone_or_email_is_400(self):
+        for label, overrides in (
+            ("phone", dict(contact_phone="not a phone")),
+            ("email", dict(contact_email="not an email")),
+            ("long skill", dict(skills=["x" * 61])),
+        ):
+            with self.subTest(label):
+                self.assertEqual(self.create(**overrides).status_code, 400)
+
     def test_a_top_level_category_is_accepted(self):
-        res = self.create(category=self.category.parent_id)
+        res = self.create(category=self.category.parent.slug, sub_category=None)
         self.assertEqual(res.status_code, 201, res.data)
 
-    def test_physical_training_at_own_location(self):
-        res = self.create(mode="PHYSICAL", institute_location=self.location.pk)
+    def test_the_sub_category_is_optional_and_answered_next_to_the_category(self):
+        top = self.category.parent
+        res = self.create()  # the default body sends a sub-category
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (top.slug, self.category.slug))
+        self.assertEqual(Training.objects.get(pk=res.data["id"]).category, self.category)  # the leaf is stored
+        res = self.create(sub_category=None)
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (top.slug, None))
+        self.assertEqual(Training.objects.get(pk=res.data["id"]).category, top)
+        data = training_payload(self.category)
+        del data["sub_category"]  # leaving it out is the same as null
+        res = self.client.post(PORTAL, data, format="json")
+        self.assertEqual((res.status_code, res.data["sub_category"]), (201, None))
+
+    def test_a_sub_category_must_belong_to_the_category(self):
+        stranger = make_category("Barista", parent="Hospitality")
+        res = self.create(sub_category=stranger.slug)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("sub_category", res.data)
+
+    def test_the_two_category_fields_only_take_their_own_level(self):
+        for label, overrides in (
+            ("a sub-category as the category", dict(category=self.category.slug, sub_category=None)),
+            ("a top-level category as the sub-category", dict(sub_category=self.category.parent.slug)),
+        ):
+            with self.subTest(label):
+                self.assertEqual(self.create(**overrides).status_code, 400)
+
+    def test_shifts_are_cleaned_and_answered(self):
+        res = self.create(shifts=[EVENING, MORNING, EVENING])
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["shifts"], [MORNING, EVENING])
+
+    def test_a_draft_may_leave_the_shifts_out(self):
+        data = training_payload(self.category)
+        del data["shifts"]
+        res = self.client.post(PORTAL, data, format="json")
+        self.assertEqual((res.status_code, res.data["shifts"]), (201, []))
+
+    def test_an_unknown_shift_is_400(self):
+        for shifts in (["Night"], [MORNING, "Night"], MORNING):
+            with self.subTest(shifts=shifts):
+                self.assertEqual(self.create(shifts=shifts).status_code, 400)
+
+    def test_physical_training_takes_a_municipality_and_an_address(self):
+        venue = {
+            "location": self.location.location_id,
+            "address": "Lakeside, Pokhara",
+            "map_url": "https://maps.example/lakeside",
+        }
+        res = self.create(mode="PHYSICAL", venue=venue)
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(res.data["venue"]["location"], self.location.location_id)
+        self.assertEqual(res.data["venue"]["address"], "Lakeside, Pokhara")
+
+    def test_online_training_takes_only_an_address_text(self):
+        res = self.create(venue={"address": "Zoom, link sent after enrolment"})
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(
+            (res.data["venue"]["location"], res.data["venue"]["address"]),
+            (None, "Zoom, link sent after enrolment"),
+        )
+
+    def test_the_municipality_can_be_anywhere_not_only_the_institutes_own(self):
+        elsewhere = make_municipality(9, "Elsewhere")
+        res = self.create(mode="PHYSICAL", venue={"location": elsewhere.pk, "address": "Far Road"})
         self.assertEqual(res.status_code, 201, res.data)
 
     def test_refused(self):
-        _, _, other_location = approved_institute("Beta", "beta@example.com", code=2)
-        inactive = add_location(self.institute, make_municipality(3, "M3"), is_active=False)
+        inactive = make_municipality(3, "M3")
+        inactive.is_active = False
+        inactive.save()
+        district = self.location.location.parent
         retired = make_category("Retired", "Old")
         retired.is_active = False
         retired.save()
         cases = {
-            "another institute's location": dict(mode="PHYSICAL", institute_location=other_location.pk),
-            "inactive location": dict(mode="PHYSICAL", institute_location=inactive.pk),
-            "inactive category": dict(category=retired.pk),
+            "physical without a municipality": dict(mode="PHYSICAL"),
+            "physical without a venue": dict(mode="PHYSICAL", venue=None),
+            "online with a municipality": dict(
+                venue={"location": self.location.location_id, "address": "Main Road"}
+            ),
+            "inactive municipality": dict(
+                mode="PHYSICAL", venue={"location": inactive.pk, "address": "Main Road"}
+            ),
+            "a district, not a municipality": dict(
+                mode="PHYSICAL", venue={"location": district.pk, "address": "Main Road"}
+            ),
+            "no address": dict(venue={"address": ""}),
+            "inactive category": dict(category=retired.slug),
+            "inactive sub-category": dict(sub_category=retired.slug),
             "unknown day": dict(sessions=[{"class_days": ["XYZ"], "start_time": "07:00", "end_time": "08:00"}]),
             "repeated day": dict(sessions=[{"class_days": ["SUN", "SUN"], "start_time": "07:00", "end_time": "08:00"}]),
             "unknown level": dict(level="ALL_LEVELS"),
@@ -123,6 +250,93 @@ class PortalEditTests(PortalTestCase):
         self.assertEqual(len(res.data["sessions"]), 1)
         res = self.client.patch(self.url(training), {"modules": []}, format="json")
         self.assertEqual(res.data["modules"], [])
+
+    def test_patch_replaces_the_venue_and_keeps_it_when_left_out(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        res = self.client.patch(self.url(training), {"title": "Renamed"}, format="json")
+        self.assertEqual(res.data["venue"]["address"], "Zoom link sent after enrolment")
+        venue = {"location": self.location.location_id, "address": "Lakeside"}
+        res = self.client.patch(self.url(training), {"mode": "PHYSICAL", "venue": venue}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["venue"]["location"], self.location.location_id)
+
+    def test_changing_the_mode_needs_the_new_venue(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        res = self.client.patch(self.url(training), {"mode": "PHYSICAL"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("venue", res.data)
+        training.refresh_from_db()
+        self.assertEqual(training.mode, "ONLINE")
+
+    def test_patch_changes_only_the_fields_it_sends_on_the_detail_and_contact_rows(self):
+        training = make_training(
+            self.institute, status=S.DRAFT, contact_person="Ram", contact_phone="9800000000"
+        )
+        res = self.client.patch(self.url(training), {"contact_phone": "9811111111"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        contact = TrainingContact.objects.get(training=training)
+        self.assertEqual((contact.contact_person, contact.contact_phone), ("Ram", "9811111111"))
+        res = self.client.patch(self.url(training), {"skills": ["Go"]}, format="json")
+        self.assertEqual((res.data["skills"], res.data["overview"]), (["Go"], "A detailed description"))
+        self.assertEqual(res.data["contact_phone"], "9811111111")
+
+    def test_patch_builds_the_rows_for_a_training_that_has_none(self):
+        training = Training.objects.create(
+            institute=self.institute, category=self.category, title="Bare", mode="ONLINE"
+        )
+        res = self.client.patch(self.url(training), {"overview": "Now described"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(TrainingDetail.objects.get(training=training).overview, "Now described")
+
+    def test_a_skills_edit_is_found_by_search(self):
+        training = make_training(self.institute, status=S.DRAFT, skills=["Python"])
+        self.client.patch(self.url(training), {"skills": ["Welding"]}, format="json")
+        Training.objects.filter(pk=training.pk).update(status=S.APPROVED)  # public to search
+        self.assertEqual(self.client.get(PUBLIC, {"search": "weld"}).data["count"], 1)
+
+    def test_patching_the_category_alone_clears_the_sub_category(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        top = self.category.parent.slug
+        res = self.client.patch(self.url(training), {"category": top}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (top, None))
+
+    def test_patching_the_sub_category_alone_is_checked_against_the_current_category(self):
+        training = make_training(self.institute, status=S.DRAFT, category=self.category.parent)
+        top = self.category.parent.slug
+        res = self.client.patch(self.url(training), {"sub_category": self.category.slug}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (top, self.category.slug))
+        stranger = make_category("Barista", parent="Hospitality")
+        res = self.client.patch(self.url(training), {"sub_category": stranger.slug}, format="json")
+        self.assertEqual(res.status_code, 400)
+        res = self.client.patch(self.url(training), {"sub_category": None}, format="json")
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (top, None))
+
+    def test_the_category_and_sub_category_can_change_together(self):
+        training = Training.objects.get(pk=self.create().data["id"])
+        other = make_category("Barista", parent="Hospitality")
+        body = {"category": other.parent.slug, "sub_category": other.slug}
+        res = self.client.patch(self.url(training), body, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual((res.data["category"], res.data["sub_category"]), (other.parent.slug, other.slug))
+        training.refresh_from_db()
+        self.assertEqual(training.category, other)
+
+    def test_patch_replaces_the_shifts(self):
+        training = make_training(self.institute, status=S.DRAFT)
+        res = self.client.patch(self.url(training), {"shifts": [EVENING, DAY]}, format="json")
+        self.assertEqual((res.status_code, res.data["shifts"]), (200, [DAY, EVENING]))
+        res = self.client.patch(self.url(training), {"title": "Renamed"}, format="json")
+        self.assertEqual(res.data["shifts"], [DAY, EVENING])  # left out: kept
+
+    def test_clearing_the_shifts_of_an_approved_training_is_400_and_saves_nothing(self):
+        training = make_training(self.institute)
+        res = self.client.patch(self.url(training), {"shifts": []}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("shifts", res.data)
+        training.refresh_from_db()
+        self.assertEqual((training.status, training.shifts), (S.APPROVED, [MORNING]))
 
     def test_patch_of_an_approved_training_sends_it_back_to_review(self):
         training = make_training(self.institute)
@@ -182,9 +396,9 @@ class LifecycleTests(PortalTestCase):
     def test_the_whole_lifecycle(self):
         reviewer = make_admin("reviewer@example.com")
         res = self.create(short_description="")
-        training_id = res.data["id"]
-        portal = f"{PORTAL}{training_id}/"
-        admin = f"{ADMIN}{training_id}/"
+        training_slug = res.data["slug"]
+        portal = f"{PORTAL}{training_slug}/"
+        admin = f"{ADMIN}{training_slug}/"
 
         res = self.client.post(f"{portal}submit/")
         self.assertEqual(res.status_code, 400)
@@ -223,6 +437,20 @@ class LifecycleTests(PortalTestCase):
         self.assertEqual(self.client.post(f"{portal}republish/").status_code, 400)
 
 
+class SubmitNeedsShiftsTests(PortalTestCase):
+    def test_submit_is_refused_without_shifts_until_they_are_added(self):
+        portal = f"{PORTAL}{self.create(shifts=[]).data['slug']}/"
+        res = self.client.post(f"{portal}submit/")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("shifts", res.data)
+        self.client.patch(portal, {"shifts": [DAY]}, format="json")
+        self.assertEqual(self.client.post(f"{portal}submit/").data["status"], S.SUBMITTED)
+
+    def test_the_sub_category_is_not_needed_to_submit(self):
+        portal = f"{PORTAL}{self.create(sub_category=None).data['slug']}/"
+        self.assertEqual(self.client.post(f"{portal}submit/").data["status"], S.SUBMITTED)
+
+
 class AdminApiTests(APITestCase):
     def setUp(self):
         self.institute, self.owner, _ = approved_institute()
@@ -245,13 +473,33 @@ class AdminApiTests(APITestCase):
 
     def test_detail_shows_the_whole_training(self):
         self.client.force_authenticate(self.reviewer)
-        data = self.client.get(f"{ADMIN}{self.training.pk}/").data
+        data = self.client.get(f"{ADMIN}{self.training.slug}/").data
         self.assertEqual(data["institute"]["status"], InstituteStatus.APPROVED)
+        self.assertEqual(data["institute"]["slug"], self.institute.slug)
         self.assertEqual(len(data["sessions"]), 1)
+        self.assertEqual(data["overview"], "A detailed description")
+        self.assertEqual(data["skills"], ["Python", "Git"])
+        self.assertEqual(data["contact_person"], "")
+        self.assertEqual(data["shifts"], [MORNING])
+        self.assertEqual(data["category"]["id"], self.training.category_id)  # the stored leaf
+        self.assertEqual(data["category"]["slug"], self.training.category.slug)
+        self.assertEqual(
+            data["sub_category"], {
+                "id": self.training.category_id,
+                "slug": self.training.category.slug,
+                "name": self.training.category.name,
+            }
+        )
+
+    def test_detail_has_no_sub_category_for_a_top_level_category(self):
+        top_only = make_training(self.institute, status=S.SUBMITTED, category=make_category().parent)
+        self.client.force_authenticate(self.reviewer)
+        data = self.client.get(f"{ADMIN}{top_only.slug}/").data
+        self.assertIsNone(data["sub_category"])
 
     def test_review_actions(self):
         self.client.force_authenticate(self.reviewer)
-        url = f"{ADMIN}{self.training.pk}/"
+        url = f"{ADMIN}{self.training.slug}/"
         for action in ("request-changes", "reject"):
             with self.subTest(action=action):
                 self.assertEqual(self.client.post(f"{url}{action}/", {}, format="json").status_code, 400)
@@ -263,7 +511,73 @@ class AdminApiTests(APITestCase):
         for status in (S.DRAFT, S.UNPUBLISHED):
             with self.subTest(status=status):
                 training = make_training(self.institute, status=status)
-                self.assertEqual(self.client.post(f"{ADMIN}{training.pk}/approve/").status_code, 400)
+                self.assertEqual(self.client.post(f"{ADMIN}{training.slug}/approve/").status_code, 400)
+
+    def test_slug_lookup_and_numeric_id_404_and_action(self):
+        self.client.force_authenticate(self.reviewer)
+        # retrieve by slug = 200
+        res = self.client.get(f"{ADMIN}{self.training.slug}/")
+        self.assertEqual(res.status_code, 200)
+        # retrieve by numeric id = 404
+        res_numeric = self.client.get(f"{ADMIN}{self.training.pk}/")
+        self.assertEqual(res_numeric.status_code, 404)
+        # one action by slug works
+        res_action = self.client.post(f"{ADMIN}{self.training.slug}/approve/")
+        self.assertEqual(res_action.status_code, 200)
+
+
+class SummaryTests(PortalTestCase):
+    SUMMARY = f"{PORTAL}summary/"
+
+    def test_counts_only_this_institutes_trainings(self):
+        for status in (S.DRAFT, S.SUBMITTED, S.APPROVED, S.APPROVED, S.CANCELLED):
+            make_training(self.institute, status=status)
+        other, _, _ = approved_institute("Beta Institute", "beta@example.com", code=2)
+        make_training(other, status=S.APPROVED)
+        response = self.client.get(self.SUMMARY)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data, {"total": 5, "active": 2, "pending_review": 1}
+        )
+
+    def test_is_one_aggregate_query(self):
+        make_training(self.institute)
+        self.client.get(self.SUMMARY)  # warm-up: permissions are cached per user
+        self.assertEqual(count_queries(lambda: self.client.get(self.SUMMARY)), 1)
+
+    def test_an_institute_without_trainings_gets_zeros(self):
+        response = self.client.get(self.SUMMARY)
+        self.assertEqual(response.data, {"total": 0, "active": 0, "pending_review": 0})
+
+    def test_anonymous_is_refused(self):
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.get(self.SUMMARY).status_code, (401, 403))
+
+
+class ActionQueryCountTests(TempMediaMixin, PortalTestCase):
+    """The services lock and re-read the row, so the viewset must not prefetch before them
+    (measured: 12 queries per transition or cover upload with a prefetch in get_object, 9 without)."""
+
+    def queries(self, call):
+        self.client.get(PORTAL)  # warm-up: permissions are cached per user
+        return count_queries(call)
+
+    def test_a_transition_re_reads_the_row_once(self):
+        training = make_training(self.institute, status=S.SUBMITTED)
+        self.assertLessEqual(
+            self.queries(lambda: self.client.post(self.url(training, "withdraw"))), 9
+        )
+
+    def test_cover_re_reads_the_row_once(self):
+        training = make_training(self.institute, status=S.DRAFT)
+        self.assertLessEqual(
+            self.queries(
+                lambda: self.client.post(
+                    self.url(training, "cover"), {"cover_image": png()}, format="multipart"
+                )
+            ),
+            9,
+        )
 
 
 class QueryCountTests(PortalTestCase):

@@ -5,7 +5,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.training.constants import SEARCH_CONFIG
+from apps.training.constants import SEARCH_CONFIG, TrainingShift
 from apps.training.models import Training
 
 # the hub's own buckets: under 1 month, 1 to 3 months, 3 months or more
@@ -24,17 +24,13 @@ def prefix_query(text):
 
 
 class TrainingFilter(django_filters.FilterSet):
-    # a top-level id also finds the trainings of its sub-categories
-    category = django_filters.NumberFilter(method="filter_category")
-    sub_category = django_filters.NumberFilter(field_name="category_id")
-    # an online training has no location, so a location filter excludes it
-    province = django_filters.NumberFilter(
-        field_name="institute_location__location__province_id"
-    )
-    district = django_filters.NumberFilter(
-        field_name="institute_location__location__district_id"
-    )
-    municipality = django_filters.NumberFilter(field_name="institute_location__location_id")
+    # a top-level slug also finds the trainings of its sub-categories
+    category = django_filters.CharFilter(method="filter_category")
+    sub_category = django_filters.CharFilter(field_name="category__slug")
+    # an online training has no municipality, so a location filter excludes it
+    province = django_filters.NumberFilter(field_name="venue__location__province_id")
+    district = django_filters.NumberFilter(field_name="venue__location__district_id")
+    municipality = django_filters.NumberFilter(field_name="venue__location_id")
     fee_min = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="gte")
     fee_max = django_filters.NumberFilter(field_name="fee_npr", lookup_expr="lte")
     start_from = django_filters.DateFilter(field_name="start_date", lookup_expr="gte")
@@ -51,13 +47,16 @@ class TrainingFilter(django_filters.FilterSet):
     institute = django_filters.CharFilter(field_name="institute__slug")
     registration_open = django_filters.BooleanFilter(method="filter_registration_open")
     search = django_filters.CharFilter(method="filter_search")
+    shifts = django_filters.MultipleChoiceFilter(
+        choices=TrainingShift.CHOICES, method="filter_shift"
+    )
 
     class Meta:
         model = Training
         fields = ("mode", "level")
 
     def filter_category(self, queryset, name, value):
-        return queryset.filter(Q(category_id=value) | Q(category__parent_id=value))
+        return queryset.filter(Q(category__slug=value) | Q(category__parent__slug=value))
 
     def filter_duration(self, queryset, name, value):
         return queryset.filter(DURATION_BUCKETS[value])
@@ -84,10 +83,6 @@ class TrainingFilter(django_filters.FilterSet):
             .order_by("-rank", "-published_at", "-pk")
         )
 
-
-class AdminTrainingFilter(django_filters.FilterSet):
-    institute = django_filters.NumberFilter(field_name="institute_id")
-
-    class Meta:
-        model = Training
-        fields = ("status", "mode", "institute")
+    def filter_shift(self, queryset, name, value):
+        """?shift=MORNING&shift=EVENING: trainings offering any of them."""
+        return queryset.filter(shifts__overlap=value)

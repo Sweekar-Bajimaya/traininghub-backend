@@ -1,5 +1,5 @@
 Django==5.2.4
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.13
 pytz==2025.2
 Pillow==11.3.0
 

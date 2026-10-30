@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -50,11 +51,14 @@ if DEBUG:
     # Unconditional in prod otherwise - the toolbar is a dev-only tool and
     # its middleware/panels have no business running against real traffic.
     THIRD_PARTY_APPS.append("debug_toolbar")
+    # Dev-only, like the toolbar (requirements/dev.txt): gives `manage.py show_urls`.
+    THIRD_PARTY_APPS.append("django_extensions")
 
 
 LOCAL_APPS = [
     "apps.app_key",
     "apps.common",
+    "apps.control_panel",
     "apps.institutes",
     "apps.training",
     "apps.users",
@@ -140,6 +144,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -162,10 +167,14 @@ REST_FRAMEWORK = {
         # Password guessing.
         "login": "5/min",
         "token_refresh": "10/min",
+        "otp": "50/min",
         "password_reset": "5/min",
         # Anonymous enquiry submission (also limited per phone number in the view).
         "enquiry": "10/hour",
         "institute_register": "5/hour",
+        # Registration email codes, per submitted address (the cache also allows one code a minute).
+        "register_otp": "5/hour",
+        "register_otp_verify": "30/hour",
         "invitation_accept": "10/hour",
     },
 }
@@ -236,10 +245,20 @@ PASSWORD_HASHERS = [
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# The tests clear one-time codes and throttle counters (cache.delete_pattern), so `manage.py test`
+# gets its own Redis database for the cache. Sharing REDIS_URL's would wipe the codes someone just
+# requested from the dev server. Only the cache moves: the django-q broker stays on REDIS_URL.
+if "test" in sys.argv:
+    CACHE_REDIS_URL = os.environ.get("REDIS_TEST_URL") or (
+        urlsplit(REDIS_URL)._replace(path="/15").geturl()
+    )
+else:
+    CACHE_REDIS_URL = REDIS_URL
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
+        "LOCATION": CACHE_REDIS_URL,
         "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
     }
 }

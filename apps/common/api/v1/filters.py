@@ -1,6 +1,5 @@
 import django_filters
 
-from apps.common.models.category import Category
 from apps.common.models.location import Location
 
 
@@ -14,11 +13,3 @@ class LocationFilter(django_filters.FilterSet):
     class Meta:
         model = Location
         fields = ("level", "parent", "province", "district")
-
-
-class AdminCategoryFilter(django_filters.FilterSet):
-    parent = django_filters.NumberFilter(field_name="parent_id")
-
-    class Meta:
-        model = Category
-        fields = ("parent", "is_active")

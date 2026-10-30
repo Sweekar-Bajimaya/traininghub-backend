@@ -1,101 +1,170 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from rest_framework.validators import UniqueValidator
 
-from apps.common.constants import LocationLevel
-from apps.common.models.location import Location
+from apps.common.api.v1.serializers import (
+    LocationInputSerializer,
+    active_municipalities,
+)
 from apps.common.serializers import DynamicFieldsModelSerializer
-from apps.common.validators import validate_phone_number
+from apps.common.validators import validate_pan_vat_number
 from apps.institutes import services
-from apps.institutes.constants import DocumentStatus
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
     InstituteMember,
+    InstituteSocialLink,
 )
+from apps.users.api.v1.serializers import (
+    OTPField,
+    UserRegistrationSerializer,
+)
+from apps.users.constants import SocialPlatform
 
 User = get_user_model()
 
 
-def active_municipalities():
-    return Location.objects.filter(level=LocationLevel.MUNICIPALITY, is_active=True)
-
-
-
-# registration (public)
-class OwnerSerializer(serializers.Serializer):
-    email = serializers.EmailField(
-        validators=[
-            UniqueValidator(
-                queryset=User.objects.all(),
-                lookup="iexact",
-                message="A user with that email already exists.",
-            )
-        ]
-    )
-    full_name = serializers.CharField(max_length=150)
-    password = serializers.CharField(write_only=True)
-    phone_number = serializers.CharField(
-        max_length=25,
-        required=False,
-        validators=[
-            validate_phone_number,
-            UniqueValidator(
-                queryset=User.objects.all(),
-                message="A user with that phone number already exists.",
-            ),
-        ],
-    )
-
-    def validate_password(self, value):
-        validate_password(value)
-        return value
-
-
-class LocationInputSerializer(serializers.Serializer):
-    location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
-    address = serializers.CharField(max_length=255)
-    map_url = serializers.URLField(required=False, allow_blank=True)
-    contact_phone = serializers.CharField(
-        max_length=25,
+class InstituteContactSerializer(DynamicFieldsModelSerializer):
+    # Not a column of the contact row: it is the institute's "website" social link. Output is
+    # filled in `to_representation`, input is written by `services.update_contact` / `register`.
+    # Blank or null means "no website".
+    website = serializers.URLField(
         required=False,
         allow_blank=True,
-        validators=[validate_phone_number],
+        allow_null=True,
+        max_length=InstituteSocialLink._meta.get_field("url").max_length,
     )
 
+    class Meta:
+        model = InstituteContact
+        fields = ("contact_person", "contact_phone", "contact_email", "telephone_number", "website")
 
-class RegisterSerializer(DynamicFieldsModelSerializer):
-    """Public registration. Role and status are never read from the payload."""
+    def to_representation(self, instance):
+        data = super().to_representation(instance)  # the contact has no `website`: null for now
+        if "website" in data:  # `fields` / `exclude_fields` may have dropped it
+            link = next(
+                (
+                    l
+                    for l in instance.institute.social_links.all()
+                    if l.platform == SocialPlatform.WEBSITE
+                ),
+                None,
+            )
+            data["website"] = link.url if link else None
+        return data
 
-    owner = OwnerSerializer(write_only=True)
-    locations = LocationInputSerializer(many=True, write_only=True, required=True, allow_empty=False)
+    def update(self, instance, validated_data):
+        return services.update_contact(instance, **validated_data)
+
+
+
+class InstituteCEOSerializer(DynamicFieldsModelSerializer):
+    class Meta:
+        model = InstituteCEO
+        fields = ("name", "message", "photo", "linkedin_url")
+
+    def update(self, instance, validated_data):
+        # used by PUT institute/ceo/ (create or replace); the instance may not be saved yet
+        return services.save_ceo(
+            self.request.user.membership.institute, **validated_data
+        )
+
+
+class InstituteSocialLinkSerializer(DynamicFieldsModelSerializer):
+    class Meta:
+        model = InstituteSocialLink
+        fields = ("id", "platform", "url", "label")
+        read_only_fields = ("id",)
+
+    def create(self, validated_data):
+        return services.add_social_link(
+            self.request.user.membership.institute, **validated_data
+        )
+
+    def update(self, instance, validated_data):
+        return services.update_social_link(instance, **validated_data)
+
+
+class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
+    """Registration requires contact person + phone. `owner.email` and `owner.password` are the
+    institute's login; the email is verified with `otp`, the code sent to it by
+    RegistrationOTPSerializer."""
+
+    otp = OTPField()
+    owner = UserRegistrationSerializer(write_only=True)
+    locations = LocationInputSerializer(
+        many=True, write_only=True, required=True, allow_empty=False
+    )
+    contact = InstituteContactSerializer(write_only=True)
+    ceo = InstituteCEOSerializer(
+        write_only=True, required=False, exclude_fields=("photo",)
+    )
+    social_links = InstituteSocialLinkSerializer(
+        many=True, write_only=True, required=False
+    )
 
     class Meta:
         model = Institute
         fields = (
             "id",
             "slug",
+            "status",
             "name",
+            "registration_number",
+            "pan_vat_number",
             "type",
+            "otp",
             "established_year",
             "description",
-            "status",
             "owner",
             "locations",
+            "contact",
+            "ceo",
+            "social_links",
         )
-        read_only_fields = ("id", "slug", "status")
+        read_only_fields = (
+            "id",
+            "slug",
+            "status",
+        )  # no logo: it's uploaded later through the portal
+
+    def validate_social_links(self, value):
+        platforms = [
+            l["platform"] for l in value if l["platform"] != SocialPlatform.OTHER
+        ]
+        if len(platforms) != len(set(platforms)):
+            raise serializers.ValidationError("Each platform can be added only once.")
+        return value
+
+    def validate(self, attrs):
+        sends_website_link = any(
+            link["platform"] == SocialPlatform.WEBSITE
+            for link in attrs.get("social_links", [])
+        )
+        if attrs["contact"].get("website") and sends_website_link:
+            raise serializers.ValidationError(
+                {"social_links": "The website is already sent in contact; add it only once."}
+            )
+        return attrs
 
     def create(self, validated_data):
         return services.register(
             owner=validated_data.pop("owner"),
-            locations=validated_data.pop("locations", []),
+            locations=validated_data.pop("locations"),
+            contact=validated_data.pop("contact"),
+            ceo=validated_data.pop("ceo", None),
+            social_links=validated_data.pop("social_links", []),
+            otp=validated_data.pop("otp"),
             institute_data=validated_data,
         )
 
+    def validate_pan_vat_number(self, value):
+        return validate_pan_vat_number(value)
 
 
 # public pages
@@ -121,6 +190,10 @@ class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
 
 
 class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
+    contact = InstituteContactSerializer(read_only=True, allow_null=True)
+    # to hide the person's name publicly: InstituteContactSerializer(read_only=True, allow_null=True, exclude_fields=("contact_person",))
+    ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
+    social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
     locations = serializers.SerializerMethodField()
     gallery = serializers.SerializerMethodField()
 
@@ -128,18 +201,15 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
         fields = PublicInstituteListSerializer.Meta.fields + (
             "established_year",
             "description",
-            "ceo_name",
-            "ceo_message",
-            "website",
-            "contact_email",
-            "contact_phone",
-            "facebook_url",
-            "linkedin_url",
+            "contact",
+            "ceo",
+            "social_links",
             "locations",
             "gallery",
         )
 
     def get_locations(self, obj):
+        # prefetched: active only, with municipality / district / province, main office first
         return [
             {
                 "municipality": l.location.name,
@@ -157,86 +227,67 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
         return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
 
 
-# ---------------------------------------------------------------- admin review
-
-
-class ReasonSerializer(serializers.Serializer):
-    reason = serializers.CharField()
-
-
-class AdminDocumentSerializer(DynamicFieldsModelSerializer):
-    class Meta:
-        model = InstituteDocument
-        fields = ("id", "name", "status", "created_at")  # never the file path or URL
-        read_only_fields = ("id", "name", "created_at")
-
-
-class DocumentReviewSerializer(serializers.Serializer):
-    status = serializers.ChoiceField(
-        choices=(DocumentStatus.VERIFIED, DocumentStatus.REJECTED)
-    )
-
-
-class AdminInstituteSerializer(DynamicFieldsModelSerializer):
-    documents = AdminDocumentSerializer(many=True, read_only=True)
-    owner_email = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Institute
-        fields = (
-            "id",
-            "slug",
-            "name",
-            "type",
-            "status",
-            "status_reason",
-            "established_year",
-            "description",
-            "created_at",
-            "owner_email",
-            "documents",
-        )
-
-    def get_owner_email(self, obj):
-        owners = getattr(obj, "owner_members", [])  # prefetched by the admin viewset
-        return owners[0].user.email if owners else None
-
-
-# ---------------------------------------------------------------- portal (the institute's own staff)
-
-
 class InstituteProfileSerializer(DynamicFieldsModelSerializer):
+    """The institute's own profile in the portal. Only its own columns are edited here; the
+    contact person, CEO and social links are shown and edited through their own endpoints."""
+
+    contact = InstituteContactSerializer(read_only=True, allow_null=True)
+    ceo = InstituteCEOSerializer(
+        read_only=True, allow_null=True
+    )  # allow_null: no CEO row → null, not a 500
+    social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
+
     class Meta:
         model = Institute
         fields = (
             "id",
             "slug",
             "name",
+            "registration_number",
+            "pan_vat_number",
             "type",
             "status",
             "status_reason",
             "established_year",
             "description",
             "logo",
-            "ceo_name",
-            "ceo_message",
-            "website",
-            "contact_email",
-            "contact_phone",
-            "facebook_url",
-            "linkedin_url",
+            "contact",
+            "ceo",
+            "social_links",
         )
-        read_only_fields = ("id", "slug", "status", "status_reason")
+        read_only_fields = (
+            "id",
+            "slug",
+            "registration_number",
+            "pan_vat_number",
+            "status",
+            "status_reason",
+        )
 
     def update(self, instance, validated_data):
-        return services.update_profile(instance, **validated_data)
+        return services.update_profile(instance, **validated_data)  # unchanged
+
+
+class InstituteActionRequiredSerializer(serializers.Serializer):
+    """One boolean per profile section: `true` = filled in, `false` = the institute still has
+    to fill it. Reads the `has_*` annotations of `services.annotate_profile_completion`."""
+
+    description = serializers.BooleanField(source="has_description", read_only=True)
+    ceo = serializers.BooleanField(source="has_ceo", read_only=True)
+    gallery = serializers.BooleanField(source="has_gallery", read_only=True)
+    contact = serializers.BooleanField(source="has_contact", read_only=True)
+    social_links = serializers.BooleanField(source="has_social_links", read_only=True)
 
 
 class InstituteLocationSerializer(DynamicFieldsModelSerializer):
     location = serializers.PrimaryKeyRelatedField(queryset=active_municipalities())
     municipality_name = serializers.CharField(source="location.name", read_only=True)
-    district_name = serializers.CharField(source="location.district.name", read_only=True)
-    province_name = serializers.CharField(source="location.province.name", read_only=True)
+    district_name = serializers.CharField(
+        source="location.district.name", read_only=True
+    )
+    province_name = serializers.CharField(
+        source="location.province.name", read_only=True
+    )
 
     class Meta:
         model = InstituteLocation
@@ -264,16 +315,27 @@ class InstituteLocationSerializer(DynamicFieldsModelSerializer):
 
 
 class InstituteDocumentSerializer(DynamicFieldsModelSerializer):
+    """POST adds a document; PATCH takes only a new `file`, for a rejected document."""
+
     class Meta:
         model = InstituteDocument
         fields = ("id", "name", "file", "status", "created_at")
         read_only_fields = ("id", "status", "created_at")
+        create_only_fields = ("name",)
         extra_kwargs = {"file": {"write_only": True}}  # never echoed back
+
+    def validate(self, attrs):
+        if self.instance is not None and "file" not in attrs:  # a PATCH is partial
+            raise serializers.ValidationError({"file": "This field is required."})
+        return attrs
 
     def create(self, validated_data):
         return services.add_document(
             self.request.user.membership.institute, **validated_data
         )
+
+    def update(self, instance, validated_data):
+        return services.reupload_document(instance, **validated_data)
 
 
 class GalleryImageSerializer(DynamicFieldsModelSerializer):

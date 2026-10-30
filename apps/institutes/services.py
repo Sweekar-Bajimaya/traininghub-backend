@@ -6,10 +6,16 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Q
+from django.db.models.functions import Length
+from django.db.models.lookups import GreaterThanOrEqual
 from django.utils import timezone
 from django_q.tasks import async_task
 
 from apps.institutes.constants import (
+    DESCRIPTION_MIN_LENGTH,
+    GALLERY_MIN_PHOTOS,
+    SOCIAL_LINKS_MIN,
     DocumentStatus,
     InstituteStatus,
     InvitationStatus,
@@ -17,23 +23,23 @@ from apps.institutes.constants import (
 )
 from apps.institutes.models import (
     Institute,
+    InstituteCEO,
+    InstituteContact,
     InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
     InstituteMember,
+    InstituteSocialLink,
 )
 from apps.institutes.validators import validate_institute_location
-from apps.training.constants import TrainingStatus  # constants only, so no import cycle
 from apps.users import services as user_services
-from apps.users.constants import Role
+from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
 User = get_user_model()
 
 
-# ---------------------------------------------------------------- status workflow
-
-
+# status workflow
 def _transition(institute, to, *, reason="", check=None):
     """Move an institute to a new status. Caller must be inside transaction.atomic()."""
     institute = Institute.objects.select_for_update().get(pk=institute.pk)
@@ -93,6 +99,8 @@ def resubmit(institute):
 
 @transaction.atomic
 def update_profile(institute, **fields):
+    """Change the institute's own columns. The contact person, the CEO and the social links have
+    their own endpoints and services (`save_ceo`, `add_social_link`, ...)."""
     institute = Institute.objects.select_for_update().get(pk=institute.pk)
     renamed = "name" in fields and fields["name"] != institute.name
     for name, value in fields.items():
@@ -102,24 +110,46 @@ def update_profile(institute, **fields):
         # the institute name is part of every training's search vector
         transaction.on_commit(
             lambda: async_task(
-                "apps.training.tasks.refresh_institute_trainings", institute.pk, save=False
+                "apps.training.tasks.refresh_institute_trainings",
+                institute.pk,
+                save=False,
             )
         )
     return institute
 
 
-# ---------------------------------------------------------------- registration and locations
+# registration and locations
+def register(
+    *, institute_data, owner, contact, otp, locations=(), ceo=None, social_links=()
+):
+    """Create an institute with its owner, contact, locations and links.
 
-
-@transaction.atomic
-def register(*, institute_data, owner, locations=()):
-    """Create an institute, its owner account and its locations in one transaction.
-
-    owner = {"email", "password", "full_name", optional "phone_number"}; the owner is always
-    INSTITUTE_STAFF. Documents are uploaded afterwards through the portal.
+    The owner's email is the institute's login, and `otp` is the code emailed to it by
+    users.services.send_registration_otp. The code is checked before anything is written and used up at the end,
+    inside the transaction, so a failed registration rolls back and a code works only once.
     """
+    email = user_services.normalize_email(owner["email"])
+    user_services.verify_otp(email, otp, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+    with transaction.atomic():
+        institute = _create_registration(
+            institute_data=institute_data,
+            owner=owner,
+            contact=contact,
+            locations=locations,
+            ceo=ceo,
+            social_links=social_links,
+        )
+        # Last, so that of two parallel requests with the same code only one gets through; the
+        # other raises here and its writes are rolled back.
+        user_services.consume_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+    return institute
+
+
+def _create_registration(*, institute_data, owner, contact, locations, ceo, social_links):
     for item in locations:
-        validate_institute_location(item["location"])  # bulk_create skips model validation
+        validate_institute_location(
+            item["location"]
+        )  # bulk_create skips model validation
     institute = Institute.objects.create(**institute_data)
     owner_user = User.objects.create_user(role=Role.INSTITUTE_STAFF, **owner)
     InstituteMember.objects.create(
@@ -127,20 +157,32 @@ def register(*, institute_data, owner, locations=()):
     )
     InstituteLocation.objects.bulk_create(
         [
-            InstituteLocation(
-                institute=institute, is_main=(i == 0), **item
-            )  # the first one is the main office
+            InstituteLocation(institute=institute, is_main=(i == 0), **item)
             for i, item in enumerate(locations)
         ]
     )
-    # TODO(notify): admins with manage_institutes
+    contact = dict(contact)
+    website = contact.pop("website", None)  # not a column: it is the "website" social link
+    InstituteContact.objects.create(institute=institute, **contact)
+    if ceo:
+        InstituteCEO.objects.create(institute=institute, **ceo)
+    links = [InstituteSocialLink(institute=institute, **link) for link in social_links]
+    if website:
+        links.append(
+            InstituteSocialLink(
+                institute=institute, platform=SocialPlatform.WEBSITE, url=website
+            )
+        )
+    InstituteSocialLink.objects.bulk_create(links)
     return institute
 
 
 @transaction.atomic
 def add_location(institute, *, location, address, contact_phone="", map_url=""):
     validate_institute_location(location)
-    Institute.objects.select_for_update().get(pk=institute.pk)  # serialise per institute
+    Institute.objects.select_for_update().get(
+        pk=institute.pk
+    )  # serialise per institute
     first = not institute.locations.filter(is_active=True).exists()
     return InstituteLocation.objects.create(
         institute=institute,
@@ -160,13 +202,6 @@ def update_location(instance, **fields):
     for name, value in fields.items():
         setattr(instance, name, value)
     instance.save(update_fields=[*fields, "modified_at"])
-    if "location" in fields:
-        # the municipality and district are part of the search vector of trainings held here
-        transaction.on_commit(
-            lambda: async_task(
-                "apps.training.tasks.refresh_location_trainings", instance.pk, save=False
-            )
-        )
     return instance
 
 
@@ -178,7 +213,9 @@ def set_main_location(location):
         raise ValidationError("An inactive location cannot be the main office.")
     InstituteLocation.objects.filter(
         institute_id=location.institute_id, is_main=True
-    ).exclude(pk=location.pk).update(is_main=False)  # clear first, then set (partial unique index)
+    ).exclude(pk=location.pk).update(
+        is_main=False
+    )  # clear first, then set (partial unique index)
     location.is_main = True
     location.save(update_fields=["is_main", "modified_at"])
     return location
@@ -190,19 +227,44 @@ def deactivate_location(location):
     location = InstituteLocation.objects.get(pk=location.pk)
     if location.is_main:
         raise ValidationError("Choose another main office first.")
-    if location.trainings.exclude(status__in=TrainingStatus.FINISHED).exists():
-        raise ValidationError("Move or cancel the trainings held at this location first.")
     location.is_active = False
     location.save(update_fields=["is_active", "modified_at"])
     return location
 
 
-# ---------------------------------------------------------------- documents and gallery
+# documents and gallery
+@transaction.atomic
+def add_document(institute, *, name, file):
+    """Upload a new verification document. An institute has one row per document name (any case),
+    so a name it already used is refused; a rejected document is uploaded again with
+    `reupload_document`."""
+    name = name.strip()
+    # one upload per institute at a time, so two requests cannot both find "no such name"
+    Institute.objects.select_for_update().get(pk=institute.pk)
+    if InstituteDocument.objects.filter(institute=institute, name__iexact=name).exists():
+        raise ValidationError(
+            {
+                "name": "A document with this name already exists. If it was rejected, "
+                "upload the file again to that document instead of adding a new one."
+            }
+        )
+    return InstituteDocument.objects.create(institute=institute, name=name, file=file)
 
 
 @transaction.atomic
-def add_document(institute, *, name, file):
-    return InstituteDocument.objects.create(institute=institute, name=name, file=file)
+def reupload_document(document, *, file):
+    """Replace the file of a `REJECTED` document and send it back to review as `RE_UPLOADED`. The
+    row, and so its id, stays. Any other status is refused, so a file an admin may be reading, or
+    has verified, is never swapped underneath them."""
+    document = InstituteDocument.objects.select_for_update().get(pk=document.pk)
+    if document.status != DocumentStatus.REJECTED:
+        raise ValidationError("Only a rejected document can be uploaded again.")
+    old_name, storage = document.file.name, document.file.storage
+    document.file = file
+    document.status = DocumentStatus.RE_UPLOADED
+    document.save(update_fields=["file", "status", "modified_at"])
+    transaction.on_commit(lambda: storage.delete(old_name))  # the rejected file is not kept
+    return document
 
 
 @transaction.atomic
@@ -241,9 +303,7 @@ def reorder_gallery(institute, ids):
     InstituteGalleryImage.objects.bulk_update(images.values(), ["position"])
 
 
-# ---------------------------------------------------------------- staff and invitations
-
-
+# staff and invitations
 def _hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -339,3 +399,124 @@ def remove_staff(member, *, by):
     member.delete()
     # deactivates the account and revokes its refresh tokens
     user_services.set_status(user, active=False, by=by)
+
+
+@transaction.atomic
+def save_ceo(institute, **fields):
+    """Create or update the CEO. Only the keys sent are changed, so an omitted photo stays."""
+    Institute.objects.select_for_update().get(
+        pk=institute.pk
+    )  # serialise per institute
+    ceo = InstituteCEO.objects.filter(institute=institute).first() or InstituteCEO(
+        institute=institute
+    )
+    for name, value in fields.items():
+        setattr(ceo, name, value)
+    ceo.save()
+    return ceo
+
+
+def _check_platform_free(institute_id, platform, *, exclude_pk=None):
+    if platform == SocialPlatform.OTHER:
+        return
+    taken = InstituteSocialLink.objects.filter(
+        institute_id=institute_id, platform=platform
+    )
+    if exclude_pk:
+        taken = taken.exclude(pk=exclude_pk)
+    if taken.exists():
+        raise ValidationError(
+            {"platform": "This platform is already added."}
+        )  # 400, not a 409
+
+
+@transaction.atomic
+def add_social_link(institute, **fields):
+    Institute.objects.select_for_update().get(pk=institute.pk)
+    _check_platform_free(institute.pk, fields["platform"])
+    return InstituteSocialLink.objects.create(institute=institute, **fields)
+
+
+@transaction.atomic
+def update_social_link(link, **fields):
+    Institute.objects.select_for_update().get(pk=link.institute_id)
+    if "platform" in fields:
+        _check_platform_free(link.institute_id, fields["platform"], exclude_pk=link.pk)
+    for name, value in fields.items():
+        setattr(link, name, value)
+    link.save()
+    return link
+
+
+@transaction.atomic
+def update_contact(contact, **fields):
+    """Change the contact row. `website` is not one of its columns: it is the institute's
+    "website" social link, set when given and removed when blank. Only the keys sent are changed."""
+    Institute.objects.select_for_update().get(
+        pk=contact.institute_id
+    )  # serialise per institute
+    sets_website = "website" in fields
+    website = fields.pop("website", None)
+    for name, value in fields.items():
+        setattr(contact, name, value)
+    if fields:
+        contact.save(update_fields=[*fields, "modified_at"])
+    if sets_website:
+        _set_website(contact.institute_id, website)
+    return contact
+
+
+def _set_website(institute_id, url):
+    """One website link per institute (the unique index allows one per platform but `other`)."""
+    links = InstituteSocialLink.objects.filter(
+        institute_id=institute_id, platform=SocialPlatform.WEBSITE
+    )
+    if url:
+        InstituteSocialLink.objects.update_or_create(
+            institute_id=institute_id,
+            platform=SocialPlatform.WEBSITE,
+            defaults={"url": url},
+        )
+    else:
+        links.delete()
+
+
+# profile completion (read only)
+def _at_least(queryset, count):
+    """EXISTS that is true only when the subquery has `count` rows or more
+    (`LIMIT 1 OFFSET count-1`), so a count threshold needs no join or GROUP BY."""
+    return Exists(queryset.values("pk")[count - 1 : count])
+
+
+def annotate_profile_completion(queryset):
+    """Annotate institutes with one boolean per profile section: `True` when the section is
+    filled in, `False` when the institute still has to fill it. One query for all sections.
+
+    The text columns are NOT NULL, so "empty" is `""`. The API strips surrounding whitespace
+    on write, so a stored description's length is its trimmed length.
+    """
+    mine = {"institute": OuterRef("pk")}
+    return queryset.annotate(
+        has_description=GreaterThanOrEqual(
+            Length("description"), DESCRIPTION_MIN_LENGTH
+        ),
+        # the row can exist without a message or photo: both are blank=True
+        has_ceo=Exists(
+            InstituteCEO.objects.filter(**mine).exclude(Q(message="") | Q(photo=""))
+        ),
+        has_gallery=_at_least(
+            InstituteGalleryImage.objects.filter(**mine), GALLERY_MIN_PHOTOS
+        ),
+        # registration fills the first three; only the landline is optional
+        has_contact=Exists(
+            InstituteContact.objects.filter(**mine).exclude(
+                Q(contact_person="")
+                | Q(contact_phone="")
+                | Q(contact_email="")
+                | Q(telephone_number="")
+            )
+        ),
+        has_social_links=_at_least(
+            InstituteSocialLink.objects.filter(**mine), SOCIAL_LINKS_MIN
+        ),
+    )

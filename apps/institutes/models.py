@@ -1,5 +1,7 @@
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models import OneToOneField
 from django.db.models.functions import Lower
 
 from apps.common.models.base import BaseModel, SlugModel
@@ -14,10 +16,13 @@ from apps.institutes.constants import (
 )
 from apps.institutes.storage import PrivateStorage
 from apps.institutes.validators import validate_document_file, validate_image_file
+from apps.users.constants import SocialPlatform
 
 
 class Institute(BaseModel, SlugModel):
     name = models.CharField(max_length=255)
+    registration_number = models.CharField(max_length=50)
+    pan_vat_number = models.CharField(max_length=9, unique=True)
     type = models.CharField(max_length=30, choices=InstituteType.CHOICES)
     established_year = models.PositiveSmallIntegerField(null=True, blank=True)
     description = models.TextField(blank=True)
@@ -28,17 +33,6 @@ class Institute(BaseModel, SlugModel):
         max_length=20, choices=InstituteStatus.CHOICES, default=InstituteStatus.PENDING
     )
     status_reason = models.TextField(blank=True)
-
-    # profile
-    ceo_name = models.CharField(max_length=150, blank=True)
-    ceo_message = models.TextField(blank=True)
-    website = models.URLField(blank=True)
-    contact_email = models.EmailField(blank=True)
-    contact_phone = models.CharField(
-        max_length=25, blank=True, validators=[validate_phone_number]
-    )
-    facebook_url = models.URLField(blank=True)
-    linkedin_url = models.URLField(blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["status"], name="institutes_status_idx")]
@@ -113,7 +107,7 @@ class InstituteDocument(BaseModel):
         validators=[validate_document_file],
     )
     status = models.CharField(
-        max_length=10, choices=DocumentStatus.CHOICES, default=DocumentStatus.PENDING
+        max_length=20, choices=DocumentStatus.CHOICES, default=DocumentStatus.PENDING
     )
 
     class Meta:
@@ -121,6 +115,15 @@ class InstituteDocument(BaseModel):
             models.Index(
                 fields=["institute", "status"], name="institutes_doc_status_idx"
             )
+        ]
+        constraints = [
+            # one row per document: a rejected one is replaced in place (`services.reupload_document`)
+            models.UniqueConstraint(
+                "institute",
+                Lower("name"),
+                name="institutes_document_unique_name",
+                violation_error_message="A document with this name already exists.",
+            ),
         ]
 
 
@@ -177,3 +180,64 @@ class InstituteGalleryImage(BaseModel):
                 fields=["institute", "position"], name="institutes_gallery_pos_idx"
             )
         ]
+
+
+class InstituteContact(BaseModel):
+    """Required contact person for institute registration."""
+
+    institute = models.OneToOneField(
+        Institute, on_delete=models.CASCADE, related_name="contact"
+    )
+    contact_person = models.CharField(max_length=150)
+    contact_phone = models.CharField(max_length=25, validators=[validate_phone_number])
+    contact_email = models.EmailField()
+    telephone_number = models.CharField(
+        max_length=25,
+        blank=True,
+        validators=[validate_phone_number],
+    )
+
+    def __str__(self):
+        return f"{self.contact_person} - {self.institute.name}"
+
+
+class InstituteCEO(BaseModel):
+    """Optional CEO/leadership profile."""
+
+    institute = models.OneToOneField(
+        Institute, on_delete=models.CASCADE, related_name="ceo"
+    )
+    name = models.CharField(max_length=150)
+    message = models.TextField(blank=True)
+    photo = models.ImageField(
+        upload_to=get_upload_path, blank=True, validators=[validate_image_file]
+    )
+    linkedin_url = models.URLField(blank=True)
+
+    def __str__(self):
+        return f"CEO: {self.name} - {self.institute.name}"
+
+
+class InstituteSocialLink(BaseModel):
+    """Extensible social media links for institute."""
+
+    institute = models.ForeignKey(
+        Institute, on_delete=models.CASCADE, related_name="social_links"
+    )
+    platform = models.CharField(max_length=20, choices=SocialPlatform.CHOICES)
+    url = models.URLField()
+    label = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["institute", "platform"],
+                condition=~models.Q(
+                    platform=SocialPlatform.OTHER
+                ),  # any number of "other" links
+                name="institutes_unique_social_platform",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.get_platform_display()} - {self.institute.name}"
