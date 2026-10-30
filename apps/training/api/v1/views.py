@@ -67,7 +67,7 @@ def transition(service):
     Assign it to the service's own name (`submit = transition(services.submit)`): that name
     becomes the URL, and DRF refuses to start if the two differ."""
 
-    def run(self, request, pk=None):
+    def run(self, request, *args, **kwargs):
         return self._respond(service(self.get_object(), by=request.user))
 
     # `action()` reads the name when it decorates, so set it first
@@ -81,7 +81,8 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     PATCH on an approved or unpublished training sends it back to review."""
 
     permission_classes = [IsInstituteMember]
-    lookup_value_regex = r"[0-9]+"
+    lookup_field = "slug"
+    lookup_value_regex = r"[-a-zA-Z0-9_]+"
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filter_backends = (DjangoFilterBackend,)
     filterset_fields = ("status",)
@@ -125,7 +126,7 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     cancel = transition(services.cancel)
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
-    def cover(self, request, pk=None):
+    def cover(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object(), data=request.data)
         serializer.is_valid(raise_exception=True)
         return self._respond(serializer.save())
