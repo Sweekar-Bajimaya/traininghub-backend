@@ -13,12 +13,12 @@ router.register("trainings", views.AdminTrainingViewSet, basename="admin-trainin
 
 urlpatterns = [
     path(
-        "institutes/<int:institute_id>/documents/<int:pk>/",
+        "institutes/<slug:institute_slug>/documents/<int:pk>/",
         views.AdminDocumentView.as_view(),
         name="admin-document",
     ),
     path(
-        "institutes/<int:institute_id>/documents/<int:pk>/download/",
+        "institutes/<slug:institute_slug>/documents/<int:pk>/download/",
         views.AdminDocumentDownloadView.as_view(),
         name="admin-document-download",
     ),

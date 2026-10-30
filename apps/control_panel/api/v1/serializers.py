@@ -92,7 +92,8 @@ class AdminSerializer(ProfileSerializer):
 
 # categories
 class AdminCategorySerializer(DynamicFieldsModelSerializer):
-    parent = serializers.PrimaryKeyRelatedField(
+    parent = serializers.SlugRelatedField(
+        slug_field="slug",
         queryset=Category.objects.filter(parent__isnull=True),
         required=False,
         allow_null=True,
@@ -220,6 +221,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     def get_institute(self, obj):
         return {
             "id": obj.institute_id,
+            "slug": obj.institute.slug,
             "name": obj.institute.name,
             "status": obj.institute.status,
         }
@@ -228,6 +230,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
         parent = obj.category.parent
         return {
             "id": obj.category_id,
+            "slug": obj.category.slug,
             "name": obj.category.name,
             "parent": parent.name if parent else None,
         }
@@ -246,4 +249,8 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     def get_sub_category(self, obj):
         if obj.category.parent_id is None:
             return None
-        return {"id": obj.category_id, "name": obj.category.name}
+        return {
+            "id": obj.category_id,
+            "slug": obj.category.slug,
+            "name": obj.category.name,
+        }
