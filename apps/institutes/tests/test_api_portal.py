@@ -1088,13 +1088,12 @@ class EndToEndTests(TempMediaMixin, APITestCase):
         # 3. an admin reviews the document and approves the institute
         admin_client = APIClient()
         admin_client.force_authenticate(reviewer)
-        institute_id = Institute.objects.get(slug=slug).pk
         res = admin_client.patch(
-            f"/api/v1/admin/institutes/{institute_id}/documents/{document_id}/",
+            f"/api/v1/admin/institutes/{slug}/documents/{document_id}/",
             {"status": "VERIFIED"},
         )
         self.assertEqual(res.status_code, 200)
-        res = admin_client.post(f"/api/v1/admin/institutes/{institute_id}/approve/")
+        res = admin_client.post(f"/api/v1/admin/institutes/{slug}/approve/")
         self.assertEqual(res.status_code, 200, res.data)
 
         # 4. it is now public
