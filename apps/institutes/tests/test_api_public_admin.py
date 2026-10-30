@@ -713,7 +713,7 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         return services.add_document(self.institute, name="License", file=pdf())
 
     def url(self, action):
-        return f"{ADMIN_URL}{self.institute.pk}/{action}/"
+        return f"{ADMIN_URL}{self.institute.slug}/{action}/"
 
     def test_access_matrix(self):
         staff = self.owner
@@ -833,7 +833,7 @@ class AdminApiTests(TempMediaMixin, APITestCase):
     def test_document_review(self):
         document = self.ready()
         self.client.force_authenticate(self.reviewer)
-        url = f"{ADMIN_URL}{self.institute.pk}/documents/{document.pk}/"
+        url = f"{ADMIN_URL}{self.institute.slug}/documents/{document.pk}/"
         res = self.client.patch(url, {"status": "VERIFIED"})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["status"], "VERIFIED")
@@ -841,11 +841,11 @@ class AdminApiTests(TempMediaMixin, APITestCase):
 
     def test_a_re_uploaded_document_is_one_row_and_can_be_reviewed_again(self):
         document = self.ready()
-        url = f"{ADMIN_URL}{self.institute.pk}/documents/{document.pk}/"
+        url = f"{ADMIN_URL}{self.institute.slug}/documents/{document.pk}/"
         self.client.force_authenticate(self.reviewer)
         self.assertEqual(self.client.patch(url, {"status": "REJECTED"}).status_code, 200)
         services.reupload_document(document, file=pdf("again.pdf"))
-        row = self.client.get(f"{ADMIN_URL}{self.institute.pk}/").data
+        row = self.client.get(f"{ADMIN_URL}{self.institute.slug}/").data
         self.assertEqual(
             [(d["id"], d["status"]) for d in row["documents"]],
             [(document.pk, "RE_UPLOADED")],
@@ -856,7 +856,7 @@ class AdminApiTests(TempMediaMixin, APITestCase):
     def test_document_download_streams_the_file(self):
         document = self.ready()
         self.client.force_authenticate(self.reviewer)
-        res = self.client.get(f"{ADMIN_URL}{self.institute.pk}/documents/{document.pk}/download/")
+        res = self.client.get(f"{ADMIN_URL}{self.institute.slug}/documents/{document.pk}/download/")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(b"".join(res.streaming_content), b"%PDF-1.4 test")
         self.assertIn("attachment", res["Content-Disposition"])
@@ -865,11 +865,24 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         document = self.ready()
         other, _ = make_institute(name="Other", email="other@example.com")
         self.client.force_authenticate(self.reviewer)
-        url = f"{ADMIN_URL}{other.pk}/documents/{document.pk}/download/"
+        url = f"{ADMIN_URL}{other.slug}/documents/{document.pk}/download/"
         self.assertEqual(self.client.get(url).status_code, 404)
 
     def test_staff_cannot_download_through_the_admin_api(self):
         document = self.ready()
         self.client.force_authenticate(self.owner)
-        url = f"{ADMIN_URL}{self.institute.pk}/documents/{document.pk}/download/"
+        url = f"{ADMIN_URL}{self.institute.slug}/documents/{document.pk}/download/"
         self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_slug_lookup_and_numeric_id_404_and_action(self):
+        self.ready()
+        self.client.force_authenticate(self.reviewer)
+        # retrieve by slug = 200
+        res = self.client.get(f"{ADMIN_URL}{self.institute.slug}/")
+        self.assertEqual(res.status_code, 200)
+        # retrieve by numeric id = 404
+        res_numeric = self.client.get(f"{ADMIN_URL}{self.institute.pk}/")
+        self.assertEqual(res_numeric.status_code, 404)
+        # one action by slug works
+        res_action = self.client.post(f"{ADMIN_URL}{self.institute.slug}/approve/")
+        self.assertEqual(res_action.status_code, 200)

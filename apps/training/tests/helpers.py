@@ -112,7 +112,7 @@ def training_payload(category, **overrides):
     top = category.parent or category
     data = {
         "title": "Barista Course",
-        "category": top.pk,
+        "category": top.slug,
         "short_description": "Coffee basics",
         "overview": "Espresso, milk and latte art",
         "mode": "ONLINE",
@@ -132,6 +132,6 @@ def training_payload(category, **overrides):
         "outcomes": [{"text": "Pull a shot"}],
     }
     if category.parent_id:
-        data["sub_category"] = category.pk
+        data["sub_category"] = category.slug
     data.update(overrides)
     return data

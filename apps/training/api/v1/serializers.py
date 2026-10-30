@@ -92,8 +92,13 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
         parent = obj.category.parent
         return {
             "id": obj.category_id,
+            "slug": obj.category.slug,
             "name": obj.category.name,
-            "parent": {"id": parent.id, "name": parent.name} if parent else None,
+            "parent": (
+                {"id": parent.id, "slug": parent.slug, "name": parent.name}
+                if parent
+                else None
+            ),
         }
 
     def get_location(self, obj):
@@ -237,10 +242,12 @@ class TrainingContentFields(serializers.Serializer):
 class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
     """A nested list replaces the whole list; leave it out to keep it."""
 
-    category = serializers.PrimaryKeyRelatedField(
-        queryset=available_categories().filter(parent__isnull=True)
+    category = serializers.SlugRelatedField(
+        slug_field="slug",
+        queryset=available_categories().filter(parent__isnull=True),
     )
-    sub_category = serializers.PrimaryKeyRelatedField(
+    sub_category = serializers.SlugRelatedField(
+        slug_field="slug",
         queryset=available_categories().filter(parent__isnull=False),
         required=False,
         allow_null=True,
@@ -323,9 +330,9 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
         data = super().to_representation(instance)
         leaf = instance.category  # split the stored leaf back into the two inputs
         if "category" in data:
-            data["category"] = leaf.parent_id or leaf.pk
+            data["category"] = leaf.parent.slug if leaf.parent_id else leaf.slug
         if "sub_category" in data:
-            data["sub_category"] = leaf.pk if leaf.parent_id else None
+            data["sub_category"] = leaf.slug if leaf.parent_id else None
         return data
 
     @staticmethod
