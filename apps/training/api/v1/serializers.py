@@ -100,7 +100,9 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
         venue = getattr(obj, "venue", None)
         if venue is None:
             return None
-        place = venue.location  # empty for an online training: only the address text is left
+        place = (
+            venue.location
+        )  # empty for an online training: only the address text is left
         return {
             "municipality": place.name if place else None,
             "district": place.district.name if place else None,
@@ -120,12 +122,16 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
     modules = serializers.SerializerMethodField()
     outcomes = serializers.SerializerMethodField()
     contact = serializers.SerializerMethodField()
+    target_audience = serializers.ListField(
+        source="detail.target_audience", read_only=True
+    )
 
     class Meta(PublicTrainingListSerializer.Meta):
         fields = PublicTrainingListSerializer.Meta.fields + (
             "overview",
             "eligibility",
             "certification",
+            "target_audience",
             "seats",
             "schedule",
             "modules",
@@ -232,6 +238,12 @@ class TrainingContentFields(serializers.Serializer):
     contact_email = serializers.EmailField(
         source="contact.contact_email", required=False, allow_blank=True
     )
+    target_audience = serializers.ListField(
+        source="detail.target_audience",
+        child=serializers.CharField(max_length=300),
+        required=False,
+        max_length=10,
+    )
 
 
 class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -276,6 +288,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "eligibility",
             "certification",
             "skills",
+            "target_audience",
             "contact_person",
             "contact_phone",
             "contact_email",

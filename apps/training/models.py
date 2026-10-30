@@ -130,6 +130,17 @@ class TrainingDetail(BaseModel):
     eligibility = models.TextField(blank=True)
     certification = models.CharField(max_length=255, blank=True)
     skills = ArrayField(models.CharField(max_length=60), blank=True, default=list)
+    target_audience = ArrayField(
+        models.CharField(max_length=300), default=list
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(target_audience__len__lte=10),
+                name="training_detail_audience_max_10",
+            ),
+        ]
 
 
 class TrainingContact(BaseModel):

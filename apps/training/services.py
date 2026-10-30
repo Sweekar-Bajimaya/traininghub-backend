@@ -203,6 +203,9 @@ def _ready_for_submission(training):
         if value in (None, "", []):
             errors[name] = "This is required before submitting."
     venue = getattr(training, "venue", None)
+    detail = getattr(training, "detail", None)
+    if detail is None or not detail.target_audience:
+        errors["target_audience"] = "This is required before submitting."
     if venue is None or not venue.address:
         errors["venue"] = "Add where the training is held."
     elif training.mode == TrainingMode.PHYSICAL:
@@ -470,6 +473,7 @@ def institute_counts(trainings):
         active=Count("pk", filter=Q(status=TrainingStatus.APPROVED)),
         pending_review=Count("pk", filter=Q(status=TrainingStatus.SUBMITTED)),
     )
+
 
 def annotate_category_training_count(categories):
     """Annotate categories with `training_count`: the trainings the public can see (`APPROVED`,
