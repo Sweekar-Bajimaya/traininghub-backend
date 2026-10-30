@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
@@ -98,6 +99,9 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
         allow_null=True,
     )
     parent_name = serializers.SerializerMethodField()
+    # annotated by AdminCategoryViewSet: approved trainings of approved institutes
+    # (a main category also counts the trainings of its sub-categories)
+    live_trainings_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Category
@@ -110,6 +114,7 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
             "icon",
             "hue",
             "is_active",
+            "live_trainings_count",
             "created_at",
         )
         read_only_fields = ("id", "slug", "created_at")
@@ -134,10 +139,27 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("is_active", None)
-        return common_services.create_category(**validated_data)
+        try:
+            return common_services.create_category(**validated_data)
+        except DjangoValidationError as exc:  # the service's parent rules -> a 400, not a 500
+            raise serializers.ValidationError(exc.message_dict)
 
     def update(self, instance, validated_data):
-        return common_services.update_category(instance, **validated_data)
+        try:
+            return common_services.update_category(instance, **validated_data)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict)
+
+
+class AdminCategoryOptionSerializer(serializers.ModelSerializer):
+    """Light shape for dropdowns (e.g. the category filter on other screens)."""
+
+    parent_name = serializers.CharField(source="parent.name", read_only=True, default=None)
+
+    class Meta:
+        model = Category
+        fields = ("id", "name", "parent", "parent_name", "is_active")
+        read_only_fields = fields
 
 
 # institutes

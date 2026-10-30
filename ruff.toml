@@ -1,0 +1,14 @@
+#Ruff is used only for formatting and import sorting in this project.
+# No style/correctness lint rules — those are left to code review.
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+# `select` replaces Ruff's defaults entirely, so listing only "I" (isort)
+# disables everything else, including RUF012 (mutable class attribute
+# defaults), which fires on every Django ModelAdmin / Serializer class.
+select = ["I"]
+
+[lint.isort]
+known-first-party = ["common", "institutes", "training", "users"]
