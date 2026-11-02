@@ -4,7 +4,6 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -186,9 +185,6 @@ LOGOUT_URL = "rest_framework:logout"
 
 # CORS Settings
 CORS_ALLOW_CREDENTIALS = True
-# The browser sends the device token of "My enquiries" in this custom header, so a cross-origin
-# request needs it allowed (the preflight fails otherwise).
-CORS_ALLOW_HEADERS = (*default_headers, "x-device-token")
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),

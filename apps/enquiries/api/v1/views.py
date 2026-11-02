@@ -2,7 +2,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.functional import cached_property
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
-from rest_framework.generics import CreateAPIView, ListAPIView, ListCreateAPIView
+from rest_framework.generics import CreateAPIView, ListCreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -14,32 +14,17 @@ from apps.enquiries.api.v1.serializers import (
     EnquiryNoteSerializer,
     PortalEnquiryListSerializer,
     PortalEnquirySerializer,
-    VisitorEnquirySerializer,
-    device_token_from,
 )
 from apps.enquiries.models import Enquiry, EnquiryNote
 from apps.institutes.permissions import InstituteScopedMixin, IsInstituteMember
 
 
-# public (no account: the device token is the only identity)
+# public
 class EnquiryCreateView(CreateAPIView):
     serializer_class = EnquiryCreateSerializer
     permission_classes = [AllowAny]
     authentication_classes = []
     throttle_scope = "enquiry"  # per client IP; the per-phone limit is in the service
-
-
-class MyEnquiriesView(ListAPIView):
-    """The enquiries sent from this browser in the last 90 days."""
-
-    serializer_class = VisitorEnquirySerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def get_queryset(self):
-        if getattr(self, "swagger_fake_view", False):
-            return Enquiry.objects.none()
-        return services.device_enquiries(device_token_from(self.request))
 
 
 # portal (the institute's own staff and owner)

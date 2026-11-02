@@ -1,11 +1,8 @@
-import uuid
-
 from rest_framework import serializers
 
 from apps.common.serializers import DynamicFieldsModelSerializer
 from apps.enquiries import services
 from apps.enquiries.constants import (
-    DEVICE_TOKEN_HEADER,
     MESSAGE_MAX_LENGTH,
     EnquiryStatus,
 )
@@ -14,21 +11,6 @@ from apps.enquiries.validators import normalize_phone
 from apps.institutes.constants import InstituteStatus
 from apps.training.constants import TrainingStatus
 from apps.training.models import Training
-
-
-def device_token_from(request):
-    """The browser's device token (a UUID4 in the X-Device-Token header) as a string. A missing,
-    malformed or non-random one (the all-zero UUID, say) is a 400: a token shared by several
-    browsers would show them each other's enquiries."""
-    try:
-        token = uuid.UUID(request.headers.get(DEVICE_TOKEN_HEADER, ""))
-    except ValueError:
-        token = None
-    if token is None or token.version != 4:
-        raise serializers.ValidationError(
-            {"device_token": [f"Send a random UUID4 in the {DEVICE_TOKEN_HEADER} header."]}
-        )
-    return str(token)
 
 
 class NepalMobileField(serializers.CharField):
@@ -102,10 +84,6 @@ class EnquiryCreateSerializer(DynamicFieldsModelSerializer):
 
     def validate_email(self, value):
         return value.lower()
-
-    def validate(self, attrs):
-        attrs["device_token"] = device_token_from(self.request)
-        return attrs
 
     def create(self, validated_data):
         return services.submit_enquiry(**validated_data)

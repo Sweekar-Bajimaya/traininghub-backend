@@ -11,7 +11,6 @@ from django.utils import timezone
 from apps.common.exceptions import TooManyRequests
 from apps.enquiries import services
 from apps.enquiries.constants import (
-    MY_ENQUIRIES_DAYS,
     PHONE_DAILY_LIMIT,
     EnquiryStatus,
     EnquiryType,
@@ -21,7 +20,6 @@ from apps.enquiries.tests.helpers import (
     approved_institute,
     make_enquiry,
     make_training,
-    new_token,
     next_phone,
     reset_limits,
 )
@@ -35,9 +33,7 @@ S = EnquiryStatus
 
 
 def submit(training, **overrides):
-    fields = dict(
-        training=training, name="Ram Sharma", phone=next_phone(), device_token=new_token()
-    )
+    fields = dict(training=training, name="Ram Sharma", phone=next_phone())
     fields.update(overrides)
     return services.submit_enquiry(**fields)
 
@@ -51,13 +47,11 @@ class ServiceTestCase(TestCase):
 
 class SubmitTests(ServiceTestCase):
     def test_creates_an_open_enquiry_for_the_trainings_institute(self):
-        token = new_token()
-        enquiry = submit(self.training, device_token=token, email="a@b.com", message="Hi")
+        enquiry = submit(self.training, email="a@b.com", message="Hi")
         enquiry.refresh_from_db()
         self.assertEqual(enquiry.institute_id, self.institute.pk)
         self.assertEqual(enquiry.status, S.NEW)
         self.assertEqual(enquiry.type, EnquiryType.ENQUIRY)
-        self.assertEqual(str(enquiry.device_token), token)
         self.assertEqual((enquiry.email, enquiry.message), ("a@b.com", "Hi"))
 
     def test_a_training_that_is_not_published_takes_no_enquiry(self):
@@ -304,21 +298,6 @@ class SummaryTests(ServiceTestCase):
         counts = services.summary(Enquiry.objects.none())
         self.assertEqual((counts["total"], counts["new"], counts["unique_phones"]), (0, 0, 0))
         self.assertEqual(set(counts["by_status"].values()), {0})
-
-
-class DeviceEnquiriesTests(ServiceTestCase):
-    def test_a_device_sees_only_its_own_from_the_last_90_days_newest_first(self):
-        token = new_token()
-        old = make_enquiry(self.training, device_token=token)
-        recent = make_enquiry(self.training, device_token=token)
-        newest = make_enquiry(self.training, device_token=token)
-        edge = make_enquiry(self.training, device_token=token)
-        make_enquiry(self.training)  # someone else's
-        now = timezone.now()
-        for enquiry, days in ((old, MY_ENQUIRIES_DAYS + 1), (recent, 30), (newest, 1), (edge, MY_ENQUIRIES_DAYS - 1)):
-            Enquiry.objects.filter(pk=enquiry.pk).update(created_at=now - timedelta(days=days))
-        found = list(services.device_enquiries(token))
-        self.assertEqual([e.pk for e in found], [newest.pk, recent.pk, edge.pk])
 
 
 class DeleteTrainingTests(ServiceTestCase):

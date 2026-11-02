@@ -1,5 +1,3 @@
-import uuid
-
 from django.core.cache import cache
 
 from apps.enquiries.models import Enquiry
@@ -22,10 +20,6 @@ def next_phone():
     return str(next(_phones))
 
 
-def new_token():
-    return str(uuid.uuid4())
-
-
 def reset_limits():
     """Clear the throttle counters and the per-phone allowances (and nothing else in Redis)."""
     reset_throttles()
@@ -39,7 +33,6 @@ def make_enquiry(training, **overrides):
         institute=training.institute,
         name="Ram Sharma",
         phone=next_phone(),
-        device_token=new_token(),
     )
     fields.update(overrides)
     return Enquiry.objects.create(**fields)

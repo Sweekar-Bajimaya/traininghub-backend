@@ -1,14 +1,10 @@
-from datetime import timedelta
-
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
-from django.utils import timezone
 
 from apps.common.exceptions import TooManyRequests
 from apps.enquiries.constants import (
-    MY_ENQUIRIES_DAYS,
     PHONE_DAILY_LIMIT,
     PHONE_LIMIT_SECONDS,
     EnquiryStatus,
@@ -80,7 +76,6 @@ def submit_enquiry(
     training,
     name,
     phone,
-    device_token,
     email="",
     message="",
     type=EnquiryType.ENQUIRY,
@@ -111,22 +106,11 @@ def submit_enquiry(
                 message=message,
                 type=type,
                 preferred_time=preferred_time,
-                device_token=device_token,
             )
     except IntegrityError as error:  # two submits at once: the unique index decides
         if _is_open_duplicate(error):
             raise duplicate from error
         raise
-
-
-def device_enquiries(device_token):
-    """What one browser sees under "My enquiries": its own, from the last 90 days."""
-    since = timezone.now() - timedelta(days=MY_ENQUIRIES_DAYS)
-    return (
-        Enquiry.objects.filter(device_token=device_token, created_at__gte=since)
-        .select_related("training", "institute")
-        .order_by("-created_at", "-pk")
-    )
 
 
 # institute side

@@ -90,7 +90,7 @@ docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
 
-Planned apps: `enquiries`, `notifications`, `analytics`.
+Planned apps: `notifications`, `analytics`.
 
 ## Users API (`/api/v1/user/`)
 

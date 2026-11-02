@@ -45,8 +45,8 @@ or an open question gets answered. Rules:
 ## Product decisions that shape the code
 
 - No learner accounts. Only **institute staff** and **admins** log in. Visitors submit anonymous
-  **Enquiries** (rate limited per IP and per phone number; no captcha for now); "My enquiries" is tracked by a
-  browser-made UUID4 sent in `X-Device-Token` and shows the last 90 days.
+  **Enquiries** (rate limited per IP and per phone number; no captcha for now). A visitor has no identity after the
+  submit: no device token, no "My enquiries" list (dropped 2026-11-02); the answer to the `POST` is all they get back.
 - Enquiries (`apps/enquiries`): the portal's seven statuses (`NEW`, `CONTACTED`, `FOLLOW_UP`, `INTERESTED`, `CONVERTED`,
   `NOT_INTERESTED`, `CLOSED`); any status moves to any other, staff and owner both change them, only `CONVERTED` is
   guarded by `seats`. `type` is `ENQUIRY` or `INTEREST`: an interest is always accepted for a published training, a plain
@@ -149,10 +149,10 @@ apps/
                           (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
                           social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
                           `control_panel`
-  enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status, `device_token`) and
+  enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
                           `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
-                          and training; `change_status`: free moves, the seat guard; notes, `summary`, `device_enquiries`),
-                          `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST, `my/`) and portal
+                          and training; `change_status`: free moves, the seat guard; notes, `summary`),
+                          `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST only) and portal
                           `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`, `summary/`). The admin monitor
                           is not built
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
@@ -319,10 +319,11 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   (the serializer hands it the phone already normalised to ten digits), refuses what the rules refuse and counts the phone
   number in Redis (`enquiry_phone_<phone>`, 24 hours; tests clear it with `reset_limits()`); the unique index
   `enquiry_one_open_per_phone_training` is the final judge of two submits at once. `change_status` locks the enquiry, then the
-  training (always in that order) before `CONVERTED`. The device token must be a v4 UUID (the all-zero or a time-based UUID is
-  a 400, because a shared token would show browsers each other's enquiries), and `X-Device-Token` is listed in
-  `CORS_ALLOW_HEADERS`: without it a cross-origin preflight fails. If Redis is down the submit fails with a 500 (fails closed).
+  training (always in that order) before `CONVERTED`. If Redis is down the submit fails with a 500 (fails closed).
   A training with enquiries cannot be deleted (`PROTECT`; `delete_training` says so).
+- **`enquiries/0001_initial` was rewritten in place (2026-11-02) to drop `device_token`** instead of adding a migration. A
+  database that applied the old `0001` keeps the NOT NULL `device_token` column and every submit fails; check with
+  `\d enquiries_enquiry`, and fix with `python manage.py migrate enquiries zero` then `migrate` (this deletes every enquiry).
 - **Registration checks the code before writing and uses it up inside the transaction** (`institutes/services.register`), so
   a failed registration keeps the code and a code works once. Every caller of `register` must pass the code.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
@@ -330,7 +331,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 
 ## Open decisions (also in System Design.md)
 
-- Do institutes keep enquiries after the 90-day "My enquiries" window?
+- Keep every enquiry indefinitely, or delete old ones? Nothing deletes them today.
 - Where the frontend stores access/refresh tokens (memory, `localStorage`, httpOnly cookie).
 - How an admin's password is reset (the API only lets the Super Admin set the initial password).
 - Whether `/admin/` is renamed or restricted at the proxy before production (it is on the default path, no 2FA).

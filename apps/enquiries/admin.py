@@ -11,7 +11,6 @@ class EnquiryAdmin(admin.ModelAdmin):
     list_filter = ("status", "type")
     search_fields = ("name", "phone", "training__title", "institute__name")
     list_select_related = ("training", "institute")
-    exclude = ("device_token",)
     ordering = ("-created_at", "-pk")
 
     def has_add_permission(self, request):

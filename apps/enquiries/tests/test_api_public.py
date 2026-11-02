@@ -1,19 +1,16 @@
-import uuid
 from datetime import timedelta
 
-from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from apps.enquiries.constants import MY_ENQUIRIES_DAYS, PHONE_DAILY_LIMIT, EnquiryStatus
+from apps.enquiries.api.v1.serializers import VisitorEnquirySerializer
+from apps.enquiries.constants import PHONE_DAILY_LIMIT, EnquiryStatus
 from apps.enquiries.models import Enquiry
 from apps.enquiries.tests.helpers import (
     approved_institute,
-    count_queries,
     enquiry_payload,
     make_enquiry,
     make_training,
-    new_token,
     next_phone,
     reset_limits,
     reset_throttles,
@@ -23,7 +20,6 @@ from apps.institutes.models import Institute
 from apps.training.constants import TrainingStatus
 
 URL = "/api/v1/enquiries/"
-MY = "/api/v1/enquiries/my/"
 S = EnquiryStatus
 
 VISITOR_FIELDS = {"id", "type", "training", "institute_name", "status_label", "created_at"}
@@ -34,18 +30,12 @@ class PublicTestCase(APITestCase):
         reset_limits()
         self.institute, self.owner, _ = approved_institute()
         self.training = make_training(self.institute)
-        self.token = new_token()
 
-    def post(self, payload=None, token="default"):
+    def post(self, payload=None):
         """Submit as a visitor. Throttles are cleared first, so a test can send many requests."""
         reset_throttles()
-        headers = {} if token is None else {"HTTP_X_DEVICE_TOKEN": self.token if token == "default" else token}
         payload = enquiry_payload(self.training) if payload is None else payload
-        return self.client.post(URL, payload, format="json", **headers)
-
-    def get_my(self, token="default"):
-        headers = {} if token is None else {"HTTP_X_DEVICE_TOKEN": self.token if token == "default" else token}
-        return self.client.get(MY, **headers)
+        return self.client.post(URL, payload, format="json")
 
 
 class SubmitTests(PublicTestCase):
@@ -74,7 +64,6 @@ class SubmitTests(PublicTestCase):
         self.assertEqual(enquiry.email, "ram@example.com")
         self.assertEqual(enquiry.status, S.NEW)
         self.assertEqual(enquiry.institute_id, self.institute.pk)
-        self.assertEqual(str(enquiry.device_token), self.token)
         self.assertEqual((enquiry.message, enquiry.preferred_time), ("Is the morning batch open?", "MORNING"))
 
     def test_only_name_phone_and_training_are_required(self):
@@ -172,49 +161,31 @@ class SubmitTests(PublicTestCase):
         self.assertEqual(self.post(enquiry_payload(self.training, phone=phone)).status_code, 201)
 
 
-class DeviceTokenTests(PublicTestCase):
-    def test_the_token_must_be_a_random_uuid(self):
-        bad = {
-            "missing": None,
-            "empty": "",
-            "not a uuid": "hello",
-            "all zeros": str(uuid.UUID(int=0)),
-            "a time-based uuid": str(uuid.uuid1()),
-        }
-        for label, token in bad.items():
-            with self.subTest(label):
-                for res in (self.post(token=token), self.get_my(token=token)):
-                    self.assertEqual(res.status_code, 400)
-                    self.assertIn("device_token", res.data)
-        self.assertFalse(Enquiry.objects.exists())
+class NoVisitorIdentityTests(PublicTestCase):
+    """A visitor has no identity: nothing to send beyond the form, and no list of their own."""
 
-    def test_a_uuid_without_hyphens_is_accepted_and_stored_in_the_same_form(self):
-        token = uuid.uuid4()
-        self.assertEqual(self.post(token=token.hex).status_code, 201)
-        self.assertEqual(Enquiry.objects.get().device_token, token)
-        self.assertEqual(self.get_my(token=str(token)).data["count"], 1)
-
-    @override_settings(CORS_ALLOW_ALL_ORIGINS=True)
-    def test_the_header_is_allowed_in_cors_preflights(self):
-        res = self.client.options(
+    def test_a_stray_device_token_is_ignored(self):
+        res = self.client.post(
             URL,
-            HTTP_ORIGIN="http://localhost:3000",
-            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
-            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="x-device-token,content-type",
+            enquiry_payload(self.training, device_token="not-a-uuid"),
+            format="json",
+            HTTP_X_DEVICE_TOKEN="not-a-uuid",
         )
-        self.assertIn("x-device-token", res.headers.get("Access-Control-Allow-Headers", ""))
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Enquiry.objects.count(), 1)
+
+    def test_there_is_no_my_enquiries_list(self):
+        self.assertEqual(self.post().status_code, 201)
+        self.assertEqual(self.client.get(URL + "my/").status_code, 404)
+        self.assertEqual(self.client.get(URL).status_code, 405)
 
 
 class ThrottleTests(PublicTestCase):
     def test_the_eleventh_request_from_one_address_in_an_hour_is_throttled(self):
         for n in range(10):
-            res = self.client.post(
-                URL, enquiry_payload(self.training), format="json", HTTP_X_DEVICE_TOKEN=self.token
-            )
+            res = self.client.post(URL, enquiry_payload(self.training), format="json")
             self.assertEqual(res.status_code, 201, f"request {n + 1}")
-        res = self.client.post(
-            URL, enquiry_payload(self.training), format="json", HTTP_X_DEVICE_TOKEN=self.token
-        )
+        res = self.client.post(URL, enquiry_payload(self.training), format="json")
         self.assertEqual(res.status_code, 429)
         self.assertIn("Retry-After", res.headers)
         self.assertEqual(Enquiry.objects.count(), 10)
@@ -234,63 +205,19 @@ class ThrottleTests(PublicTestCase):
         self.assertEqual(self.post(enquiry_payload(trainings[-1])).status_code, 201)
 
 
-class MyEnquiriesTests(PublicTestCase):
-    def test_a_device_sees_only_its_own_enquiries_newest_first(self):
-        mine = [make_enquiry(self.training, device_token=self.token) for _ in range(3)]
-        make_enquiry(self.training)  # another browser's
-        res = self.get_my()
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["count"], 3)
-        self.assertEqual([row["id"] for row in res.data["results"]], [e.pk for e in reversed(mine)])
-        self.assertEqual(self.get_my(token=new_token()).data["count"], 0)
-
-    def test_nothing_private_is_returned(self):
-        make_enquiry(self.training, device_token=self.token, email="ram@example.com", message="secret")
-        row = self.get_my().data["results"][0]
-        self.assertEqual(set(row), VISITOR_FIELDS)
-        self.assertEqual(set(row["training"]), {"id", "slug", "title"})
-        self.assertNotIn("ram@example.com", str(row))
-        self.assertNotIn("secret", str(row))
-
+class VisitorViewTests(PublicTestCase):
     def test_each_status_reads_as_the_prototypes_wording(self):
-        for status in S.VALUES:
-            make_enquiry(self.training, device_token=self.token, status=status)
-        labels = {row["status_label"] for row in self.get_my().data["results"]}
-        self.assertEqual(
-            labels,
-            {
-                "Sent to institute",
-                "Institute contacted you",
-                "Institute will follow up",
-                "Marked interested",
-                "Enrolled",
-                "Closed",
-            },
-        )
-        # not interested and closed read the same, so the visitor never sees the institute's verdict
-        expected = [S.VISITOR_LABELS[s] for s in S.VALUES]
-        self.assertEqual(expected.count("Closed"), 2)
-
-    def test_only_the_last_90_days_are_shown(self):
-        old = make_enquiry(self.training, device_token=self.token)
-        edge = make_enquiry(self.training, device_token=self.token)
-        now = timezone.now()
-        Enquiry.objects.filter(pk=old.pk).update(created_at=now - timedelta(days=MY_ENQUIRIES_DAYS + 1))
-        Enquiry.objects.filter(pk=edge.pk).update(created_at=now - timedelta(days=MY_ENQUIRIES_DAYS - 1))
-        ids = [row["id"] for row in self.get_my().data["results"]]
-        self.assertEqual(ids, [edge.pk])
-        self.assertTrue(Enquiry.objects.filter(pk=old.pk).exists())  # the institute still has it
-
-    def test_the_visitor_follows_an_enquiry_from_sent_to_closed(self):
-        created = self.post()
-        self.assertEqual(created.status_code, 201)
-        self.assertEqual(self.get_my().data["results"][0]["status_label"], "Sent to institute")
-        Enquiry.objects.update(status=S.CONTACTED)
-        self.assertEqual(self.get_my().data["results"][0]["status_label"], "Institute contacted you")
-
-    def test_the_query_count_does_not_grow_with_the_list(self):
-        make_enquiry(self.training, device_token=self.token)
-        few = count_queries(lambda: self.get_my())
-        for _ in range(8):
-            make_enquiry(self.training, device_token=self.token)
-        self.assertEqual(count_queries(lambda: self.get_my()), few)
+        expected = {
+            S.NEW: "Sent to institute",
+            S.CONTACTED: "Institute contacted you",
+            S.FOLLOW_UP: "Institute will follow up",
+            S.INTERESTED: "Marked interested",
+            S.CONVERTED: "Enrolled",
+            S.NOT_INTERESTED: "Closed",  # the institute's verdict is never shown
+            S.CLOSED: "Closed",
+        }
+        self.assertEqual(set(expected), set(S.VALUES))
+        for status, label in expected.items():
+            with self.subTest(status=status):
+                enquiry = make_enquiry(self.training, status=status)
+                self.assertEqual(VisitorEnquirySerializer(enquiry).data["status_label"], label)

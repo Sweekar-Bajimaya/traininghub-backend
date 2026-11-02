@@ -39,8 +39,6 @@ class Enquiry(BaseModel):
     status = models.CharField(
         max_length=20, choices=EnquiryStatus.CHOICES, default=EnquiryStatus.NEW
     )
-    # a UUID4 the visitor's browser keeps: it is the only link back to "My enquiries"
-    device_token = models.UUIDField()
 
     class Meta:
         constraints = [
@@ -74,10 +72,6 @@ class Enquiry(BaseModel):
             models.Index(
                 fields=["institute", "status", "-created_at"],
                 name="enquiry_inst_status_idx",
-            ),
-            # "My enquiries"
-            models.Index(
-                fields=["device_token", "-created_at"], name="enquiry_device_idx"
             ),
             # converted enquiries against the seats
             models.Index(fields=["training", "status"], name="enquiry_training_status_idx"),

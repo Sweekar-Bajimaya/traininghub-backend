@@ -23,8 +23,8 @@ class EnquiryStatus:
     VALUES = tuple(value for value, _ in CHOICES)
     # still being worked: one phone number has at most one such enquiry per training
     OPEN = (NEW, CONTACTED, FOLLOW_UP, INTERESTED)
-    # what a visitor sees under "My enquiries" (the prototype's wording; the internal status stays
-    # with the institute, so "Not interested" reads as "Closed")
+    # what a visitor is told (the prototype's wording; the internal status stays with the
+    # institute, so "Not interested" reads as "Closed")
     VISITOR_LABELS = {
         NEW: "Sent to institute",
         CONTACTED: "Institute contacted you",
@@ -56,8 +56,6 @@ class PreferredTime:
     VALUES = tuple(value for value, _ in CHOICES)
 
 
-MY_ENQUIRIES_DAYS = 90  # a device sees its enquiries for this long; the institute keeps them
 PHONE_DAILY_LIMIT = 3  # enquiries accepted per phone number
 PHONE_LIMIT_SECONDS = 24 * 60 * 60  # ... in this window (the IP limit is the `enquiry` throttle scope)
-DEVICE_TOKEN_HEADER = "X-Device-Token"  # a UUID4 the browser makes and keeps (also in CORS_ALLOW_HEADERS)
 MESSAGE_MAX_LENGTH = 2000

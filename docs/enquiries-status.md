@@ -5,16 +5,19 @@ Institute Portal's Enquiries screen. A record of the work, not of the code: wher
 The decisions behind it are in the last entry of the decision log in `docs/System Design.md`; the endpoint tables are
 in its section 3.7.
 
+Updated 2026-11-02: the device token, the `X-Device-Token` header and the visitor's "My enquiries" list were removed.
+This file describes the app without them; the decision is the last entry of the log in `docs/System Design.md`.
+
 ## 1. In short
 
 - **Built:** a visitor sends an enquiry or an interest without an account; the institute's staff and owner list,
-  search, filter and open enquiries, change the status, add internal notes and read the counts; the visitor sees their
-  own enquiries under "My enquiries" for 90 days.
-- **Tested:** 89 new tests, and the whole suite is 444 tests, all passing (`python manage.py test`).
+  search, filter and open enquiries, change the status, add internal notes and read the counts. The visitor has no
+  identity after the submit and no list of their own.
+- **Tested:** 82 tests in `apps/enquiries`, and the whole suite is 516 tests, all passing (`python manage.py test`).
 - **Not built:** email or in-app alerts, captcha, the admin enquiries monitor, dashboard analytics, and "seats left" on
   public trainings (section 5).
-- **Before it works end to end:** run `python manage.py migrate`, and the frontend has to send the device token
-  (section 4).
+- **Before it works end to end:** run `python manage.py migrate` (a database built before 2026-11-02 has to roll the
+  app back first, section 4.1).
 
 ## 2. What was built
 
@@ -22,7 +25,7 @@ in its section 3.7.
 
 | Model | Fields | Rules in the database |
 | :---- | :---- | :---- |
-| `Enquiry` | `training` and `institute` (both `PROTECT`; the institute is copied from the training), `name`, `phone` (ten digits, no country code), `email` (optional), `message` (up to 2000), `type`, `preferred_time` (optional), `status`, `device_token` (UUID), `created_at`, `modified_at` | Check constraints on status, type, preferred time and phone format (`^9[678][0-9]{8}$`). A partial unique index: one **open** enquiry per phone number and training. Indexes for the portal list, "My enquiries" and the seat count |
+| `Enquiry` | `training` and `institute` (both `PROTECT`; the institute is copied from the training), `name`, `phone` (ten digits, no country code), `email` (optional), `message` (up to 2000), `type`, `preferred_time` (optional), `status`, `created_at`, `modified_at` | Check constraints on status, type, preferred time and phone format (`^9[678][0-9]{8}$`). A partial unique index: one **open** enquiry per phone number and training. Indexes for the portal list and the seat count |
 | `EnquiryNote` | `enquiry`, `author` (null if the user is deleted), `text` (up to 2000), `created_at` | Text cannot be blank; ordered newest first |
 
 - Statuses: `NEW`, `CONTACTED`, `FOLLOW_UP`, `INTERESTED`, `CONVERTED`, `NOT_INTERESTED`, `CLOSED`. "Open" means
@@ -54,8 +57,7 @@ phone number already has another open one for the training. Moving out of `CONVE
 
 | Endpoint | Who | What it does |
 | :---- | :---- | :---- |
-| `POST enquiries/` | public | Body: `training` (slug), `name` (2+ characters), `phone`, optional `email`, `message`, `type`, `preferred_time`. Header `X-Device-Token` required. Answers 201 with the visitor's view |
-| `GET enquiries/my/` | public, header | This device's enquiries from the last 90 days, newest first, paginated |
+| `POST enquiries/` | public | Body: `training` (slug), `name` (2+ characters), `phone`, optional `email`, `message`, `type`, `preferred_time`. No header is needed. Answers 201 with the visitor's view |
 | `GET institute/enquiries/` | staff, owner | Newest first, `limit` / `offset`; filters `status`, `training`, `q` (name, phone or email, anywhere in the text) |
 | `GET, PATCH institute/enquiries/{id}/` | staff, owner | Detail with notes; `PATCH` accepts only `status` |
 | `GET, POST institute/enquiries/{id}/notes/` | staff, owner | Internal notes, newest first, all in one list |
@@ -66,7 +68,7 @@ Another institute's enquiry is a 404. An admin account gets 403 on the portal en
 Response shapes (from the tests):
 
 ```jsonc
-// POST enquiries/ -> 201, and each row of GET enquiries/my/
+// POST enquiries/ -> 201
 { "id": 12, "type": "ENQUIRY",
   "training": { "id": 5, "slug": "python-bootcamp", "title": "Python Bootcamp" },
   "institute_name": "Alpha Institute", "status_label": "Sent to institute", "created_at": "2026-10-10T14:05:00+05:45" }
@@ -84,17 +86,18 @@ Response shapes (from the tests):
 
 The visitor never receives the phone number, email, message, notes or the raw status. `status_label` is the prototype's
 wording: `NEW` "Sent to institute", `CONTACTED` "Institute contacted you", `FOLLOW_UP` "Institute will follow up",
-`INTERESTED` "Marked interested", `CONVERTED` "Enrolled", `NOT_INTERESTED` and `CLOSED` both "Closed".
+`INTERESTED` "Marked interested", `CONVERTED` "Enrolled", `NOT_INTERESTED` and `CLOSED` both "Closed". A new enquiry is
+always `NEW`, so the only label the API sends today is "Sent to institute".
 
 Errors the frontend should expect: field errors as `{"phone": ["Enter a 10-digit mobile number starting with 96, 97 or
-98."]}`; the three business refusals (closed, full, duplicate) as `{"non_field_errors": ["..."]}`; a bad device token as
-`{"device_token": ["Send a random UUID4 in the X-Device-Token header."]}`; throttling as 429 with `Retry-After`.
+98."]}`; the three business refusals (closed, full, duplicate) as `{"non_field_errors": ["..."]}`; throttling as 429 with
+`Retry-After`.
 
 ### 2.4 Changes outside the new app
 
 | File | Change |
 | :---- | :---- |
-| `config/settings/base.py` | `apps.enquiries` installed; `CORS_ALLOW_HEADERS` now includes `x-device-token` |
+| `config/settings/base.py` | `apps.enquiries` installed |
 | `apps/api/v1/urls.py` | Prefixes `enquiries/` and `institute/enquiries/` |
 | `apps/training/services.py` | New `registration_open_q()`, the one definition of "registration open"; `delete_training` refuses a draft that has enquiries (the institute keeps them) |
 | `apps/training/api/v1/filters.py` | The public `registration_open` filter now uses `registration_open_q()` (same behaviour) |
@@ -103,8 +106,8 @@ Errors the frontend should expect: field errors as `{"phone": ["Enter a 10-digit
 ### 2.5 Tests (`apps/enquiries/tests/`)
 
 Constraints; the submit rules; free status moves and the seat guard, including a two-thread test that only one of two
-simultaneous conversions takes the last seat; the phone allowance and the IP throttle; the device token; the 90-day
-window; the access matrix (anonymous 401, admin 403, other institute 404); filters and search; notes; the summary; and
+simultaneous conversions takes the last seat; the phone allowance and the IP throttle; that a stray device token is ignored
+and `enquiries/my/` is gone; the access matrix (anonymous 401, admin 403, other institute 404); filters and search; notes; the summary; and
 query counts that stay constant as lists and notes grow.
 
 ## 3. Where the build differs from the prototype
@@ -118,22 +121,24 @@ query counts that stay constant as lists and notes grow.
 | Phone check `^9[678]\d{8}$` with the message "97 or 98" | Same pattern; the message says "96, 97 or 98" | The pattern already allowed 96 |
 | `+977` stripped from the start of any number | Stripped only when ten digits remain | Otherwise a real number starting 977 is cut short |
 | Visitor sees the raw status colour and label | Visitor sees `status_label` only | `NOT_INTERESTED` must not show the institute's verdict |
+| "My enquiries" for the visitor on the same browser, kept 90 days (PRD) | Not built; no device token | Decided 2026-11-02: not needed |
 
 ## 4. What needs changes
 
 ### 4.1 Before it works end to end
 
 - [ ] **Run `python manage.py migrate`** on every database. The migration is `apps/enquiries/migrations/0001_initial.py`.
-- [ ] **The frontend must send `X-Device-Token`** on `POST enquiries/` and `GET enquiries/my/`: a random UUID4 made once
-      (`crypto.randomUUID()`) and kept in the browser. A missing, malformed, all-zero or time-based token is a 400. Clearing
-      browser data loses the history.
+- [ ] **A database that applied `0001` before 2026-11-02 must roll the app back first.** That migration was rewritten in
+      place to drop `device_token`, so the old table keeps a NOT NULL `device_token` column and every submit fails. Run
+      `python manage.py migrate enquiries zero` (this deletes every enquiry), then `migrate`. A fresh database is fine.
 - [ ] **The deployment proxy must pass the real client IP**, or the 10-an-hour limit counts every visitor together.
 - [ ] **Redis must be up.** The throttle and the phone counter need it; if it is down, a submit fails with a 500.
 - [ ] `qcluster` is **not** needed for enquiries (they queue nothing).
 
 ### 4.2 Frontend changes against the prototype
 
-- Send the training's **slug**, not its id, when submitting.
+- Send the training's **slug**, not its id, when submitting. Send no `X-Device-Token`, and drop the "My enquiries" screen:
+  `enquiries/my/` is a 404 now. The answer to the `POST` is the visitor's only receipt.
 - Send enum values, not labels: `ENQUIRY` / `INTEREST`, `MORNING` / `DAY` / `EVENING` / `WEEKEND`, and the seven status
   values (`FOLLOW_UP`, `NOT_INTERESTED`, ...). Show the labels in the UI.
 - Remove the preferred-location field. Show the validation text that says 96, 97 or 98.
@@ -169,8 +174,6 @@ query counts that stay constant as lists and notes grow.
 - **A frontend that calls from its own server** would put every visitor behind one IP, so the `enquiry` throttle would limit
   them all together. The IP throttle suits the browser-direct setup in CLAUDE.md; revisit it if that changes.
 - **Phone numbers sit in Redis** (`enquiry_phone_<phone>`) for up to 24 hours as part of the per-phone counter.
-- **The device token is the only link to "My enquiries".** Anyone who learns it can read that list (training, institute and
-  status label, never contact details).
 - **The seat check on submit does not lock the training**, so one extra enquiry can slip in beside the last seat. An
   enquiry does not take a seat; only `CONVERTED` does, and that is locked.
 - **Search** uses `icontains` on name, phone and email, with no trigram index. It is fine for one institute's volume; look
@@ -192,13 +195,13 @@ query counts that stay constant as lists and notes grow.
 ```bash
 source .venv/bin/activate
 python manage.py migrate
-python manage.py test apps.enquiries      # 89 tests
-python manage.py test                     # the whole suite, 444 tests
+python manage.py test apps.enquiries      # 82 tests
+python manage.py test                     # the whole suite, 516 tests
 python manage.py check && python manage.py makemigrations --check --dry-run
 DEBUG=true python manage.py show_urls | grep enquir     # the routes
 ```
 
-With `DEBUG=true` the swagger page is at `/api/root/` and lists `/enquiries/`, `/enquiries/my/` and the
+With `DEBUG=true` the swagger page is at `/api/root/` and lists `/enquiries/` and the
 `/institute/enquiries/` routes.
 
 Files: `apps/enquiries/` (`models.py`, `constants.py`, `services.py`, `validators.py`, `admin.py`,
