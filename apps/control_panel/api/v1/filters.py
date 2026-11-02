@@ -5,7 +5,7 @@ from apps.training.models import Training
 
 
 class AdminCategoryFilter(django_filters.FilterSet):
-    parent = django_filters.NumberFilter(field_name="parent_id")
+    parent = django_filters.CharFilter(field_name="parent__slug")
 
     class Meta:
         model = Category
@@ -13,7 +13,7 @@ class AdminCategoryFilter(django_filters.FilterSet):
 
 
 class AdminTrainingFilter(django_filters.FilterSet):
-    institute = django_filters.NumberFilter(field_name="institute_id")
+    institute = django_filters.CharFilter(field_name="institute__slug")
 
     class Meta:
         model = Training

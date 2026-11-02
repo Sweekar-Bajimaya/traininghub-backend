@@ -35,7 +35,7 @@
 - PublicTrainingTestCase
 - CategoryTreeView
 - settings/base.py
-- common/validators.py
+- .url
 - .create
 - IdentityScopedRateThrottle
 - SubmitTests
@@ -71,9 +71,7 @@
 - Training
 - Open question: how an admin's password is reset
 - Product Requirements Document (PRD)
-- helpers.py
-- AcceptInvitationSerializer
-- TrainingConstraintTests
+- Base64FieldMixin
 - Entity: Institute
 - EnquiryConstraintTests
 - NormalizedEmailSerializer
@@ -136,6 +134,8 @@
 10. `ActionRequiredTests` - 29 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `4.3 Backend work not done` --references--> `change_status()`  [INFERRED]
+  docs/enquiries-status.md → apps/enquiries/services.py
 - `Decision: PAN/VAT number unique, nine digits, contact telephone optional` --references--> `validate_pan_vat_number()`  [EXTRACTED]
   docs/System Design.md → apps/common/validators.py
 - `2.1 Data (`apps/enquiries/models.py`)` --references--> `Enquiry`  [INFERRED]
@@ -200,15 +200,23 @@ Nodes (10): LoginSerializer, UpdateStatusSerializer, Meta, LoginView, LogoutView
 Cohesion: 0.08
 Nodes (23): BaseModel, Meta, available_categories(), CoverSerializer, LearningOutcomeSerializer, Meta, TrainingModuleSerializer, Meta (+15 more)
 
-### Community 16 - "PublicTrainingTestCase"
-Cohesion: 0.13
-Nodes (7): FilterTests, PublicTrainingTestCase, QueryCountTests, SearchTests, ShiftsAreShownTests, titles(), VisibilityTests
+### Community 16 - "FilterTests"
+Cohesion: 0.15
+Nodes (4): FilterTests, SearchTests, titles(), VisibilityTests
 
 ### Community 17 - "CategoryTreeView"
 Cohesion: 0.22
 Nodes (4): build_category_tree(), build_tree(), CategoryTreeView, LocationTreeView
 
-### Community 19 - "common/validators.py"
+### Community 20 - ".url"
+Cohesion: 0.07
+Nodes (7): AccessTests, DetailTests, ListTests, NoteTests, PortalTestCase, StatusChangeTests, SummaryTests
+
+### Community 21 - ".create"
+Cohesion: 0.05
+Nodes (10): ActionQueryCountTests, AdminApiTests, LifecycleTests, PortalCreateTests, PortalEditTests, PortalPermissionTests, PortalTestCase, QueryCountTests (+2 more)
+
+### Community 22 - "common/validators.py"
 Cohesion: 0.16
 Nodes (9): combine_date_parts(), get_today(), validate_attachment(), validate_coded_phone_number(), validate_dob(), validate_future_datetime(), validate_is_future_datetime(), validate_otp() (+1 more)
 
@@ -260,9 +268,9 @@ Nodes (7): EnquiryStatus, EnquiryType, PreferredTime, Enquiry, Meta, SeatRaceTes
 Cohesion: 0.05
 Nodes (7): ControlPanelRoutesTests, add_contact(), InstituteAdminSiteTests, UserManager, User, Meta, UserConstraintTests
 
-### Community 37 - "fields.py"
-Cohesion: 0.07
-Nodes (4): DistributedKeyAuthentication, DistributedAppKey, Base64FieldMixin, Base64ImageField
+### Community 38 - "SubmitTests"
+Cohesion: 0.09
+Nodes (6): ChangeStatusTests, NoteTests, ServiceTestCase, submit(), SubmitTests, SummaryTests
 
 ### Community 38 - "control_panel/api/v1/views.py"
 Cohesion: 0.10
@@ -288,9 +296,9 @@ Nodes (4): NoVisitorIdentityTests, PublicTestCase, SubmitTests, ThrottleTests
 Cohesion: 0.18
 Nodes (4): EndToEndTests, PermissionMatrixTests, PortalTestCase, ResubmitTests
 
-### Community 47 - "PublicInstituteViewSet"
-Cohesion: 0.20
-Nodes (5): PublicInstituteDetailSerializer, Meta, PublicInstituteListSerializer, Meta, PublicInstituteViewSet
+### Community 46 - "register"
+Cohesion: 0.07
+Nodes (13): register(), NormalizedEmailSerializer, RegistrationOTPSerializer, RegistrationOTPVerifySerializer, SendOTPSerializer, VerifyOTPSerializer, consume_otp(), normalize_email() (+5 more)
 
 ### Community 50 - "EnquiryNote"
 Cohesion: 0.17

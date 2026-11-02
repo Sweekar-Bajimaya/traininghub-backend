@@ -24,9 +24,9 @@ def prefix_query(text):
 
 
 class TrainingFilter(django_filters.FilterSet):
-    # a top-level id also finds the trainings of its sub-categories
-    category = django_filters.NumberFilter(method="filter_category")
-    sub_category = django_filters.NumberFilter(field_name="category_id")
+    # a top-level slug also finds the trainings of its sub-categories
+    category = django_filters.CharFilter(method="filter_category")
+    sub_category = django_filters.CharFilter(field_name="category__slug")
     # an online training has no municipality, so a location filter excludes it
     province = django_filters.NumberFilter(field_name="venue__location__province_id")
     district = django_filters.NumberFilter(field_name="venue__location__district_id")
@@ -56,7 +56,7 @@ class TrainingFilter(django_filters.FilterSet):
         fields = ("mode", "level")
 
     def filter_category(self, queryset, name, value):
-        return queryset.filter(Q(category_id=value) | Q(category__parent_id=value))
+        return queryset.filter(Q(category__slug=value) | Q(category__parent__slug=value))
 
     def filter_duration(self, queryset, name, value):
         return queryset.filter(DURATION_BUCKETS[value])

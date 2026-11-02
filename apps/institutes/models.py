@@ -107,7 +107,7 @@ class InstituteDocument(BaseModel):
         validators=[validate_document_file],
     )
     status = models.CharField(
-        max_length=10, choices=DocumentStatus.CHOICES, default=DocumentStatus.PENDING
+        max_length=20, choices=DocumentStatus.CHOICES, default=DocumentStatus.PENDING
     )
 
     class Meta:
@@ -115,6 +115,15 @@ class InstituteDocument(BaseModel):
             models.Index(
                 fields=["institute", "status"], name="institutes_doc_status_idx"
             )
+        ]
+        constraints = [
+            # one row per document: a rejected one is replaced in place (`services.reupload_document`)
+            models.UniqueConstraint(
+                "institute",
+                Lower("name"),
+                name="institutes_document_unique_name",
+                violation_error_message="A document with this name already exists.",
+            ),
         ]
 
 

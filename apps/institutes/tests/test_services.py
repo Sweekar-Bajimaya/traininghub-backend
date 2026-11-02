@@ -22,6 +22,7 @@ from apps.institutes.constants import (
 )
 from apps.institutes.models import (
     Institute,
+    InstituteDocument,
     InstituteGalleryImage,
     InstituteInvitation,
     InstituteLocation,
@@ -384,6 +385,74 @@ class DocumentAndGalleryTests(TempMediaMixin, TestCase):
             services.review_document(
                 document, status=DocumentStatus.PENDING, by=self.admin
             )
+
+    def reject(self, document):
+        return services.review_document(
+            document, status=DocumentStatus.REJECTED, by=self.admin
+        )
+
+    def test_uploading_a_rejected_document_again_reuses_its_row(self):
+        document = services.add_document(self.institute, name="PAN/VAT", file=pdf())
+        self.reject(document)
+        again = services.reupload_document(
+            document, file=SimpleUploadedFile("new.pdf", b"%PDF-1.4 second")
+        )
+        self.assertEqual(again.pk, document.pk)
+        self.assertEqual(again.name, "PAN/VAT")
+        self.assertEqual(again.status, DocumentStatus.RE_UPLOADED)
+        self.assertEqual(self.institute.documents.count(), 1)
+        with again.file.open("rb") as stored:
+            self.assertEqual(stored.read(), b"%PDF-1.4 second")
+
+    def test_the_rejected_file_is_deleted_once_the_upload_commits(self):
+        document = services.add_document(self.institute, name="PAN/VAT", file=pdf())
+        self.reject(document)
+        old_name, storage = document.file.name, document.file.storage
+        with self.captureOnCommitCallbacks(execute=True):
+            services.reupload_document(document, file=pdf("new.pdf"))
+        self.assertFalse(storage.exists(old_name))
+
+    def test_a_document_that_is_not_rejected_cannot_be_uploaded_again(self):
+        for status in (
+            DocumentStatus.PENDING,
+            DocumentStatus.VERIFIED,
+            DocumentStatus.RE_UPLOADED,
+        ):
+            with self.subTest(status=status):
+                document = services.add_document(
+                    self.institute, name=f"Doc {status}", file=pdf()
+                )
+                self.institute.documents.filter(pk=document.pk).update(status=status)
+                with self.assertRaises(ValidationError):
+                    services.reupload_document(document, file=pdf("new.pdf"))
+                document.refresh_from_db()
+                self.assertEqual(document.status, status)
+                with document.file.open("rb") as stored:
+                    self.assertEqual(stored.read(), b"%PDF-1.4 test")  # the file is kept
+
+    def test_adding_a_name_the_institute_already_has_is_refused_in_any_status(self):
+        for status in DocumentStatus.CHOICES:
+            status = status[0]
+            with self.subTest(status=status):
+                document = services.add_document(
+                    self.institute, name=f"Doc {status}", file=pdf()
+                )
+                self.institute.documents.filter(pk=document.pk).update(status=status)
+                with self.assertRaises(ValidationError) as caught:
+                    services.add_document(
+                        self.institute, name=f" doc {status}", file=pdf("new.pdf")
+                    )
+                self.assertIn("name", caught.exception.message_dict)
+                self.assertEqual(
+                    self.institute.documents.filter(name__iexact=document.name).count(),
+                    1,
+                )
+
+    def test_two_institutes_can_each_have_a_document_of_the_same_name(self):
+        other, _ = make_institute(name="Other", email="other@example.com")
+        services.add_document(self.institute, name="PAN/VAT", file=pdf())
+        services.add_document(other, name="PAN/VAT", file=pdf())
+        self.assertEqual(InstituteDocument.objects.filter(name="PAN/VAT").count(), 2)
 
     def test_gallery_images_are_appended_in_order(self):
         positions = [

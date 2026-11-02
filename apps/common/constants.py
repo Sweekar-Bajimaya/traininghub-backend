@@ -21,3 +21,4 @@ class MunicipalityType:
 
 TREE_CACHE_KEY = "common:location-tree:v1"
 CATEGORY_TREE_CACHE_KEY = "common:category-tree:v1"
+CATEGORY_TREE_TTL = 300  # seconds

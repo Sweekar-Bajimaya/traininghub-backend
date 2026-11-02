@@ -80,8 +80,8 @@ class FilterTests(PublicTrainingTestCase):
     def test_each_filter(self):
         place = self.location.location
         cases = (
-            ({"category": self.coffee.parent_id}, ["Physical", "Short"]),
-            ({"sub_category": self.coffee.pk}, ["Physical"]),
+            ({"category": self.coffee.parent.slug}, ["Physical", "Short"]),
+            ({"sub_category": self.coffee.slug}, ["Physical"]),
             ({"mode": "ONLINE"}, ["Online", "Short"]),
             ({"level": "ADVANCED"}, ["Online"]),
             ({"shifts": MORNING}, ["Online", "Short"]),

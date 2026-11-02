@@ -7,10 +7,15 @@ from rest_framework.views import APIView
 
 from apps.common.api.v1.filters import LocationFilter
 from apps.common.api.v1.serializers import LocationSerializer
-from apps.common.constants import CATEGORY_TREE_CACHE_KEY, TREE_CACHE_KEY
+from apps.common.constants import (
+    CATEGORY_TREE_CACHE_KEY,
+    CATEGORY_TREE_TTL,
+    TREE_CACHE_KEY,
+)
 from apps.common.models.category import Category
 from apps.common.models.location import Location
 from apps.common.viewsets import ReadOnlyViewSet
+from apps.training import services as training_services
 
 
 class LocationViewSet(ReadOnlyViewSet):
@@ -60,9 +65,11 @@ class LocationTreeView(APIView):
 
 def build_category_tree():
     rows = list(
-        Category.objects.filter(is_active=True)
+        training_services.annotate_category_training_count(
+            Category.objects.filter(is_active=True)
+        )
         .order_by("name", "pk")
-        .values("id", "name", "slug", "icon", "hue", "parent_id")
+        .values("id", "name", "slug", "icon", "hue", "parent_id", "training_count")
     )
     nodes = {r["id"]: {**r, "children": []} for r in rows}
     roots = []
@@ -82,5 +89,7 @@ class CategoryTreeView(APIView):
 
     def get(self, request):
         return Response(
-            cache.get_or_set(CATEGORY_TREE_CACHE_KEY, build_category_tree, timeout=None)
+            cache.get_or_set(
+                CATEGORY_TREE_CACHE_KEY, build_category_tree, timeout=CATEGORY_TREE_TTL
+            )
         )
