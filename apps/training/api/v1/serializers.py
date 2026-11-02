@@ -10,6 +10,7 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.common.utils.helpers import institute_experience
 from apps.common.validators import validate_phone_number
 from apps.institutes.validators import validate_image_file
 from apps.training import services
@@ -169,6 +170,12 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
             "email": (own.contact_email if own else "")
             or (institute.contact_email if institute else ""),
         }
+    
+    def get_institute(self, obj):
+            data = super().get_institute(obj)
+            data["experience"] = institute_experience(obj.institute.established_year)
+            data["training_count"] = obj.institute_training_count
+            return data
 
 
 # portal (the institute's own staff)

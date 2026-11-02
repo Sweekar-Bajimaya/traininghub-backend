@@ -1,6 +1,6 @@
+import datetime
 import os
 import uuid
-import datetime
 from functools import reduce
 
 from django.utils import timezone
@@ -15,13 +15,14 @@ def get_uuid_filename(filename):
     rename the file name to uuid4 and return the
     path
     """
-    ext = filename.split('.')[-1]
+    ext = filename.split(".")[-1]
     return "{}.{}".format(uuid.uuid4().hex, ext)
 
 
 def get_upload_path(instance, filename):
-    return os.path.join(f"uploads/{instance.__class__.__name__.lower()}",
-                        get_uuid_filename(filename))
+    return os.path.join(
+        f"uploads/{instance.__class__.__name__.lower()}", get_uuid_filename(filename)
+    )
 
 
 def combine_date_parts(year: int = 0, month: int = 0, day: int = 1):
@@ -32,12 +33,12 @@ def combine_date_parts(year: int = 0, month: int = 0, day: int = 1):
     :param day: Day int (defaults to 1)
     :return: datetime.date instance if valid and None if invalid
     """
-    date_kwargs = {'day': day}
+    date_kwargs = {"day": day}
 
     if year:
-        date_kwargs['year'] = year
+        date_kwargs["year"] = year
     if month:
-        date_kwargs['month'] = month
+        date_kwargs["month"] = month
 
     try:
         return datetime.date(**date_kwargs)
@@ -57,12 +58,18 @@ def update_instance(instance: object, validated_data: dict, save: bool = True):
     for attr, value in validated_data.items():
         setattr(instance, attr, value)
 
-    if save and hasattr(instance, 'save'):
+    if save and hasattr(instance, "save"):
         instance.save()
     return instance
 
 
-def set_instance_fields(instance: object, validated_data: dict, save: bool = True, fields=(), pop_items: bool = False):
+def set_instance_fields(
+    instance: object,
+    validated_data: dict,
+    save: bool = True,
+    fields=(),
+    pop_items: bool = False,
+):
     """
     Sets attributes to given instance
     :param instance: Instance to update
@@ -74,8 +81,11 @@ def set_instance_fields(instance: object, validated_data: dict, save: bool = Tru
     """
     if fields:
         if pop_items:
-            validated_data = {field_name: validated_data.pop(
-                field_name) for field_name in fields if field_name in validated_data.keys()}
+            validated_data = {
+                field_name: validated_data.pop(field_name)
+                for field_name in fields
+                if field_name in validated_data.keys()
+            }
         else:
             validated_data = {
                 key: value for key, value in validated_data.items() if key in fields
@@ -83,7 +93,9 @@ def set_instance_fields(instance: object, validated_data: dict, save: bool = Tru
     return update_instance(instance, validated_data, save)
 
 
-def nested_getattr(instance: object, attributes: str, separator='.', default=None, call=True):
+def nested_getattr(
+    instance: object, attributes: str, separator=".", default=None, call=True
+):
     """
     Returns nested getattr and returns default if not found
     :param instance: object to get nested attributes from
@@ -97,11 +109,34 @@ def nested_getattr(instance: object, attributes: str, separator='.', default=Non
     nested_attrs.insert(0, instance)
     try:
         attr = reduce(
-            lambda instance_, attribute_: getattr(instance_, attribute_),
-            nested_attrs
+            lambda instance_, attribute_: getattr(instance_, attribute_), nested_attrs
         )
         if call and callable(attr):
             return attr()
         return attr
     except AttributeError:
         return default
+
+
+def institute_experience(established_year):
+    """Experience since `established_year`, counted from 1 January of that year (only the year is
+    stored, so this is approximate). Under a year: months; otherwise whole years.
+    None when the year is unknown or in the future."""
+    if not established_year:
+        return None
+    today = timezone.localdate()
+    months = (today.year - established_year) * 12 + today.month - 1
+
+    if months < 0:
+        return None
+
+    if months < 12:
+        value, unit = max(months, 1), "MONTHS"
+    else:
+        value, unit = months // 12, "YEARS"
+    word = unit.lower()
+    return {
+        "value": value,
+        "unit": unit,
+        "text": f"{value} {word[:-1] if value == 1 else word}",  # "1 year" / "6 years"
+    }

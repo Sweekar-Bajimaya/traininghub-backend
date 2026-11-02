@@ -492,3 +492,22 @@ def annotate_category_training_count(categories):
     return categories.annotate(
         training_count=Coalesce(Subquery(visible, output_field=IntegerField()), 0)
     )
+
+def annotate_institute_training_count(trainings):
+    """Annotate trainings with `institute_training_count`: the `APPROVED` trainings of the same
+    institute. One query, however many rows. The detail view only serves approved institutes, so
+    this is the public count."""
+    approved = (
+        Training.objects.filter(
+            institute=OuterRef("institute_id"), status=TrainingStatus.APPROVED
+        )
+        .order_by()
+        .values(group=Value(1))
+        .annotate(n=Count("pk"))
+        .values("n")
+    )
+    return trainings.annotate(
+        institute_training_count=Coalesce(
+            Subquery(approved, output_field=IntegerField()), 0
+        )
+    )

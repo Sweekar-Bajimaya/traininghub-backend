@@ -57,7 +57,9 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
             "detail",  # the cards show the skills
         )
         if self.action == "retrieve":
-            return queryset.select_related("contact").prefetch_related(*CHILDREN)
+            return services.annotate_institute_training_count(
+                queryset.select_related("contact").prefetch_related(*CHILDREN)
+            )
         return queryset.order_by("-published_at", "-pk")
 
 

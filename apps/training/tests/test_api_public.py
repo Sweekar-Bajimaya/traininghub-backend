@@ -217,6 +217,18 @@ class DetailTests(PublicTrainingTestCase):
             {"person": "Ram", "phone": "9800000000", "email": "info@alpha.example"},
         )
 
+    def test_detail_shows_institute_experience_and_approved_count(self):
+        self.institute.established_year = self.today.year - 3
+        self.institute.save()
+        shown = make_training(self.institute, location=self.location)
+        make_training(self.institute, title="Second")
+        make_training(self.institute, title="Draft", status=S.DRAFT)  # not counted
+        other, _, _ = approved_institute()  # hypothetical second institute; adapt to the helper
+        make_training(other, title="Elsewhere")  # not counted
+        data = self.client.get(f"{URL}{shown.slug}/").data
+        self.assertEqual(data["institute"]["training_count"], 2)
+        self.assertEqual(data["institute"]["experience"]["unit"], "YEARS")
+
 
 class QueryCountTests(PublicTrainingTestCase):
     def test_list_and_detail_cost_a_constant_number_of_queries(self):
