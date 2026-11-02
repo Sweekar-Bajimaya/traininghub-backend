@@ -60,7 +60,8 @@ class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
     serializer_class = AdminCategorySerializer
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_categories"
-    lookup_value_regex = r"[0-9]+"
+    lookup_field = "slug"
+    lookup_value_regex = r"[-a-zA-Z0-9_]+"
     http_method_names = ["get", "post", "patch", "head", "options"]
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminCategoryFilter
@@ -73,7 +74,8 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     serializer_class = AdminInstituteSerializer
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_institutes"
-    lookup_value_regex = r"[0-9]+"
+    lookup_field = "slug"
+    lookup_value_regex = r"[-a-zA-Z0-9_]+"
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_fields = ("status", "type")
     search_fields = ("name",)
@@ -112,19 +114,19 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
         )
 
     @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
+    def approve(self, request, *args, **kwargs):
         return self._review(request, institute_services.approve, with_reason=False)
 
     @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
+    def reject(self, request, *args, **kwargs):
         return self._review(request, institute_services.reject, with_reason=True)
 
     @action(detail=True, methods=["post"], url_path="request-info")
-    def request_info(self, request, pk=None):
+    def request_info(self, request, *args, **kwargs):
         return self._review(request, institute_services.request_info, with_reason=True)
 
     @action(detail=True, methods=["post"])
-    def suspend(self, request, pk=None):
+    def suspend(self, request, *args, **kwargs):
         return self._review(request, institute_services.suspend, with_reason=True)
 
     # Disabled until it is decided what suspending an institute means and whether it can be undone.
@@ -142,9 +144,9 @@ class AdminDocumentView(GenericAPIView):
         InstituteDocument.objects.none()
     )  # only for schema generation; patch() looks the row up itself
 
-    def patch(self, request, institute_id, pk):
+    def patch(self, request, institute_slug, pk):
         document = get_object_or_404(
-            InstituteDocument, pk=pk, institute_id=institute_id
+            InstituteDocument, pk=pk, institute__slug=institute_slug
         )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -162,9 +164,9 @@ class AdminDocumentDownloadView(APIView):
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_institutes"
 
-    def get(self, request, institute_id, pk):
+    def get(self, request, institute_slug, pk):
         return private_file_response(
-            get_object_or_404(InstituteDocument, pk=pk, institute_id=institute_id)
+            get_object_or_404(InstituteDocument, pk=pk, institute__slug=institute_slug)
         )
 
 
@@ -174,7 +176,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
 
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_trainings"
-    lookup_value_regex = r"[0-9]+"
+    lookup_field = "slug"
+    lookup_value_regex = r"[-a-zA-Z0-9_]+"
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
@@ -210,15 +213,15 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
         )
 
     @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
+    def approve(self, request, *args, **kwargs):
         return self._review(request, training_services.approve, with_reason=False)
 
     @action(detail=True, methods=["post"], url_path="request-changes")
-    def request_changes(self, request, pk=None):
+    def request_changes(self, request, *args, **kwargs):
         return self._review(
             request, training_services.request_changes, with_reason=True
         )
 
     @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
+    def reject(self, request, *args, **kwargs):
         return self._review(request, training_services.reject, with_reason=True)

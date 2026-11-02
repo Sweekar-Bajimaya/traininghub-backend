@@ -45,8 +45,14 @@ or an open question gets answered. Rules:
 ## Product decisions that shape the code
 
 - No learner accounts. Only **institute staff** and **admins** log in. Visitors submit anonymous
-  **Enquiries** (captcha + rate limiting); "My enquiries" is tracked by a browser-stored device token and
-  shows the last 90 days.
+  **Enquiries** (rate limited per IP and per phone number; no captcha for now). A visitor has no identity after the
+  submit: no device token, no "My enquiries" list (dropped 2026-11-02); the answer to the `POST` is all they get back.
+- Enquiries (`apps/enquiries`): the portal's seven statuses (`NEW`, `CONTACTED`, `FOLLOW_UP`, `INTERESTED`, `CONVERTED`,
+  `NOT_INTERESTED`, `CLOSED`); any status moves to any other, staff and owner both change them, only `CONVERTED` is
+  guarded by `seats`. `type` is `ENQUIRY` or `INTEREST`: an interest is always accepted for a published training, a plain
+  enquiry is refused when registration has closed (`training.services.registration_open_q`) or the seats are full. One
+  open enquiry per phone number and training; 3 a day per phone number. Notes are internal. No preferred-location field,
+  no email alert for a new enquiry (decided 2026-10-10).
 - Learner **Applications** (approve/reject/capacity) are phase 2 - keep the schema open to them.
 - Providers are verified **Institutes** only; an Institute has several staff users (owner + staff; the owner
   can invite more) and **several locations** (its offices; a training's venue is separate, see below).
@@ -110,8 +116,8 @@ config/
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
-                          `institute/trainings/`, `institute/`, `admin/` (one include per resource group; `admin/`
-                          is one include, of `control_panel`)
+                          `enquiries/`, `institute/trainings/`, `institute/enquiries/`, `institute/`, `admin/` (one include
+                          per resource group; `admin/` is one include, of `control_panel`)
   common/                 the one shared app (installed, label `common`): base classes and reference data.
                           `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
                           `category.py`; `BaseViewSet` + mixin viewsets, `ActionAPIView` (POST that answers 200),
@@ -145,9 +151,15 @@ apps/
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
-                          (register, `register/send-otp/`, `register/verify-otp/`, profile, `action-required/`,
-                          contact, ceo, social-links, locations, documents, gallery, staff, invitations, resubmit); the
-                          admin review API is in `control_panel`
+                          (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
+                          social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
+                          `control_panel`
+  enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
+                          `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
+                          and training; `change_status`: free moves, the seat guard; notes, `summary`),
+                          `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST only) and portal
+                          `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`, `summary/`). The admin monitor
+                          is not built
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
                           `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they
                           grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),
@@ -164,12 +176,12 @@ docs/  design/            see "Source of truth"
 graphify-out/             the generated knowledge graph (graph.json, GRAPH_REPORT.md, graph.html); written by graphify, never hand-edited; only graph.json and GRAPH_REPORT.md are committed
 ```
 
-Planned apps (not created yet): `enquiries`, `notifications`, `analytics`; later `applications`,
+Planned apps (not created yet): `notifications`, `analytics`; later `applications`,
 `learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
 code (send and verify exist; nothing sets the new password yet).
 Each app (except `control_panel`, which has no models) follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
-(`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/` and
-`apps/training/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
+(`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/`,
+`apps/training/api/v1/urls/` and `apps/enquiries/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
 module per model group, its `__init__.py` imports them all so every model registers, and callers import by module path,
 e.g. `apps.common.models.location`).
 
@@ -237,7 +249,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Public listings return only `APPROVED` trainings of `APPROVED` institutes.
 - Throttle by scope (`throttle_scope` on the view); rates are in `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`. A scope
   with no rate there makes every request to that view a 500 (`ImproperlyConfigured`). The OTP views use
-  `IdentityScopedRateThrottle` (scopes `otp`, `register_otp`, `register_otp_verify`).
+  `IdentityScopedRateThrottle` (scopes `otp`, `register_otp`, `register_otp_verify`). The public enquiry form uses the plain
+  scoped throttle (`enquiry`, per client IP) and the service adds a per-phone allowance.
 - A service that needs the caller to wait raises `TooManyRequests(message, wait=seconds)`; the exception handler answers
   429 with `Retry-After`.
 
@@ -311,6 +324,15 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   address; build them nowhere else. Each purpose (`OTPPurpose`) has its own keys, so a code works only for the flow it was
   sent for. In tests mock `apps.users.services.async_task`: a real one lands in the Redis queue that a running `qcluster`
   also reads, and it would send real mail.
+- **Enquiries are written only through `apps/enquiries/services.py`.** `submit_enquiry` copies `institute` from the training
+  (the serializer hands it the phone already normalised to ten digits), refuses what the rules refuse and counts the phone
+  number in Redis (`enquiry_phone_<phone>`, 24 hours; tests clear it with `reset_limits()`); the unique index
+  `enquiry_one_open_per_phone_training` is the final judge of two submits at once. `change_status` locks the enquiry, then the
+  training (always in that order) before `CONVERTED`. If Redis is down the submit fails with a 500 (fails closed).
+  A training with enquiries cannot be deleted (`PROTECT`; `delete_training` says so).
+- **`enquiries/0001_initial` was rewritten in place (2026-11-02) to drop `device_token`** instead of adding a migration. A
+  database that applied the old `0001` keeps the NOT NULL `device_token` column and every submit fails; check with
+  `\d enquiries_enquiry`, and fix with `python manage.py migrate enquiries zero` then `migrate` (this deletes every enquiry).
 - **Registration checks the code before writing and uses it up inside the transaction** (`institutes/services.register`), so
   a failed registration keeps the code and a code works once. Every caller of `register` must pass the code.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
@@ -318,7 +340,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 
 ## Open decisions (also in System Design.md)
 
-- Do institutes keep enquiries after the 90-day "My enquiries" window?
+- Keep every enquiry indefinitely, or delete old ones? Nothing deletes them today.
 - Where the frontend stores access/refresh tokens (memory, `localStorage`, httpOnly cookie).
 - How an admin's password is reset (the API only lets the Super Admin set the initial password).
 - Whether `/admin/` is renamed or restricted at the proxy before production (it is on the default path, no 2FA).
