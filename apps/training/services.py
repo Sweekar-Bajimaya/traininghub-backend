@@ -526,3 +526,26 @@ def annotate_institute_training_count(trainings):
             Subquery(approved, output_field=IntegerField()), 0
         )
     )
+
+def annotate_institute_public_counts(institutes):
+    """Annotate institutes with `training_count` (their `APPROVED` trainings) and `category_count`
+    (the distinct top-level categories those trainings fall in; a sub-category counts as its
+    parent). One query, however many rows. Pass approved institutes only (the public list)."""
+    approved = Training.objects.filter(
+        institute=OuterRef("pk"), status=TrainingStatus.APPROVED
+    ).order_by()
+
+    def scalar(aggregate):
+        return Coalesce(
+            Subquery(
+                approved.values(group=Value(1)).annotate(n=aggregate).values("n"),
+                output_field=IntegerField(),
+            ),
+            0,
+        )
+
+    top_level = Coalesce("category__parent_id", "category_id", output_field=IntegerField())
+    return institutes.annotate(
+        training_count=scalar(Count("pk")),
+        category_count=scalar(Count(top_level, distinct=True)),
+    )

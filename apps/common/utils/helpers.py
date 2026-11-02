@@ -118,18 +118,8 @@ def nested_getattr(
         return default
 
 
-def institute_experience(established_year):
-    """Experience since `established_year`, counted from 1 January of that year (only the year is
-    stored, so this is approximate). Under a year: months; otherwise whole years.
-    None when the year is unknown or in the future."""
-    if not established_year:
-        return None
-    today = timezone.localdate()
-    months = (today.year - established_year) * 12 + today.month - 1
-
-    if months < 0:
-        return None
-
+def _duration(months):
+    """{"value", "unit", "text"} for whole months: under a year in months, otherwise whole years."""
     if months < 12:
         value, unit = max(months, 1), "MONTHS"
     else:
@@ -140,3 +130,27 @@ def institute_experience(established_year):
         "unit": unit,
         "text": f"{value} {word[:-1] if value == 1 else word}",  # "1 year" / "6 years"
     }
+
+
+def institute_experience(established_year):
+    """Experience since `established_year`, counted from 1 January of that year (only the year is
+    stored, so this is approximate). None when the year is unknown or in the future."""
+    if not established_year:
+        return None
+    today = timezone.localdate()
+    months = (today.year - established_year) * 12 + today.month - 1
+    return None if months < 0 else _duration(months)
+
+
+def membership_duration(joined_at):
+    """How long since `joined_at` (an aware datetime, e.g. `Institute.created_at`), same shape as
+    `institute_experience`. The exact date is known, so a month only counts once its day is reached."""
+    if not joined_at:
+        return None
+    joined = timezone.localtime(joined_at).date()  # the Kathmandu day, not the UTC one
+    today = timezone.localdate()
+    months = (today.year - joined.year) * 12 + today.month - joined.month
+    if today.day < joined.day:
+        months -= 1
+    return None if months < 0 else _duration(months)
+
