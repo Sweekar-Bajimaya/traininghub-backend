@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.postgres.search import SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,6 +12,7 @@ from apps.institutes.models import Institute
 from apps.training.constants import (
     SEARCH_CONFIG,
     DurationUnit,
+    StartBucket,
     TrainingMode,
     TrainingShift,
     TrainingStatus,
@@ -129,9 +132,11 @@ def _save_venue(training, venue):
     """The one-to-one row holds where it is held. None leaves it alone; a dict replaces it whole."""
     if venue is None:
         return
-    training.venue, _ = TrainingLocation.objects.update_or_create(  # keeps the cached row current
-        training=training,
-        defaults={"location": None, "map_url": "", "contact_phone": "", **venue},
+    training.venue, _ = (
+        TrainingLocation.objects.update_or_create(  # keeps the cached row current
+            training=training,
+            defaults={"location": None, "map_url": "", "contact_phone": "", **venue},
+        )
     )
 
 
@@ -415,7 +420,9 @@ def update_training(
     mode = fields.get("mode", training.mode)
     if venue is None and mode != training.mode:
         raise ValidationError({"venue": "Send the venue when you change the mode."})
-    if venue is not None or "mode" in fields:  # a title-only edit of an old draft stays allowed
+    if (
+        venue is not None or "mode" in fields
+    ):  # a title-only edit of an old draft stays allowed
         current = getattr(training, "venue", None)
         if venue is not None:
             location, address = venue.get("location"), venue["address"]
@@ -508,6 +515,7 @@ def annotate_category_training_count(categories):
         training_count=Coalesce(Subquery(visible, output_field=IntegerField()), 0)
     )
 
+
 def annotate_institute_training_count(trainings):
     """Annotate trainings with `institute_training_count`: the `APPROVED` trainings of the same
     institute. One query, however many rows. The detail view only serves approved institutes, so
@@ -527,6 +535,7 @@ def annotate_institute_training_count(trainings):
         )
     )
 
+
 def annotate_institute_public_counts(institutes):
     """Annotate institutes with `training_count` (their `APPROVED` trainings) and `category_count`
     (the distinct top-level categories those trainings fall in; a sub-category counts as its
@@ -544,8 +553,20 @@ def annotate_institute_public_counts(institutes):
             0,
         )
 
-    top_level = Coalesce("category__parent_id", "category_id", output_field=IntegerField())
+    top_level = Coalesce(
+        "category__parent_id", "category_id", output_field=IntegerField()
+    )
     return institutes.annotate(
         training_count=scalar(Count("pk")),
         category_count=scalar(Count(top_level, distinct=True)),
     )
+
+
+def start_date_range(bucket, today=None):
+    """(first day, last day) a StartBucket covers; the last day is None when it has no end.
+    The windows are rolling and cumulative, counted from today. A training that has already
+    started is in no bucket."""
+    today = today or timezone.localdate()
+    if bucket == StartBucket.LATER:
+        return today + timedelta(days=max(StartBucket.DAYS.values()) + 1), None
+    return today, today + timedelta(days=StartBucket.DAYS[bucket])

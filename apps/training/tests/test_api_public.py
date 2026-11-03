@@ -7,7 +7,12 @@ from rest_framework.test import APITestCase
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import InstituteContact
 from apps.training import services
-from apps.training.constants import TrainingShift, TrainingStatus
+from apps.training.constants import (
+    DurationBucket,
+    StartBucket,
+    TrainingShift,
+    TrainingStatus,
+)
 from apps.training.models import Training, TrainingSession
 from apps.training.tests.helpers import (
     approved_institute,
@@ -84,6 +89,8 @@ class FilterTests(PublicTrainingTestCase):
             ({"sub_category": self.coffee.slug}, ["Physical"]),
             ({"mode": "ONLINE"}, ["Online", "Short"]),
             ({"level": "ADVANCED"}, ["Online"]),
+            ({"level": ["ADVANCED", "BEGINNER"]}, ["Online", "Physical", "Short"]),  # any of them
+            ({"level": "INTERMEDIATE"}, []),
             ({"shifts": MORNING}, ["Online", "Short"]),
             ({"shifts": DAY}, ["Physical"]),
             ({"shifts": EVENING}, ["Online"]),
@@ -96,10 +103,15 @@ class FilterTests(PublicTrainingTestCase):
             ({"fee_max": 5000}, ["Online", "Short"]),
             ({"start_from": str(self.today + timedelta(days=45))}, ["Physical"]),
             ({"start_to": str(self.today + timedelta(days=45))}, ["Online", "Short"]),
-            ({"duration": "short"}, ["Short"]),
-            ({"duration": "mid"}, ["Online"]),
-            ({"duration": "long"}, ["Physical"]),
+            ({"duration": "under-1-month"}, ["Short"]),
+            ({"duration": "1-3-months"}, ["Online"]),
+            ({"duration": "3-months-plus"}, ["Physical"]),
             ({"duration_weeks_min": 8, "duration_weeks_max": 13}, ["Online", "Physical"]),
+            # Online and Short start in 30 days, Physical in 60
+            ({"start": "within-2-weeks"}, []),
+            ({"start": "within-30-days"}, ["Online", "Short"]),
+            ({"start": "within-60-days"}, ["Online", "Physical", "Short"]),
+            ({"start": "later"}, []),
             ({"institute": self.institute.slug}, ["Online", "Physical", "Short"]),
             ({"registration_open": "true"}, ["Online", "Physical"]),
         )
@@ -110,16 +122,111 @@ class FilterTests(PublicTrainingTestCase):
     def test_an_unknown_shift_is_400(self):
         self.assertEqual(self.client.get(URL, {"shifts": "Night"}).status_code, 400)
 
+    def test_an_unknown_level_is_400(self):
+        self.assertEqual(self.client.get(URL, {"level": ["BEGINNER", "EXPERT"]}).status_code, 400)
+
+    def test_an_unknown_bucket_is_400(self):
+        # the old keys and the buckets that were dropped
+        for params in ({"duration": "short"}, {"duration": "6-months-plus"}, {"start": "this-week"}):
+            with self.subTest(params=params):
+                self.assertEqual(self.client.get(URL, params).status_code, 400)
+
     def test_bucket_edges(self):
-        for weeks, bucket in ((3, "short"), (4, "mid"), (12, "mid"), (13, "long")):
+        edges = (
+            (1, "under-1-month"), (3, "under-1-month"),
+            (4, "1-3-months"), (12, "1-3-months"),
+            (13, "3-months-plus"), (52, "3-months-plus"),
+        )
+        for weeks, bucket in edges:
             with self.subTest(weeks=weeks):
                 Training.objects.filter(pk=self.short.pk).update(duration_weeks=weeks)
                 self.assertIn("Short", titles(self.get(duration=bucket)))
+                for other, _ in DurationBucket.CHOICES:  # and in no other bucket
+                    if other != bucket:
+                        self.assertNotIn("Short", titles(self.get(duration=other)))
+
+    def test_start_bucket_edges(self):
+        everything = {bucket for bucket, _ in StartBucket.CHOICES}
+        all_windows = {"within-2-weeks", "within-30-days", "within-60-days"}
+        edges = (  # days from today -> the buckets that include that start date
+            (0, all_windows),
+            (14, all_windows),
+            (15, {"within-30-days", "within-60-days"}),
+            (30, {"within-30-days", "within-60-days"}),
+            (31, {"within-60-days"}),
+            (60, {"within-60-days"}),
+            (61, {"later"}),
+            (400, {"later"}),
+        )
+        for days, included in edges:
+            self.assertLessEqual(included, everything)
+            Training.objects.filter(pk=self.physical.pk).update(
+                start_date=self.today + timedelta(days=days),
+                end_date=self.today + timedelta(days=days + 90),
+            )
+            for bucket in sorted(everything):
+                with self.subTest(days=days, bucket=bucket):
+                    self.assertEqual(
+                        "Physical" in titles(self.get(start=bucket)), bucket in included
+                    )
+
+    def test_a_training_that_has_started_is_in_no_start_bucket(self):
+        Training.objects.filter(pk=self.physical.pk).update(
+            start_date=self.today - timedelta(days=1)
+        )
+        for bucket, _ in StartBucket.CHOICES:
+            with self.subTest(bucket=bucket):
+                self.assertNotIn("Physical", titles(self.get(start=bucket)))
 
     def test_ordering(self):
         self.assertEqual(titles(self.get(ordering="-fee_npr")), ["Physical", "Online", "Short"])
         self.assertEqual(titles(self.get(ordering="start_date"))[-1], "Physical")
         self.assertEqual(titles(self.get()), ["Short", "Physical", "Online"])  # newest first
+
+
+class FilterOptionTests(PublicTrainingTestCase):
+    """`durations/` and `start-dates/` feed the frontend's dropdowns; the values they list are
+    exactly what `?duration=` and `?start=` accept."""
+
+    def test_durations(self):
+        res = self.client.get(f"{URL}durations/")  # anonymous
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res.data,
+            [
+                {"value": "under-1-month", "label": "Under 1 month"},
+                {"value": "1-3-months", "label": "1 to 3 months"},
+                {"value": "3-months-plus", "label": "3 months or more"},
+            ],
+        )
+
+    def test_start_dates(self):
+        res = self.client.get(f"{URL}start-dates/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res.data,
+            [
+                {"value": "within-2-weeks", "label": "Within 2 weeks"},
+                {"value": "within-30-days", "label": "Within 30 days"},
+                {"value": "within-60-days", "label": "Within 60 days"},
+                {"value": "later", "label": "Later"},
+            ],
+        )
+
+    def test_every_option_is_accepted_by_the_list(self):
+        for path, param in (("durations/", "duration"), ("start-dates/", "start")):
+            for option in self.client.get(f"{URL}{path}").data:
+                with self.subTest(param=param, value=option["value"]):
+                    self.get(**{param: option["value"]})
+
+    def test_the_lists_are_not_read_as_a_training_slug(self):
+        training = make_training(self.institute)
+        self.assertEqual(self.client.get(f"{URL}{training.slug}/").status_code, 200)
+
+    def test_the_lists_need_no_database(self):
+        with self.assertNumQueries(0):
+            self.client.get(f"{URL}durations/")
+            self.client.get(f"{URL}start-dates/")
 
 
 class SearchTests(PublicTrainingTestCase):

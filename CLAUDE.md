@@ -147,7 +147,9 @@ apps/
                           the order they were sent in: ordered by pk, no position column);
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
-                          APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
+                          APIs: public `trainings/` (filters, prefix search, ordering; the `duration` and `start` filter
+                          options are served by `trainings/durations/` and `trainings/start-dates/`, built from
+                          `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
                           cover, summary); the admin review API is in `control_panel`
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
