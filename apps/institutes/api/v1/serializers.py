@@ -43,10 +43,18 @@ class InstituteContactSerializer(DynamicFieldsModelSerializer):
 
     class Meta:
         model = InstituteContact
-        fields = ("contact_person", "contact_phone", "contact_email", "telephone_number", "website")
+        fields = (
+            "contact_person",
+            "contact_phone",
+            "contact_email",
+            "telephone_number",
+            "website",
+        )
 
     def to_representation(self, instance):
-        data = super().to_representation(instance)  # the contact has no `website`: null for now
+        data = super().to_representation(
+            instance
+        )  # the contact has no `website`: null for now
         if "website" in data:  # `fields` / `exclude_fields` may have dropped it
             link = next(
                 (
@@ -61,7 +69,6 @@ class InstituteContactSerializer(DynamicFieldsModelSerializer):
 
     def update(self, instance, validated_data):
         return services.update_contact(instance, **validated_data)
-
 
 
 class InstituteCEOSerializer(DynamicFieldsModelSerializer):
@@ -149,7 +156,9 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
         )
         if attrs["contact"].get("website") and sends_website_link:
             raise serializers.ValidationError(
-                {"social_links": "The website is already sent in contact; add it only once."}
+                {
+                    "social_links": "The website is already sent in contact; add it only once."
+                }
             )
         return attrs
 
@@ -177,8 +186,19 @@ class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
 
     class Meta:
         model = Institute
-        fields = ("id", "slug", "name", "type", "logo", "location", "description",
-              "experience", "training_count", "category_count")
+        fields = (
+            "id",
+            "slug",
+            "name",
+            "type",
+            "logo",
+            "cover_img",
+            "location",
+            "description",
+            "experience",
+            "training_count",
+            "category_count",
+        )
 
     def get_location(self, obj):
         # locations are prefetched (active only, with their municipality / district / province)
@@ -195,6 +215,7 @@ class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
 
     def get_experience(self, obj):
         return institute_experience(obj.established_year)
+
 
 class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
     contact = InstituteContactSerializer(read_only=True, allow_null=True)
@@ -214,7 +235,7 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
             "social_links",
             "locations",
             "gallery",
-            "member_since"
+            "member_since",
         )
 
     def get_locations(self, obj):
@@ -263,6 +284,7 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
             "established_year",
             "description",
             "logo",
+            "cover_img",
             "contact",
             "ceo",
             "social_links",
@@ -274,10 +296,24 @@ class InstituteProfileSerializer(DynamicFieldsModelSerializer):
             "pan_vat_number",
             "status",
             "status_reason",
+            "cover_img",
         )
 
     def update(self, instance, validated_data):
         return services.update_profile(instance, **validated_data)  # unchanged
+
+
+class InstituteCoverSerializer(DynamicFieldsModelSerializer):
+    """PUT institute/cover/: the one way to replace the cover image (the model field is
+    `blank=True`, so it must be marked required here or an empty PUT would answer 200)."""
+
+    class Meta:
+        model = Institute
+        fields = ("cover_img",)
+        extra_kwargs = {"cover_img": {"required": True, "allow_null": False}}
+
+    def update(self, instance, validated_data):
+        return services.set_cover_img(instance, validated_data["cover_img"])
 
 
 class InstituteActionRequiredSerializer(serializers.Serializer):
