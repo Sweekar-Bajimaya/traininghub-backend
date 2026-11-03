@@ -1,18 +1,40 @@
 from django.contrib.auth import get_user_model
-from django.db.models import Prefetch
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import (
+    Case,
+    Count,
+    F,
+    Func,
+    IntegerField,
+    OuterRef,
+    Prefetch,
+    Subquery,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
+from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import GenericAPIView, get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
-from apps.control_panel.api.v1.filters import AdminCategoryFilter, AdminTrainingFilter
+from apps.control_panel.api.v1 import selectors
+from apps.control_panel.api.v1.filters import (
+    AWAITING_REVIEW,
+    AdminCategoryFilter,
+    AdminInstituteFilter,
+    AdminTrainingFilter,
+)
 from apps.control_panel.api.v1.serializers import (
     AdminCategorySerializer,
     AdminDocumentSerializer,
+    AdminInstituteListSerializer,
     AdminInstituteSerializer,
     AdminSerializer,
     AdminTrainingListSerializer,
@@ -22,7 +44,7 @@ from apps.control_panel.api.v1.serializers import (
 )
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
-from apps.institutes.constants import MemberRole
+from apps.institutes.constants import InstituteStatus, MemberRole
 from apps.institutes.models import (
     Institute,
     InstituteDocument,
@@ -70,36 +92,134 @@ class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
 
 
 # institutes
-class AdminInstituteViewSet(ReadOnlyViewSet):
-    serializer_class = AdminInstituteSerializer
+def _trainings_count():
+    """All trainings of the institute, any status. A correlated subquery: no join fan-out."""
+    counted = (
+        Training.objects.filter(institute=OuterRef("pk"))
+        .order_by()
+        .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
+    )
+    return Coalesce(Subquery(counted.values("n"), output_field=IntegerField()), 0)
+
+
+def _pending_documents_count():
+    """Documents of the institute waiting for an admin (new, or rejected and uploaded again)."""
+    counted = (
+        InstituteDocument.objects.filter(
+            institute=OuterRef("pk"), status__in=AWAITING_REVIEW
+        )
+        .order_by()
+        .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
+    )
+    return Coalesce(Subquery(counted.values("n"), output_field=IntegerField()), 0)
+
+
+def _owner_prefetch():
+    return Prefetch(
+        "members",
+        queryset=InstituteMember.objects.filter(role=MemberRole.OWNER).select_related(
+            "user"
+        ),
+        to_attr="owner_members",
+    )
+
+
+def _locations_queryset():
+    return InstituteLocation.objects.select_related(
+        "location", "location__district", "location__province"
+    ).order_by("-is_main", "pk")
+
+
+class AdminInstituteViewSet(viewsets.ReadOnlyModelViewSet):
+    """List: ?status=PENDING,INFO_REQUESTED (the Pending tab), ?type=, ?search=, ?ordering=.
+    Tab counts: GET summary/. Review history: GET {slug}/activity/.
+    Default order: waiting for review first, then newest."""
+
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_institutes"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
-    filter_backends = (DjangoFilterBackend, SearchFilter)
-    filterset_fields = ("status", "type")
-    search_fields = ("name",)
-    queryset = (
-        Institute.objects.select_related("contact", "ceo")
-        .prefetch_related(
+    filter_backends = (DjangoFilterBackend, SearchFilter, OrderingFilter)
+    filterset_class = AdminInstituteFilter
+    search_fields = ("name", "registration_number", "pan_vat_number")
+    ordering_fields = ("name", "created_at", "status_rank")
+    ordering = ("status_rank", "-created_at", "-pk")
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return AdminInstituteListSerializer
+        return AdminInstituteSerializer
+
+    def get_queryset(self):
+        queryset = Institute.objects.annotate(
+            # PENDING first, then INFO_REQUESTED, then the rest
+            status_rank=Case(
+                When(status=InstituteStatus.PENDING, then=Value(0)),
+                When(status=InstituteStatus.INFO_REQUESTED, then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        )
+        if self.action == "list":
+            return (
+                queryset.select_related("contact")
+                .prefetch_related(
+                    Prefetch(
+                        "locations", queryset=_locations_queryset().filter(is_active=True)
+                    )
+                )
+                .annotate(
+                    trainings_count=_trainings_count(),
+                    pending_documents_count=_pending_documents_count(),
+                )
+            )
+        return queryset.select_related("contact", "ceo").prefetch_related(
             "documents",
             "social_links",
-            Prefetch(
-                "locations",
-                queryset=InstituteLocation.objects.select_related(
-                    "location", "location__district", "location__province"
-                ).order_by("-is_main", "pk"),
-            ),
-            Prefetch(
-                "members",
-                queryset=InstituteMember.objects.filter(
-                    role=MemberRole.OWNER
-                ).select_related("user"),
-                to_attr="owner_members",
-            ),
+            Prefetch("locations", queryset=_locations_queryset()),
+            _owner_prefetch(),
         )
-        .order_by("-created_at", "-pk")
-    )
+
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Counts for the tabs. `pending` includes the institutes waiting for the owner's reply
+        (INFO_REQUESTED). `by_status` has the raw counts. `documents_to_verify` is the number of
+        approved institutes with an uploaded document still to review."""
+        rows = Institute.objects.order_by().values("status").annotate(n=Count("pk"))
+        by_status = {code: 0 for code, _ in InstituteStatus.CHOICES}
+        by_status.update({row["status"]: row["n"] for row in rows})
+        tabs = {
+            "all": sum(by_status.values()),
+            "pending": by_status[InstituteStatus.PENDING]
+            + by_status[InstituteStatus.INFO_REQUESTED],
+            "approved": by_status[InstituteStatus.APPROVED],
+            "rejected": by_status[InstituteStatus.REJECTED],
+            "suspended": by_status[InstituteStatus.SUSPENDED],
+        }
+        # approved institutes that uploaded a document after approval and wait for a review
+        documents_to_verify = (
+            InstituteDocument.objects.filter(
+                status__in=AWAITING_REVIEW, institute__status=InstituteStatus.APPROVED
+            )
+            .values("institute")
+            .distinct()
+            .count()
+        )
+        return Response(
+            {
+                "tabs": tabs,
+                "by_status": by_status,
+                "documents_to_verify": documents_to_verify,
+            }
+        )
+
+    @action(detail=True, methods=["get"])
+    def activity(self, request, *args, **kwargs):
+        """Registration, training submissions and status changes of the institute, newest first."""
+        institute = get_object_or_404(
+            Institute.objects.only("id", "created_at"), slug=kwargs["slug"]
+        )
+        return Response({"results": selectors.institute_activity(institute)})
 
     def _review(self, request, service, *, with_reason):
         kwargs = {}
@@ -107,7 +227,12 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
             serializer = ReasonSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             kwargs["reason"] = serializer.validated_data["reason"]
-        institute = service(self.get_object(), by=request.user, **kwargs)
+        try:
+            institute = service(self.get_object(), by=request.user, **kwargs)
+        except DjangoValidationError as exc:  # a status rule or approval check -> a 400
+            raise DRFValidationError(
+                exc.message_dict if hasattr(exc, "error_dict") else {"detail": exc.messages}
+            )
         # re-read through the viewset queryset so documents and owner are prefetched
         return Response(
             self.get_serializer(self.get_queryset().get(pk=institute.pk)).data
