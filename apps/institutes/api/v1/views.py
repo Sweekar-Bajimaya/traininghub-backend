@@ -63,6 +63,7 @@ from apps.institutes.permissions import (
     IsInstituteMember,
     IsInstituteOwner,
 )
+from apps.training.services import annotate_institute_public_counts
 from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
@@ -151,7 +152,7 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
             queryset = queryset.select_related("contact", "ceo").prefetch_related(
                 "social_links"
             )
-        return queryset
+        return annotate_institute_public_counts(queryset)
 
 
 # portal (the institute's own staff)

@@ -59,6 +59,7 @@ LOCAL_APPS = [
     "apps.app_key",
     "apps.common",
     "apps.control_panel",
+    "apps.enquiries",
     "apps.institutes",
     "apps.training",
     "apps.users",

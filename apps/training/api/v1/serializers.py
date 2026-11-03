@@ -10,6 +10,7 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.common.utils.helpers import institute_experience
 from apps.common.validators import validate_phone_number
 from apps.institutes.validators import validate_image_file
 from apps.training import services
@@ -105,7 +106,9 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
         venue = getattr(obj, "venue", None)
         if venue is None:
             return None
-        place = venue.location  # empty for an online training: only the address text is left
+        place = (
+            venue.location
+        )  # empty for an online training: only the address text is left
         return {
             "municipality": place.name if place else None,
             "district": place.district.name if place else None,
@@ -125,12 +128,16 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
     modules = serializers.SerializerMethodField()
     outcomes = serializers.SerializerMethodField()
     contact = serializers.SerializerMethodField()
+    target_audience = serializers.ListField(
+        source="detail.target_audience", read_only=True
+    )
 
     class Meta(PublicTrainingListSerializer.Meta):
         fields = PublicTrainingListSerializer.Meta.fields + (
             "overview",
             "eligibility",
             "certification",
+            "target_audience",
             "seats",
             "schedule",
             "modules",
@@ -168,6 +175,12 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
             "email": (own.contact_email if own else "")
             or (institute.contact_email if institute else ""),
         }
+    
+    def get_institute(self, obj):
+            data = super().get_institute(obj)
+            data["experience"] = institute_experience(obj.institute.established_year)
+            data["training_count"] = obj.institute_training_count
+            return data
 
 
 # portal (the institute's own staff)
@@ -237,6 +250,12 @@ class TrainingContentFields(serializers.Serializer):
     contact_email = serializers.EmailField(
         source="contact.contact_email", required=False, allow_blank=True
     )
+    target_audience = serializers.ListField(
+        source="detail.target_audience",
+        child=serializers.CharField(max_length=300),
+        required=False,
+        max_length=10,
+    )
 
 
 class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -283,6 +302,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "eligibility",
             "certification",
             "skills",
+            "target_audience",
             "contact_person",
             "contact_phone",
             "contact_email",

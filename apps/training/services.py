@@ -84,6 +84,16 @@ def refresh_search_vectors(queryset):
         refresh_search_vector(Training(pk=pk))
 
 
+def registration_open_q(today=None):
+    """A training still takes registrations: its deadline has not passed, or it has no deadline
+    and has not started. One definition for the public `registration_open` filter and for
+    enquiries (a plain enquiry is refused once this is false)."""
+    today = today or timezone.localdate()
+    return Q(registration_deadline__gte=today) | Q(
+        registration_deadline__isnull=True, start_date__gte=today
+    )
+
+
 # checks
 def _require_approved_institute(institute):
     if not Institute.objects.filter(
@@ -203,6 +213,9 @@ def _ready_for_submission(training):
         if value in (None, "", []):
             errors[name] = "This is required before submitting."
     venue = getattr(training, "venue", None)
+    detail = getattr(training, "detail", None)
+    if detail is None or not detail.target_audience:
+        errors["target_audience"] = "This is required before submitting."
     if venue is None or not venue.address:
         errors["venue"] = "Add where the training is held."
     elif training.mode == TrainingMode.PHYSICAL:
@@ -461,6 +474,11 @@ def delete_training(training):
         raise ValidationError(
             "Only a draft can be deleted. Cancel the training instead."
         )
+    # a training that was live and went back to a draft may hold enquiries, which the institute keeps
+    if training.enquiries.exists():
+        raise ValidationError(
+            "This training has enquiries, so it cannot be deleted. Cancel it instead."
+        )
     training.delete()
 
 
@@ -470,6 +488,7 @@ def institute_counts(trainings):
         active=Count("pk", filter=Q(status=TrainingStatus.APPROVED)),
         pending_review=Count("pk", filter=Q(status=TrainingStatus.SUBMITTED)),
     )
+
 
 def annotate_category_training_count(categories):
     """Annotate categories with `training_count`: the trainings the public can see (`APPROVED`,
@@ -487,4 +506,46 @@ def annotate_category_training_count(categories):
     )
     return categories.annotate(
         training_count=Coalesce(Subquery(visible, output_field=IntegerField()), 0)
+    )
+
+def annotate_institute_training_count(trainings):
+    """Annotate trainings with `institute_training_count`: the `APPROVED` trainings of the same
+    institute. One query, however many rows. The detail view only serves approved institutes, so
+    this is the public count."""
+    approved = (
+        Training.objects.filter(
+            institute=OuterRef("institute_id"), status=TrainingStatus.APPROVED
+        )
+        .order_by()
+        .values(group=Value(1))
+        .annotate(n=Count("pk"))
+        .values("n")
+    )
+    return trainings.annotate(
+        institute_training_count=Coalesce(
+            Subquery(approved, output_field=IntegerField()), 0
+        )
+    )
+
+def annotate_institute_public_counts(institutes):
+    """Annotate institutes with `training_count` (their `APPROVED` trainings) and `category_count`
+    (the distinct top-level categories those trainings fall in; a sub-category counts as its
+    parent). One query, however many rows. Pass approved institutes only (the public list)."""
+    approved = Training.objects.filter(
+        institute=OuterRef("pk"), status=TrainingStatus.APPROVED
+    ).order_by()
+
+    def scalar(aggregate):
+        return Coalesce(
+            Subquery(
+                approved.values(group=Value(1)).annotate(n=aggregate).values("n"),
+                output_field=IntegerField(),
+            ),
+            0,
+        )
+
+    top_level = Coalesce("category__parent_id", "category_id", output_field=IntegerField())
+    return institutes.annotate(
+        training_count=scalar(Count("pk")),
+        category_count=scalar(Count(top_level, distinct=True)),
     )

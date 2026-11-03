@@ -7,6 +7,7 @@ from apps.common.api.v1.serializers import (
     active_municipalities,
 )
 from apps.common.serializers import DynamicFieldsModelSerializer
+from apps.common.utils.helpers import institute_experience, membership_duration
 from apps.common.validators import validate_pan_vat_number
 from apps.institutes import services
 from apps.institutes.models import (
@@ -170,10 +171,14 @@ class InstituteRegistrationSerializer(DynamicFieldsModelSerializer):
 # public pages
 class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
     location = serializers.SerializerMethodField()
+    experience = serializers.SerializerMethodField()
+    training_count = serializers.IntegerField(read_only=True)  # annotated in the view
+    category_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Institute
-        fields = ("id", "slug", "name", "type", "logo", "location")
+        fields = ("id", "slug", "name", "type", "logo", "location", "description",
+              "experience", "training_count", "category_count")
 
     def get_location(self, obj):
         # locations are prefetched (active only, with their municipality / district / province)
@@ -188,6 +193,8 @@ class PublicInstituteListSerializer(DynamicFieldsModelSerializer):
             "map_url": main.map_url,
         }
 
+    def get_experience(self, obj):
+        return institute_experience(obj.established_year)
 
 class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
     contact = InstituteContactSerializer(read_only=True, allow_null=True)
@@ -196,6 +203,7 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
     locations = serializers.SerializerMethodField()
     gallery = serializers.SerializerMethodField()
+    member_since = serializers.SerializerMethodField()
 
     class Meta(PublicInstituteListSerializer.Meta):
         fields = PublicInstituteListSerializer.Meta.fields + (
@@ -206,6 +214,7 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
             "social_links",
             "locations",
             "gallery",
+            "member_since"
         )
 
     def get_locations(self, obj):
@@ -225,6 +234,9 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
 
     def get_gallery(self, obj):
         return [{"image": i.image.url, "caption": i.caption} for i in obj.gallery.all()]
+
+    def get_member_since(self, obj):
+        return membership_duration(obj.created_at)
 
 
 class InstituteProfileSerializer(DynamicFieldsModelSerializer):
