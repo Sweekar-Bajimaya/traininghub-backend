@@ -1,5 +1,5 @@
 import django_filters
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 
 from apps.common.models.category import Category
 from apps.institutes.constants import DocumentStatus
@@ -8,6 +8,10 @@ from apps.training.models import Training
 
 # documents an admin still has to look at: new uploads, and rejected ones uploaded again
 AWAITING_REVIEW = (DocumentStatus.PENDING, DocumentStatus.RE_UPLOADED)
+
+
+class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
+    """Comma separated values: ?status=PENDING,INFO_REQUESTED"""
 
 
 class AdminCategoryFilter(django_filters.FilterSet):
@@ -19,15 +23,18 @@ class AdminCategoryFilter(django_filters.FilterSet):
 
 
 class AdminTrainingFilter(django_filters.FilterSet):
+    # ?status=SUBMITTED, or several: ?status=SUBMITTED,CHANGES_REQUESTED
+    status = CharInFilter(field_name="status", lookup_expr="in")
     institute = django_filters.CharFilter(field_name="institute__slug")
+    # a main category also matches the trainings filed under its sub-categories
+    category = django_filters.CharFilter(method="filter_category")
 
     class Meta:
         model = Training
-        fields = ("status", "mode", "institute")
+        fields = ("status", "mode", "institute", "category", "is_featured")
 
-
-class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
-    """Comma separated values: ?status=PENDING,INFO_REQUESTED"""
+    def filter_category(self, queryset, name, value):
+        return queryset.filter(Q(category__slug=value) | Q(category__parent__slug=value))
 
 
 class AdminInstituteFilter(django_filters.FilterSet):

@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
-from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
+from apps.common.viewsets import CreateListRetrieveUpdateViewSet
 from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
     AWAITING_REVIEW,
@@ -32,6 +32,7 @@ from apps.control_panel.api.v1.filters import (
     AdminTrainingFilter,
 )
 from apps.control_panel.api.v1.serializers import (
+    AdminCategoryOptionSerializer,
     AdminCategorySerializer,
     AdminDocumentSerializer,
     AdminInstituteListSerializer,
@@ -40,6 +41,7 @@ from apps.control_panel.api.v1.serializers import (
     AdminTrainingListSerializer,
     AdminTrainingSerializer,
     DocumentReviewSerializer,
+    FeatureSerializer,
     ReasonSerializer,
 )
 from apps.institutes import services as institute_services
@@ -53,7 +55,8 @@ from apps.institutes.models import (
 )
 from apps.training import services as training_services
 from apps.training.api.v1.views import with_content
-from apps.training.models import Training
+from apps.training.constants import TrainingStatus
+from apps.training.models import Training, TrainingStatusLog
 from apps.users.constants import Role
 from apps.users.permissions import HasPlatformPermission
 
@@ -89,6 +92,18 @@ class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
     filterset_class = AdminCategoryFilter
     search_fields = ("name",)
     queryset = Category.objects.select_related("parent").order_by("name", "pk")
+
+    def get_serializer_class(self):
+        if self.action == "options_list":
+            return AdminCategoryOptionSerializer
+        return super().get_serializer_class()
+
+    # named options_list: a method called `options` would replace the HTTP OPTIONS handler
+    @action(detail=False, methods=["get"], url_path="options", pagination_class=None)
+    def options_list(self, request):
+        """Every category, hidden ones too, unpaginated, for dropdowns. Same filters as the list."""
+        queryset = self.filter_queryset(self.get_queryset())
+        return Response(self.get_serializer(queryset, many=True).data)
 
 
 # institutes
@@ -296,40 +311,94 @@ class AdminDocumentDownloadView(APIView):
 
 
 # trainings
-class AdminTrainingViewSet(ReadOnlyViewSet):
-    """Review queue: ?status=SUBMITTED."""
+class AdminTrainingViewSet(viewsets.ReadOnlyModelViewSet):
+    """Trainings screen: all tabs. Training Approvals uses the same list with ?status=SUBMITTED,
+    CHANGES_REQUESTED, REJECTED or APPROVED. Tab counts: GET summary/. History: GET {slug}/activity/.
+    Filters: ?status= (comma separated), ?category=<slug>, ?institute=<slug>, ?mode=, ?is_featured=,
+    ?search= (title or institute). Default order: waiting for review first, then newest."""
 
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_trainings"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
-    filter_backends = (DjangoFilterBackend, SearchFilter)
+    filter_backends = (DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
-    queryset = Training.objects.select_related(
-        "institute", "category__parent", "venue__location"
-    ).order_by("-created_at", "-pk")
+    ordering_fields = ("created_at", "title", "status_rank")
+    ordering = ("status_rank", "-created_at", "-pk")
 
     def get_serializer_class(self):
         if self.action == "list":
             return AdminTrainingListSerializer
         if self.action in ("request_changes", "reject"):
             return ReasonSerializer
+        if self.action == "feature":
+            return FeatureSerializer
         return AdminTrainingSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = Training.objects.annotate(
+            # SUBMITTED (waiting for review) first, then the rest
+            status_rank=Case(
+                When(status=TrainingStatus.SUBMITTED, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        ).select_related("institute", "category__parent")
         if self.action == "list":
             return queryset
-        return with_content(queryset)
+        submitted = (
+            TrainingStatusLog.objects.filter(
+                training=OuterRef("pk"), to_status=TrainingStatus.SUBMITTED
+            )
+            .order_by("-created_at")
+            .values("created_at")[:1]
+        )
+        return with_content(
+            queryset.select_related("venue__location").annotate(
+                submitted_at=Subquery(submitted)
+            )
+        )
 
-    def _review(self, request, service, *, with_reason):
-        kwargs = {}
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Counts for the tabs. `all` counts every status, so it can be more than the tabs added up
+        (unpublished and cancelled trainings have no tab of their own). `by_status` has the raw counts."""
+        rows = Training.objects.order_by().values("status").annotate(n=Count("pk"))
+        by_status = {code: 0 for code, _ in TrainingStatus.CHOICES}
+        by_status.update({row["status"]: row["n"] for row in rows})
+        tabs = {
+            "all": sum(by_status.values()),
+            "draft": by_status[TrainingStatus.DRAFT],
+            "pending_review": by_status[TrainingStatus.SUBMITTED],
+            "approved": by_status[TrainingStatus.APPROVED],
+            "changes_requested": by_status[TrainingStatus.CHANGES_REQUESTED],
+            "rejected": by_status[TrainingStatus.REJECTED],
+            "expired": by_status[TrainingStatus.EXPIRED],
+        }
+        featured = Training.objects.filter(is_featured=True).count()
+        return Response({"tabs": tabs, "by_status": by_status, "featured": featured})
+
+    @action(detail=True, methods=["get"])
+    def activity(self, request, *args, **kwargs):
+        """The training's creation and every status change, newest first."""
+        training = get_object_or_404(
+            Training.objects.only("id", "title", "created_at"), slug=kwargs["slug"]
+        )
+        return Response({"results": selectors.training_activity(training)})
+
+    def _review(self, request, service, *, with_reason, **extra):
+        kwargs = dict(extra)
         if with_reason:
             serializer = ReasonSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             kwargs["reason"] = serializer.validated_data["reason"]
-        training = service(self.get_object(), by=request.user, **kwargs)
+        try:
+            training = service(self.get_object(), by=request.user, **kwargs)
+        except DjangoValidationError as exc:  # a status rule or check -> a 400
+            raise DRFValidationError(
+                exc.message_dict if hasattr(exc, "error_dict") else {"detail": exc.messages}
+            )
         return Response(
             AdminTrainingSerializer(
                 self.get_queryset().get(pk=training.pk),
@@ -350,3 +419,15 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
     @action(detail=True, methods=["post"])
     def reject(self, request, *args, **kwargs):
         return self._review(request, training_services.reject, with_reason=True)
+
+    @action(detail=True, methods=["post"])
+    def feature(self, request, *args, **kwargs):
+        """Body {"is_featured": true} features an approved training, false removes it."""
+        serializer = FeatureSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return self._review(
+            request,
+            training_services.set_featured,
+            with_reason=False,
+            featured=serializer.validated_data["is_featured"],
+        )
