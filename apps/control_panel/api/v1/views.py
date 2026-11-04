@@ -23,12 +23,23 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
+<<<<<<< HEAD
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet
 from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
     AWAITING_REVIEW,
     AdminCategoryFilter,
     AdminInstituteFilter,
+=======
+from apps.common.viewsets import (
+    CreateListRetrieveUpdateViewSet,
+    ListViewSet,
+    ReadOnlyViewSet,
+)
+from apps.control_panel.api.v1.filters import (
+    AdminCategoryFilter,
+    AdminEnquiryFilter,
+>>>>>>> c3ea001797f4592d47efc2f3d0eb693d6e66e0f8
     AdminTrainingFilter,
 )
 from apps.control_panel.api.v1.serializers import (
