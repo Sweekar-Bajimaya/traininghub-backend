@@ -29,6 +29,7 @@ from apps.control_panel.api.v1.filters import (
     AWAITING_REVIEW,
     AdminCategoryFilter,
     AdminInstituteFilter,
+)
 from apps.common.viewsets import (
     CreateListRetrieveUpdateViewSet,
     ListViewSet,
@@ -175,7 +176,8 @@ class AdminInstituteViewSet(viewsets.ReadOnlyModelViewSet):
                 queryset.select_related("contact")
                 .prefetch_related(
                     Prefetch(
-                        "locations", queryset=_locations_queryset().filter(is_active=True)
+                        "locations",
+                        queryset=_locations_queryset().filter(is_active=True),
                     )
                 )
                 .annotate(
@@ -241,7 +243,9 @@ class AdminInstituteViewSet(viewsets.ReadOnlyModelViewSet):
             institute = service(self.get_object(), by=request.user, **kwargs)
         except DjangoValidationError as exc:  # a status rule or approval check -> a 400
             raise DRFValidationError(
-                exc.message_dict if hasattr(exc, "error_dict") else {"detail": exc.messages}
+                exc.message_dict
+                if hasattr(exc, "error_dict")
+                else {"detail": exc.messages}
             )
         # re-read through the viewset queryset so documents and owner are prefetched
         return Response(
