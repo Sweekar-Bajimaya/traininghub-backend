@@ -12,6 +12,7 @@ from rest_framework.generics import (
     RetrieveAPIView,
     RetrieveUpdateAPIView,
     RetrieveUpdateDestroyAPIView,
+    UpdateAPIView,
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -36,6 +37,7 @@ from apps.institutes.api.v1.serializers import (
     InstituteActionRequiredSerializer,
     InstituteCEOSerializer,
     InstituteContactSerializer,
+    InstituteCoverSerializer,
     InstituteDocumentSerializer,
     InstituteLocationSerializer,
     InstituteProfileSerializer,
@@ -168,6 +170,17 @@ class InstituteProfileView(RetrieveUpdateAPIView):
         return get_object_or_404(
             self.get_queryset(), pk=self.request.user.membership.institute_id
         )
+
+
+class PortalCoverView(UpdateAPIView):
+    """Upload (or replace) the institute's cover image: PUT multipart `cover_img`."""
+
+    serializer_class = InstituteCoverSerializer
+    permission_classes = [IsInstituteMember]
+    http_method_names = ["put", "head", "options"]
+
+    def get_object(self):
+        return self.request.user.membership.institute
 
 
 class ResubmitView(GenericAPIView):

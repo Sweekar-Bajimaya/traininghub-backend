@@ -177,3 +177,11 @@ def summary(enquiries):
         "unique_phones": counts["unique_phones"],
         "by_status": {status: counts[status] for status in EnquiryStatus.VALUES},
     }
+
+
+def counts(enquiries):
+    """Total and converted, in one query. The admin monitor's header."""
+    return enquiries.aggregate(
+        total=Count("pk"),
+        converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
+    )

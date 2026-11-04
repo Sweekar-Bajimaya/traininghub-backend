@@ -9,6 +9,7 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.enquiries.models import Enquiry
 from apps.institutes.api.v1.serializers import (
     InstituteCEOSerializer,
     InstituteContactSerializer,

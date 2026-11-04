@@ -16,7 +16,7 @@ from apps.training.api.v1.serializers import (
     PublicTrainingDetailSerializer,
     PublicTrainingListSerializer,
 )
-from apps.training.constants import TrainingStatus
+from apps.training.constants import DurationBucket, StartBucket, TrainingStatus
 from apps.training.models import Training
 
 # Child models are ordered in their Meta, so these prefetches come back in display order.
@@ -26,6 +26,10 @@ CHILDREN = ("sessions", "modules", "outcomes")
 def with_content(queryset):
     """Everything the full training serializers read: the detail and contact rows, and the children."""
     return queryset.select_related("detail", "contact").prefetch_related(*CHILDREN)
+
+
+def as_options(choices):
+    return [{"value": value, "label": label} for value, label in choices]
 
 
 # public
@@ -61,6 +65,14 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
                 queryset.select_related("contact").prefetch_related(*CHILDREN)
             )
         return queryset.order_by("-published_at", "-pk")
+
+    @action(detail=False, methods=["get"])
+    def durations(self, request):
+        return Response(as_options(DurationBucket.CHOICES))
+
+    @action(detail=False, methods=["get"], url_path="start-dates")
+    def start_dates(self, request):
+        return Response(as_options(StartBucket.CHOICES))
 
 
 # portal (the institute's own staff)

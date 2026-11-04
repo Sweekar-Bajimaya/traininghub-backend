@@ -590,6 +590,19 @@ class PublicInstituteApiTests(TempMediaMixin, APITestCase):
             },
         )
 
+    def test_the_card_and_the_detail_show_the_cover_image(self):
+        institute = self.approved("Alpha", "alpha@example.com")
+        detail_url = f"{PUBLIC_URL}{institute.slug}/"
+        self.assertIsNone(self.client.get(PUBLIC_URL).data["results"][0]["cover_img"])
+        self.assertIsNone(self.client.get(detail_url).data["cover_img"])
+        Institute.objects.filter(pk=institute.pk).update(
+            cover_img="uploads/institute/cover.png"
+        )
+        card = self.client.get(PUBLIC_URL).data["results"][0]
+        detail = self.client.get(detail_url).data
+        self.assertTrue(card["cover_img"].endswith("uploads/institute/cover.png"))
+        self.assertTrue(detail["cover_img"].endswith("uploads/institute/cover.png"))
+
     def test_the_map_link_is_saved_and_shown(self):
         institute = self.approved("Alpha", "alpha@example.com")
         InstituteLocation.objects.filter(institute=institute).update(

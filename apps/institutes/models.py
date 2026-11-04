@@ -29,6 +29,9 @@ class Institute(BaseModel, SlugModel):
     logo = models.ImageField(
         upload_to=get_upload_path, blank=True, validators=[validate_image_file]
     )
+    cover_img = models.ImageField(
+        upload_to=get_upload_path, blank=True, validators=[validate_image_file]
+    )
     status = models.CharField(
         max_length=20, choices=InstituteStatus.CHOICES, default=InstituteStatus.PENDING
     )
