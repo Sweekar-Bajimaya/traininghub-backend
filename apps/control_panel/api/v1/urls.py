@@ -10,6 +10,7 @@ router.register("users/admins", views.AdminViewSet, basename="admin-user")
 router.register("categories", views.AdminCategoryViewSet, basename="admin-category")
 router.register("institutes", views.AdminInstituteViewSet, basename="admin-institute")
 router.register("trainings", views.AdminTrainingViewSet, basename="admin-training")
+router.register("enquiries", views.AdminEnquiryViewSet, basename="admin-enquiry")
 
 urlpatterns = [
     path(

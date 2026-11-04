@@ -85,3 +85,41 @@ class TrainingShift:
     MORNING, DAY, EVENING = "Morning", "Day", "Evening"
     ORDER = (MORNING, DAY, EVENING)
     CHOICES = ((MORNING, "Morning"), (DAY, "Day"), (EVENING, "Evening"))
+
+
+class DurationBucket:
+    """The public duration filter. `WEEKS` is an inclusive (min, max) on `duration_weeks`;
+    None is open-ended. A month is 4.3 weeks (see DurationUnit), so 1 month = 4 weeks and
+    3 months = 13: "Under 1 month" is 3 weeks or less, "1 to 3 months" runs from 1 month to
+    just under 3, and "3 months or more" starts at exactly 3."""
+
+    UNDER_1_MONTH = "under-1-month"
+    ONE_TO_THREE_MONTHS = "1-3-months"
+    THREE_MONTHS_PLUS = "3-months-plus"
+    CHOICES = (
+        (UNDER_1_MONTH, "Under 1 month"),
+        (ONE_TO_THREE_MONTHS, "1 to 3 months"),
+        (THREE_MONTHS_PLUS, "3 months or more"),
+    )
+    WEEKS = {
+        UNDER_1_MONTH: (None, 3),
+        ONE_TO_THREE_MONTHS: (4, 12),
+        THREE_MONTHS_PLUS: (13, None),
+    }
+
+
+class StartBucket:
+    """The public start-date filter: rolling windows counted from today, each one including the
+    shorter ones ("within 30 days" covers "within 2 weeks"). `DAYS` is the last day of each
+    window; `LATER` starts the day after the longest. The dates are worked out when the filter
+    runs (`services.start_date_range`), so this list never goes stale."""
+
+    WITHIN_2_WEEKS, WITHIN_30_DAYS = "within-2-weeks", "within-30-days"
+    WITHIN_60_DAYS, LATER = "within-60-days", "later"
+    CHOICES = (
+        (WITHIN_2_WEEKS, "Within 2 weeks"),
+        (WITHIN_30_DAYS, "Within 30 days"),
+        (WITHIN_60_DAYS, "Within 60 days"),
+        (LATER, "Later"),
+    )
+    DAYS = {WITHIN_2_WEEKS: 14, WITHIN_30_DAYS: 30, WITHIN_60_DAYS: 60}

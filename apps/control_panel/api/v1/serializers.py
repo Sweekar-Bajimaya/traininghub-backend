@@ -9,6 +9,7 @@ from apps.common.serializers import (
     DynamicFieldsModelSerializer,
     DynamicFieldsSerializer,
 )
+from apps.enquiries.models import Enquiry
 from apps.institutes.api.v1.serializers import (
     InstituteCEOSerializer,
     InstituteContactSerializer,
@@ -404,3 +405,29 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
         elif obj.status == TrainingStatus.APPROVED and institute_approved:
             actions.append("feature")
         return actions
+
+class AdminEnquiryListSerializer(DynamicFieldsModelSerializer):
+    """One row of the admin monitor. Read-only; no phone, email or message."""
+
+    institute_name = serializers.CharField(source="institute.name", read_only=True)
+    training_title = serializers.CharField(source="training.title", read_only=True)
+    category = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Enquiry
+        fields = (
+            "id",
+            "name",
+            "type",
+            "status",
+            "training_title",
+            "institute_name",
+            "category",
+            "created_at",
+        )
+        read_only_fields = fields
+
+    def get_category(self, obj):
+        # Training.category is the leaf: a sub-category has a parent, a top-level one does not
+        category = obj.training.category
+        return (category.parent or category).name

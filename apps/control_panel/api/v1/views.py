@@ -23,11 +23,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
-from apps.common.viewsets import CreateListRetrieveUpdateViewSet
 from apps.control_panel.api.v1 import selectors
+from apps.common.viewsets import (
+    CreateListRetrieveUpdateViewSet,
+    ListViewSet,
+    ReadOnlyViewSet,
+)
 from apps.control_panel.api.v1.filters import (
     AWAITING_REVIEW,
     AdminCategoryFilter,
+    AdminEnquiryFilter,
     AdminInstituteFilter,
     AdminTrainingFilter,
 )
@@ -36,6 +41,7 @@ from apps.control_panel.api.v1.serializers import (
     AdminCategorySerializer,
     AdminDocumentSerializer,
     AdminInstituteListSerializer,
+    AdminEnquiryListSerializer,
     AdminInstituteSerializer,
     AdminSerializer,
     AdminTrainingListSerializer,
@@ -44,6 +50,8 @@ from apps.control_panel.api.v1.serializers import (
     FeatureSerializer,
     ReasonSerializer,
 )
+from apps.enquiries import services as enquiry_services
+from apps.enquiries.models import Enquiry
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
 from apps.institutes.constants import InstituteStatus, MemberRole
@@ -430,4 +438,27 @@ class AdminTrainingViewSet(viewsets.ReadOnlyModelViewSet):
             training_services.set_featured,
             with_reason=False,
             featured=serializer.validated_data["is_featured"],
+        )
+
+# enquiries
+class AdminEnquiryViewSet(ListViewSet):
+    """Monitor: every enquiry of every institute. Read-only; the institutes' own staff
+    change statuses in the portal. ?status= ?type= ?institute=<slug> ?category=<slug>
+    filter, ?search= matches the visitor's name, the training title or the institute."""
+
+    serializer_class = AdminEnquiryListSerializer
+    permission_classes = [HasPlatformPermission]
+    required_permission = "users.manage_enquiries"
+    filter_backends = (DjangoFilterBackend, SearchFilter)
+    filterset_class = AdminEnquiryFilter
+    search_fields = ("name", "training__title", "institute__name")
+    queryset = Enquiry.objects.select_related(
+        "institute", "training__category__parent"
+    ).order_by("-created_at", "-pk")
+
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """{"total", "converted"} of whatever the filters select."""
+        return Response(
+            enquiry_services.counts(self.filter_queryset(self.get_queryset()))
         )

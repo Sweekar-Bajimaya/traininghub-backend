@@ -5,15 +5,25 @@ from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F, Q
 
 from apps.training import services
-from apps.training.constants import SEARCH_CONFIG, TrainingShift
+from apps.training.constants import (
+    SEARCH_CONFIG,
+    DurationBucket,
+    StartBucket,
+    TrainingLevel,
+    TrainingShift,
+)
 from apps.training.models import Training
 
+
 # the hub's own buckets: under 1 month, 1 to 3 months, 3 months or more
-DURATION_BUCKETS = {
-    "short": Q(duration_weeks__lt=4),
-    "mid": Q(duration_weeks__gte=4, duration_weeks__lt=13),
-    "long": Q(duration_weeks__gte=13),
-}
+def duration_q(bucket):
+    low, high = DurationBucket.WEEKS[bucket]
+    query = Q()
+    if low is not None:
+        query &= Q(duration_weeks__gte=low)
+    if high is not None:
+        query &= Q(duration_weeks__lte=high)
+    return query
 
 
 def prefix_query(text):
@@ -36,7 +46,7 @@ class TrainingFilter(django_filters.FilterSet):
     start_from = django_filters.DateFilter(field_name="start_date", lookup_expr="gte")
     start_to = django_filters.DateFilter(field_name="start_date", lookup_expr="lte")
     duration = django_filters.ChoiceFilter(
-        choices=[(key, key) for key in DURATION_BUCKETS], method="filter_duration"
+        choices=DurationBucket.CHOICES, method="filter_duration"
     )
     duration_weeks_min = django_filters.NumberFilter(
         field_name="duration_weeks", lookup_expr="gte"
@@ -44,22 +54,36 @@ class TrainingFilter(django_filters.FilterSet):
     duration_weeks_max = django_filters.NumberFilter(
         field_name="duration_weeks", lookup_expr="lte"
     )
+    start = django_filters.ChoiceFilter(
+        choices=StartBucket.CHOICES, method="filter_start"
+    )
     institute = django_filters.CharFilter(field_name="institute__slug")
     registration_open = django_filters.BooleanFilter(method="filter_registration_open")
     search = django_filters.CharFilter(method="filter_search")
     shifts = django_filters.MultipleChoiceFilter(
         choices=TrainingShift.CHOICES, method="filter_shift"
     )
+    level = django_filters.MultipleChoiceFilter(
+        choices=TrainingLevel.CHOICES,
+        distinct=False,  # any of the given levels; no duplicate rows to remove
+    )
 
     class Meta:
         model = Training
-        fields = ("mode", "level")
+        fields = ("mode",)
 
     def filter_category(self, queryset, name, value):
-        return queryset.filter(Q(category__slug=value) | Q(category__parent__slug=value))
+        return queryset.filter(
+            Q(category__slug=value) | Q(category__parent__slug=value)
+        )
 
     def filter_duration(self, queryset, name, value):
-        return queryset.filter(DURATION_BUCKETS[value])
+        return queryset.filter(duration_q(value))
+
+    def filter_start(self, queryset, name, value):
+        first, last = services.start_date_range(value)
+        queryset = queryset.filter(start_date__gte=first)
+        return queryset.filter(start_date__lte=last) if last else queryset
 
     def filter_registration_open(self, queryset, name, value):
         """The deadline has not passed, or there is none and the training has not started."""

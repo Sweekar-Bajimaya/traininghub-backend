@@ -52,7 +52,8 @@ or an open question gets answered. Rules:
   guarded by `seats`. `type` is `ENQUIRY` or `INTEREST`: an interest is always accepted for a published training, a plain
   enquiry is refused when registration has closed (`training.services.registration_open_q`) or the seats are full. One
   open enquiry per phone number and training; 3 a day per phone number. Notes are internal. No preferred-location field,
-  no email alert for a new enquiry (decided 2026-10-10).
+  no email alert for a new enquiry (decided 2026-10-10). Admins only read: `admin/enquiries/` (`users.manage_enquiries`)
+  lists every institute's enquiries and counts them; only the institute's own staff change a status or add a note.
 - Learner **Applications** (approve/reject/capacity) are phase 2 - keep the schema open to them.
 - Providers are verified **Institutes** only; an Institute has several staff users (owner + staff; the owner
   can invite more) and **several locations** (its offices; a training's venue is separate, see below).
@@ -95,12 +96,13 @@ or an open question gets answered. Rules:
   between). Codes are six digits, valid 5 minutes, one per address per minute, 5 wrong guesses lock a code (limits in
   `apps/users/constants.py`).
 - Institute profile: the institute's own columns (name, type, registration number, PAN/VAT number, established year,
-  description, logo) are edited with `PATCH institute/profile/` (the registration and PAN/VAT numbers are shown there but
-  read-only); the required contact person (with an optional telephone number and website), the optional CEO and the social
+  description, logo, cover image) are edited with `PATCH institute/profile/` (the registration and PAN/VAT numbers are shown there but
+  read-only); the cover image also has its own `PUT institute/cover-image/` (multipart `cover_img`, owner or staff,
+  `services.set_cover_img` deletes the replaced file after commit; the profile `PATCH` does not); the required contact person (with an optional telephone number and website), the optional CEO and the social
   links (one per platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
   `institute/social-links/`. The contact's `website` has no column: it is the `website` social link, written through
   `services.update_contact` / `register` (`InstituteContactSerializer.to_representation` only reads it). The public detail shows them, the
-  locations and the gallery, never the owner's login.
+  locations and the gallery, never the owner's login; the public card and detail carry the `logo` and the `cover_img`.
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
   on client IP.
@@ -145,27 +147,30 @@ apps/
                           the order they were sent in: ordered by pk, no position column);
                           `services.py` (create / edit with the review rule, workflow, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
-                          APIs: public `trainings/` (filters, prefix search, ordering), portal `institute/trainings/`
+                          APIs: public `trainings/` (filters, prefix search, ordering; the `duration` and `start` filter
+                          options are served by `trainings/durations/` and `trainings/start-dates/`, built from
+                          `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
                           cover, summary); the admin review API is in `control_panel`
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
-                          (register, `register/send-otp/`, `register/verify-otp/`, profile, contact, ceo,
+                          (register, `register/send-otp/`, `register/verify-otp/`, profile, cover-image, contact, ceo,
                           social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
                           `control_panel`
   enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
                           `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
                           and training; `change_status`: free moves, the seat guard; notes, `summary`),
                           `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST only) and portal
-                          `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`, `summary/`). The admin monitor
-                          is not built
+                          `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`, `summary/`). The admin monitor is
+                          in `control_panel`; `services.counts` (total and converted) feeds its `summary/`
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
                           `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they
                           grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),
                           `categories/` (`users.manage_categories`, no DELETE), `institutes/` (review actions, document
                           review and download; `users.manage_institutes`), `trainings/` (approve, request-changes,
-                          reject; `users.manage_trainings`); `GET admin/` lists the four. It only calls the services
+                          reject; `users.manage_trainings`), `enquiries/` (list and `summary/` only, read-only; `users.manage_enquiries`);
+                          `GET admin/` lists the five. It only calls the services
                           of the other apps, which keep the rules. `users/{id}/status/` (suspend) is still in `users`.
                           Nothing imports `control_panel` except `apps/api/v1/urls.py`; new admin endpoints go here,
                           not in the resource's own app
@@ -201,7 +206,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 | query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
 | refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |
