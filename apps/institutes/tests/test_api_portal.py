@@ -210,6 +210,72 @@ class ProfileTests(PortalTestCase):
         self.assertEqual(self.as_(self.owner).put(BASE + "profile/", {}).status_code, 405)
 
 
+class CoverTests(PortalTestCase):
+    """`PUT institute/cover-image/`: upload or replace the cover image."""
+
+    URL = BASE + "cover-image/"
+
+    def put(self, user, file):
+        return self.as_(user).put(self.URL, {"cover_img": file}, format="multipart")
+
+    def test_owner_and_staff_can_upload(self):
+        for user in (self.owner, self.staff):
+            with self.subTest(user=user.email):
+                res = self.put(user, png())
+                self.assertEqual(res.status_code, 200, res.data)
+                self.assertTrue(res.data["cover_img"])
+        self.institute.refresh_from_db()
+        self.assertTrue(self.institute.cover_img)
+
+    def test_the_profile_shows_the_cover(self):
+        self.assertIsNone(self.as_(self.owner).get(BASE + "profile/").data["cover_img"])
+        self.put(self.owner, png())
+        self.assertTrue(self.as_(self.owner).get(BASE + "profile/").data["cover_img"])
+
+    def test_a_new_upload_replaces_the_old_file(self):
+        self.put(self.owner, png("one.png"))
+        self.institute.refresh_from_db()
+        old = self.institute.cover_img
+        old_name, storage = old.name, old.storage
+        with self.captureOnCommitCallbacks(execute=True):
+            self.put(self.owner, png("two.png"))
+        self.institute.refresh_from_db()
+        self.assertNotEqual(self.institute.cover_img.name, old_name)
+        self.assertFalse(storage.exists(old_name))
+        self.assertTrue(storage.exists(self.institute.cover_img.name))
+
+    def test_a_missing_file_is_refused(self):
+        res = self.as_(self.owner).put(self.URL, {}, format="multipart")
+        self.assertEqual(res.status_code, 400)
+
+    def test_a_bad_extension_is_refused(self):
+        bad = SimpleUploadedFile("cover.exe", b"MZ", content_type="application/octet-stream")
+        self.assertEqual(self.put(self.owner, bad).status_code, 400)
+        self.institute.refresh_from_db()
+        self.assertFalse(self.institute.cover_img)
+
+    def test_a_file_over_the_size_limit_is_refused(self):
+        with override_settings(INSTITUTE_UPLOAD_MAX_BYTES=10):
+            self.assertEqual(self.put(self.owner, png()).status_code, 400)
+
+    def test_another_institute_is_untouched(self):
+        self.put(self.owner, png())
+        self.other.refresh_from_db()
+        self.assertFalse(self.other.cover_img)
+
+    def test_anonymous_and_non_members_are_refused(self):
+        admin = User.objects.create_user("admin@example.com", PASSWORD, role=Role.ADMIN)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.put(self.URL, {"cover_img": png()}, format="multipart").status_code, 401)
+        self.assertEqual(self.put(admin, png()).status_code, 403)
+
+    def test_only_put_is_allowed(self):
+        client = self.as_(self.owner)
+        for method in (client.get, client.post, client.patch, client.delete):
+            with self.subTest(method=method.__name__):
+                self.assertEqual(method(self.URL).status_code, 405)
+
+
 class ActionRequiredTests(PortalTestCase):
     """`institute/action-required/`: one boolean per profile section, true = filled in."""
 

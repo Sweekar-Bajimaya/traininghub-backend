@@ -1,4 +1,4 @@
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 from io import StringIO
 from itertools import product
@@ -7,7 +7,7 @@ from unittest import mock
 from django.contrib.postgres.search import SearchQuery
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.common import services as common_services
@@ -15,7 +15,13 @@ from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.training import services, tasks
 from apps.training.api.v1.filters import prefix_query
-from apps.training.constants import SEARCH_CONFIG, TrainingShift, TrainingStatus
+from apps.training.constants import (
+    SEARCH_CONFIG,
+    DurationBucket,
+    StartBucket,
+    TrainingShift,
+    TrainingStatus,
+)
 from apps.training.models import Training
 from apps.training.tests.helpers import (
     approved_institute,
@@ -373,6 +379,51 @@ class ExpiryTests(TrainingTestCase):
         out = StringIO()
         call_command("expire_trainings", stdout=out)
         self.assertIn("Expired 0 training(s)", out.getvalue())
+
+
+class DurationBucketTests(SimpleTestCase):
+    def test_every_week_is_in_exactly_one_bucket(self):
+        """No gap (a training no option can reach) and no overlap."""
+        self.assertEqual(
+            sorted(key for key, _ in DurationBucket.CHOICES), sorted(DurationBucket.WEEKS)
+        )
+        for weeks in range(1, 300):  # `duration_weeks` is at least 1
+            hits = [
+                key
+                for key, (low, high) in DurationBucket.WEEKS.items()
+                if (low is None or weeks >= low) and (high is None or weeks <= high)
+            ]
+            self.assertEqual(len(hits), 1, f"{weeks} weeks is in {hits}")
+
+
+class StartDateRangeTests(SimpleTestCase):
+    def test_every_window_has_its_length(self):
+        windows = {key for key, _ in StartBucket.CHOICES} - {StartBucket.LATER}
+        self.assertEqual(windows, set(StartBucket.DAYS))
+
+    def test_windows_are_rolling_and_cumulative(self):
+        today = date(2026, 11, 3)
+        self.assertEqual(
+            services.start_date_range("within-2-weeks", today), (today, date(2026, 11, 17))
+        )
+        self.assertEqual(
+            services.start_date_range("within-30-days", today), (today, date(2026, 12, 3))
+        )
+        self.assertEqual(
+            services.start_date_range("within-60-days", today), (today, date(2027, 1, 2))
+        )
+        self.assertEqual(services.start_date_range("later", today), (date(2027, 1, 3), None))
+
+    def test_later_starts_the_day_after_the_longest_window(self):
+        today = date(2026, 11, 3)
+        _, longest_end = services.start_date_range("within-60-days", today)
+        later_start, later_end = services.start_date_range("later", today)
+        self.assertEqual(later_start, longest_end + timedelta(days=1))
+        self.assertIsNone(later_end)
+
+    def test_today_defaults_to_the_local_date(self):
+        first, _ = services.start_date_range("within-2-weeks")
+        self.assertEqual(first, timezone.localdate())
 
 
 class SearchVectorTests(TrainingTestCase):

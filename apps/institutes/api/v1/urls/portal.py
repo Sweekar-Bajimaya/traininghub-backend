@@ -37,6 +37,7 @@ urlpatterns = [
         name="invitation-accept",
     ),
     path("profile/", views.InstituteProfileView.as_view(), name="profile"),
+    path("cover-image/", views.PortalCoverView.as_view(), name="cover"),
     path(
         "action-required/",
         views.InstituteActionRequiredView.as_view(),

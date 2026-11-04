@@ -135,6 +135,18 @@ def update_profile(institute, **fields):
     return institute
 
 
+@transaction.atomic
+def set_cover_img(institute, image):
+    """Replace the institute's cover image. The old file is deleted once the change is committed."""
+    institute = Institute.objects.select_for_update().get(pk=institute.pk)
+    old_name, storage = institute.cover_img.name, institute.cover_img.storage
+    institute.cover_img = image
+    institute.save(update_fields=["cover_img", "modified_at"])
+    if old_name:
+        transaction.on_commit(lambda: storage.delete(old_name))
+    return institute
+
+
 # registration and locations
 def register(
     *, institute_data, owner, contact, otp, locations=(), ceo=None, social_links=()
