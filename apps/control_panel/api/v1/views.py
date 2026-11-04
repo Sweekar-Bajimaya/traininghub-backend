@@ -23,34 +23,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
-<<<<<<< HEAD
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet
 from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
     AWAITING_REVIEW,
     AdminCategoryFilter,
     AdminInstituteFilter,
-=======
-from apps.common.viewsets import (
-    CreateListRetrieveUpdateViewSet,
-    ListViewSet,
-    ReadOnlyViewSet,
-)
-from apps.control_panel.api.v1.filters import (
-    AdminCategoryFilter,
-    AdminEnquiryFilter,
->>>>>>> c3ea001797f4592d47efc2f3d0eb693d6e66e0f8
     AdminTrainingFilter,
 )
 from apps.control_panel.api.v1.serializers import (
     AdminCategoryOptionSerializer,
     AdminCategorySerializer,
     AdminDocumentSerializer,
-<<<<<<< HEAD
     AdminInstituteListSerializer,
-=======
-    AdminEnquiryListSerializer,
->>>>>>> c3ea001797f4592d47efc2f3d0eb693d6e66e0f8
     AdminInstituteSerializer,
     AdminSerializer,
     AdminTrainingListSerializer,
@@ -437,7 +422,6 @@ class AdminTrainingViewSet(viewsets.ReadOnlyModelViewSet):
     def reject(self, request, *args, **kwargs):
         return self._review(request, training_services.reject, with_reason=True)
 
-<<<<<<< HEAD
     @action(detail=True, methods=["post"])
     def feature(self, request, *args, **kwargs):
         """Body {"is_featured": true} features an approved training, false removes it."""
@@ -448,7 +432,6 @@ class AdminTrainingViewSet(viewsets.ReadOnlyModelViewSet):
             training_services.set_featured,
             with_reason=False,
             featured=serializer.validated_data["is_featured"],
-=======
 
 # enquiries
 class AdminEnquiryViewSet(ListViewSet):
@@ -471,5 +454,4 @@ class AdminEnquiryViewSet(ListViewSet):
         """{"total", "converted"} of whatever the filters select."""
         return Response(
             enquiry_services.counts(self.filter_queryset(self.get_queryset()))
->>>>>>> c3ea001797f4592d47efc2f3d0eb693d6e66e0f8
         )
