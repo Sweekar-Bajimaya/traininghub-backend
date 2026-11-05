@@ -30,6 +30,7 @@ from apps.control_panel.api.v1.filters import (
     AdminCategoryFilter,
     AdminInstituteFilter,
 )
+from apps.control_panel.api.v1.serializers import AdminInstituteListSerializer
 from apps.common.viewsets import (
     CreateListRetrieveUpdateViewSet,
     ListViewSet,
