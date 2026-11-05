@@ -310,6 +310,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "status",
             "review_feedback",
             "published_at",
+            "is_featured",
             "sessions",
             "modules",
             "outcomes",
