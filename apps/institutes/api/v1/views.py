@@ -29,6 +29,8 @@ from apps.common.viewsets import (
     ListViewSet,
     ReadOnlyViewSet,
 )
+from apps.enquiries import services as enquiry_services
+from apps.enquiries.models import Enquiry
 from apps.institutes import services
 from apps.institutes.api.v1.serializers import (
     AcceptInvitationSerializer,
@@ -43,6 +45,7 @@ from apps.institutes.api.v1.serializers import (
     InstituteProfileSerializer,
     InstituteRegistrationSerializer,
     InstituteSocialLinkSerializer,
+    InstituteSummarySerializer,
     InvitationSerializer,
     PublicInstituteDetailSerializer,
     PublicInstituteListSerializer,
@@ -65,6 +68,8 @@ from apps.institutes.permissions import (
     IsInstituteMember,
     IsInstituteOwner,
 )
+from apps.training import services as training_services
+from apps.training.models import Training
 from apps.training.services import annotate_institute_public_counts
 from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
@@ -320,3 +325,22 @@ class InstituteActionRequiredView(RetrieveAPIView):
         return get_object_or_404(
             self.get_queryset(), pk=self.request.user.membership.institute_id
         )
+
+
+class InstituteSummaryView(RetrieveAPIView):
+    """Counts for the caller's own institute: trainings and enquiries in one call (one aggregate
+    query each). Feeds the dashboard cards and the sidebar badge."""
+
+    serializer_class = InstituteSummarySerializer
+    permission_classes = [IsInstituteMember]
+
+    def get_object(self):
+        institute_id = self.request.user.membership.institute_id
+        return {
+            "trainings": training_services.institute_counts(
+                Training.objects.filter(institute_id=institute_id)
+            ),
+            "enquiries": enquiry_services.summary(
+                Enquiry.objects.filter(institute_id=institute_id)
+            ),
+        }
