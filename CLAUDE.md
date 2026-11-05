@@ -151,18 +151,21 @@ apps/
                           options are served by `trainings/durations/` and `trainings/start-dates/`, built from
                           `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
-                          cover, summary); the admin review API is in `control_panel`
+                          cover); the admin review API is in `control_panel`. `services.institute_counts` feeds the
+                          portal's `institute/summary/` (served by `institutes`)
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
                           (register, `register/send-otp/`, `register/verify-otp/`, profile, cover-image, contact, ceo,
-                          social-links, locations, documents, gallery, staff, invitations, resubmit); the admin review API is in
-                          `control_panel`
+                          social-links, locations, documents, gallery, staff, invitations, resubmit, action-required,
+                          `summary/`: the counts of the institute's trainings and enquiries, one nested answer, from the
+                          `training` and `enquiries` services); the admin review API is in `control_panel`
   enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
                           `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
                           and training; `change_status`: free moves, the seat guard; notes, `summary`),
                           `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST only) and portal
-                          `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`, `summary/`). The admin monitor is
+                          `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`). `services.summary` feeds the
+                          portal's `institute/summary/` (served by `institutes`). The admin monitor is
                           in `control_panel`; `services.counts` (total and converted) feeds its `summary/`
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
                           `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they

@@ -53,7 +53,6 @@ class AccessTests(PortalTestCase):
         admin = make_admin("admin@example.com", permissions=("manage_enquiries",))
         endpoints = (
             ("get", PORTAL),
-            ("get", f"{PORTAL}summary/"),
             ("get", self.url(mine)),
             ("patch", self.url(mine)),
             ("get", self.url(mine, "notes/")),
@@ -345,42 +344,3 @@ class NoteTests(PortalTestCase):
         for n in range(8):
             EnquiryNote.objects.create(enquiry=enquiry, author=self.owner, text=f"note {n}")
         self.assertEqual(count_queries(lambda: self.client.get(self.url(enquiry, "notes/"))), few)
-
-
-class SummaryTests(PortalTestCase):
-    SUMMARY = f"{PORTAL}summary/"
-
-    def test_counts_for_the_tabs_the_badge_and_the_cards(self):
-        make_enquiry(self.training, phone="9841111111")
-        make_enquiry(self.training, phone="9841111111", status=S.CLOSED)  # the same person again
-        make_enquiry(self.training, status=S.CONVERTED)
-        make_enquiry(self.other_training)  # another institute's do not count
-        res = self.client.get(self.SUMMARY)
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(set(res.data), {"total", "new", "unique_phones", "by_status"})
-        self.assertEqual((res.data["total"], res.data["new"], res.data["unique_phones"]), (3, 1, 2))
-        self.assertEqual(list(res.data["by_status"]), list(S.VALUES))
-        self.assertEqual(res.data["by_status"][S.CLOSED], 1)
-        self.assertEqual(res.data["by_status"][S.CONTACTED], 0)
-
-    def test_the_search_and_training_filters_apply(self):
-        other = make_training(self.institute, title="Second course")
-        make_enquiry(self.training, name="Ram Sharma")
-        make_enquiry(self.training, name="Sita Thapa", status=S.CONTACTED)
-        make_enquiry(other, name="Ram Karki")
-        by_training = self.client.get(self.SUMMARY, {"training": self.training.pk}).data
-        self.assertEqual((by_training["total"], by_training["by_status"][S.CONTACTED]), (2, 1))
-        by_search = self.client.get(self.SUMMARY, {"q": "ram"}).data
-        self.assertEqual((by_search["total"], by_search["by_status"][S.CONTACTED]), (2, 0))
-
-    def test_no_enquiries_is_all_zeros(self):
-        res = self.client.get(self.SUMMARY)
-        self.assertEqual((res.data["total"], res.data["new"], res.data["unique_phones"]), (0, 0, 0))
-        self.assertEqual(set(res.data["by_status"].values()), {0})
-
-    def test_the_query_count_does_not_grow_with_the_enquiries(self):
-        make_enquiry(self.training)
-        few = count_queries(lambda: self.client.get(self.SUMMARY))
-        for _ in range(10):
-            make_enquiry(self.training)
-        self.assertEqual(count_queries(lambda: self.client.get(self.SUMMARY)), few)
