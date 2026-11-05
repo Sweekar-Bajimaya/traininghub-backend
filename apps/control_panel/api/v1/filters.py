@@ -1,3 +1,4 @@
+from django_filters import BaseInFilter
 import django_filters
 from django.db.models import Exists, OuterRef, Q
 
@@ -29,12 +30,8 @@ class AdminTrainingFilter(django_filters.FilterSet):
         fields = ("status", "mode", "institute")
 
 
-class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
-    """Comma separated values: ?status=PENDING,INFO_REQUESTED"""
-
-
 class AdminInstituteFilter(django_filters.FilterSet):
-    status = CharInFilter(field_name="status", lookup_expr="in")
+    status = BaseInFilter(field_name="status", lookup_expr="in")
     # ?has_pending_documents=true -> institutes with a document waiting for review (new or re-uploaded)
     has_pending_documents = django_filters.BooleanFilter(
         method="filter_has_pending_documents"
