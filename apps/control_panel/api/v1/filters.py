@@ -3,7 +3,7 @@ import django_filters
 from django.db.models import Exists, OuterRef, Q
 
 from apps.common.models.category import Category
-from apps.institutes.constants import AWAITING_REVIEW, InstituteStatus
+from apps.institutes.constants import DocumentStatus, InstituteStatus
 from apps.institutes.models import Institute, InstituteDocument
 
 from apps.enquiries.models import Enquiry
@@ -48,7 +48,7 @@ class AdminInstituteFilter(django_filters.FilterSet):
     def filter_has_pending_documents(self, queryset, name, value):
         pending = Exists(
             InstituteDocument.objects.filter(
-                institute=OuterRef("pk"), status__in=AWAITING_REVIEW
+                institute=OuterRef("pk"), status__in=DocumentStatus.AWAITING_REVIEW
             )
         )
         return queryset.filter(pending) if value else queryset.exclude(pending)

@@ -51,14 +51,13 @@ class MemberRole:
 class DocumentStatus:
     PENDING, VERIFIED, REJECTED = "PENDING", "VERIFIED", "REJECTED"
     RE_UPLOADED = "RE_UPLOADED"  # a rejected document the institute has uploaded again
+    AWAITING_REVIEW = (PENDING, RE_UPLOADED)    # documents an admin still has to look at: new uploads, and rejected ones uploaded again
     CHOICES = (
         (PENDING, "Pending"),
         (VERIFIED, "Verified"),
         (REJECTED, "Rejected"),
         (RE_UPLOADED, "Re-uploaded"),
     )
-
-AWAITING_REVIEW = "AWAITING_REVIEW"
 
 
 class InvitationStatus:

@@ -25,7 +25,6 @@ from apps.common.models.category import Category
 from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
 from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
-    AWAITING_REVIEW,
     AdminCategoryFilter,
     AdminInstituteFilter,
     AdminEnquiryFilter,
@@ -50,7 +49,7 @@ from apps.enquiries import services as enquiry_services
 from apps.enquiries.models import Enquiry
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
-from apps.institutes.constants import InstituteStatus, MemberRole
+from apps.institutes.constants import InstituteStatus, DocumentStatus, MemberRole
 from apps.institutes.models import (
     Institute,
     InstituteDocument,
@@ -112,7 +111,7 @@ def _pending_documents_count():
     """Documents of the institute waiting for an admin (new, or rejected and uploaded again)."""
     counted = (
         InstituteDocument.objects.filter(
-            institute=OuterRef("pk"), status__in=AWAITING_REVIEW
+            institute=OuterRef("pk"), status__in=DocumentStatus.AWAITING_REVIEW
         )
         .order_by()
         .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
@@ -206,7 +205,7 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
         # approved institutes that uploaded a document after approval and wait for a review
         documents_to_verify = (
             InstituteDocument.objects.filter(
-                status__in=AWAITING_REVIEW, institute__status=InstituteStatus.APPROVED
+                status__in=DocumentStatus.AWAITING_REVIEW, institute__status=InstituteStatus.APPROVED
             )
             .values("institute")
             .distinct()
