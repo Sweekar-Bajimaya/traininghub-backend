@@ -45,7 +45,7 @@ def _transition(institute, to, *, reason="", check=None, by=None, only_from=None
     """Move an institute to a new status and log it. Caller must be inside transaction.atomic()."""
     institute = Institute.objects.select_for_update().get(pk=institute.pk)
     previous = institute.status
-    if to not in InstituteStatus.TRANSITIONS[previous]:
+    if to not in InstituteStatus.TRANSITIONS[previous]: or (only_from is not None and previous not in only_from):
         raise ValidationError(f"Cannot move from {previous} to {to}.")
     if to in InstituteStatus.REASON_REQUIRED and not reason.strip():
         raise ValidationError({"reason": "A reason is required."})
