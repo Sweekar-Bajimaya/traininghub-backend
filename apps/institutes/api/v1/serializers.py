@@ -440,3 +440,23 @@ class AcceptInvitationSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return {"email": instance.email}
+
+
+class TrainingCountsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    active = serializers.IntegerField()
+    pending_review = serializers.IntegerField()
+
+
+class EnquiryCountsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    new = serializers.IntegerField()
+    unique_phones = serializers.IntegerField()
+    by_status = serializers.DictField(child=serializers.IntegerField())
+
+
+class InstituteSummarySerializer(serializers.Serializer):
+    """The portal dashboard's counts for the caller's own institute."""
+
+    trainings = TrainingCountsSerializer()
+    enquiries = EnquiryCountsSerializer()

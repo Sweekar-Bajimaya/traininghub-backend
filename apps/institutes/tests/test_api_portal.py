@@ -13,6 +13,8 @@ from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.enquiries.constants import EnquiryStatus
+from apps.enquiries.tests.helpers import make_enquiry, make_training
 from apps.institutes import services
 from apps.institutes.api.v1.serializers import InstituteContactSerializer
 from apps.institutes.constants import InstituteStatus, InvitationStatus, MemberRole
@@ -40,6 +42,7 @@ from apps.institutes.tests.helpers import (
     reset_otps,
     reset_throttles,
 )
+from apps.training.constants import TrainingStatus
 from apps.users import services as user_services
 from apps.users.constants import Role
 
@@ -74,6 +77,7 @@ class PermissionMatrixTests(PortalTestCase):
     MEMBER_ENDPOINTS = (
         "profile/",
         "action-required/",
+        "summary/",
         "locations/",
         "documents/",
         "gallery/",
@@ -432,6 +436,79 @@ class ActionRequiredTests(PortalTestCase):
                 self.assertEqual(len(sql), 2, sql)  # the membership lookup + this one
                 self.assertEqual(len(institute_queries), 1)
                 self.assertEqual(institute_queries[0].count("EXISTS"), 4)
+
+
+class SummaryTests(PortalTestCase):
+    """`institute/summary/`: the trainings' and the enquiries' counts of the caller's institute."""
+
+    URL = BASE + "summary/"
+
+    def test_counts_trainings_and_enquiries_of_this_institute_only(self):
+        trainings = [
+            make_training(self.institute, status=status)
+            for status in (
+                TrainingStatus.DRAFT,
+                TrainingStatus.SUBMITTED,
+                TrainingStatus.APPROVED,
+                TrainingStatus.APPROVED,
+                TrainingStatus.CANCELLED,
+            )
+        ]
+        make_enquiry(trainings[2], phone="9841111111")
+        make_enquiry(trainings[2], phone="9841111111", status=EnquiryStatus.CLOSED)  # the same person again
+        make_enquiry(trainings[3], status=EnquiryStatus.CONVERTED)
+        other_training = make_training(self.other, status=TrainingStatus.APPROVED)
+        make_enquiry(other_training)  # another institute's rows do not count
+
+        res = self.as_(self.owner).get(self.URL)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(set(res.data), {"trainings", "enquiries"})
+        self.assertEqual(
+            res.data["trainings"], {"total": 5, "active": 2, "pending_review": 1}
+        )
+        enquiries = res.data["enquiries"]
+        self.assertEqual(set(enquiries), {"total", "new", "unique_phones", "by_status"})
+        self.assertEqual(
+            (enquiries["total"], enquiries["new"], enquiries["unique_phones"]), (3, 1, 2)
+        )
+        self.assertEqual(list(enquiries["by_status"]), list(EnquiryStatus.VALUES))
+        self.assertEqual(enquiries["by_status"][EnquiryStatus.CLOSED], 1)
+        self.assertEqual(enquiries["by_status"][EnquiryStatus.CONVERTED], 1)
+        self.assertEqual(enquiries["by_status"][EnquiryStatus.CONTACTED], 0)
+
+    def test_staff_see_the_same_counts_as_the_owner(self):
+        make_enquiry(make_training(self.institute))
+        owner = self.as_(self.owner).get(self.URL).data
+        staff = self.as_(self.staff).get(self.URL).data
+        self.assertEqual(owner, staff)
+
+    def test_an_institute_with_nothing_gets_zeros(self):
+        res = self.as_(self.owner).get(self.URL)
+        self.assertEqual(
+            res.data["trainings"], {"total": 0, "active": 0, "pending_review": 0}
+        )
+        enquiries = res.data["enquiries"]
+        self.assertEqual(
+            (enquiries["total"], enquiries["new"], enquiries["unique_phones"]), (0, 0, 0)
+        )
+        self.assertEqual(set(enquiries["by_status"].values()), {0})
+
+    def test_it_is_read_only(self):
+        for method in ("post", "put", "patch", "delete"):
+            with self.subTest(method=method):
+                res = getattr(self.as_(self.owner), method)(self.URL, {}, format="json")
+                self.assertEqual(res.status_code, 405)
+
+    def test_it_is_two_aggregate_queries_however_many_rows(self):
+        training = make_training(self.institute)
+        make_enquiry(training)
+        self.as_(self.owner).get(self.URL)  # warm-up: the membership is cached per user
+        few = count_queries(lambda: self.client.get(self.URL))
+        self.assertEqual(few, 2)  # one for the trainings, one for the enquiries
+        for _ in range(5):
+            make_training(self.institute)
+            make_enquiry(training)
+        self.assertEqual(count_queries(lambda: self.client.get(self.URL)), few)
 
 
 class ContactTests(PortalTestCase):

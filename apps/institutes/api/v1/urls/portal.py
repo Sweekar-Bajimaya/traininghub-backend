@@ -43,6 +43,7 @@ urlpatterns = [
         views.InstituteActionRequiredView.as_view(),
         name="action-required",
     ),
+    path("summary/", views.InstituteSummaryView.as_view(), name="summary"),
     path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),
     path(
         "documents/<int:pk>/download/",
