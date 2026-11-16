@@ -41,6 +41,7 @@ def institute_activity(institute):
     logs = (
         institute.status_logs.select_related("changed_by")
         .only(
+            "institute",
             "from_status",
             "to_status",
             "reason",
