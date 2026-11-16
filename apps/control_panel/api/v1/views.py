@@ -270,8 +270,6 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     def suspend(self, request, *args, **kwargs):
         return self._review(request, institute_services.suspend, with_reason=True)
 
-    # Disabled until it is decided what suspending an institute means and whether it can be undone.
-    # `institute_services.reinstate` and `InstituteStatus.TRANSITIONS[SUSPENDED]` are unchanged.
     @action(detail=True, methods=["post"])
     def reinstate(self, request, *args, **kwargs):
         """Lift a suspension: SUSPENDED back to APPROVED."""
