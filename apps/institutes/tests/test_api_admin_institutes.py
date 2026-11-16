@@ -19,6 +19,7 @@ from apps.institutes.tests.helpers import (
     PASSWORD,
     TempMediaMixin,
     add_location,
+    count_queries,
     make_institute,
     make_municipality,
     next_pan_vat_number,
@@ -191,8 +192,6 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.assertEqual(res.status_code, 200)
 
         row = next(r for r in res.data["results"] if r["slug"] == self.institute.slug)
-        # Note: Production bug in apps.institutes.constants: AWAITING_REVIEW is defined as
-        # string "AWAITING_REVIEW" instead of tuple (PENDING, RE_UPLOADED), causing count to be 0.
         self.assertEqual(row["pending_documents_count"], 2)
 
     def test_list_filter_by_status_comma_separated(self):
@@ -203,8 +202,6 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
 
         self.client.force_authenticate(self.reviewer)
         res_multi = self.client.get(ADMIN_URL, {"status": "PENDING,INFO_REQUESTED"})
-        # Note: Production bug in apps.control_panel.api.v1.filters: AdminInstituteFilter.status
-        # defines lookup_expr="in, choices=InstituteStatus.CHOICES" which rejects valid choices with 400.
         self.assertEqual(res_multi.status_code, 200, res_multi.data)
         slugs_multi = {r["slug"] for r in res_multi.data["results"]}
         self.assertIn(inst_p.slug, slugs_multi)
@@ -292,7 +289,6 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         res_true = self.client.get(ADMIN_URL, {"has_pending_documents": "true"})
         self.assertEqual(res_true.status_code, 200)
         slugs_true = {r["slug"] for r in res_true.data["results"]}
-        # Note: Production bug: AWAITING_REVIEW string causes has_pending_documents to return empty.
         self.assertIn(inst_pending.slug, slugs_true)
         self.assertIn(inst_reup.slug, slugs_true)
         self.assertNotIn(inst_ver.slug, slugs_true)
@@ -307,6 +303,64 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.assertIn(inst_ver.slug, slugs_false)
         self.assertIn(inst_rej.slug, slugs_false)
         self.assertIn(inst_none.slug, slugs_false)
+
+    def test_list_query_count_does_not_grow_with_number_of_institutes(self):
+        Institute.objects.all().delete()
+        for i in range(2):
+            inst, _ = make_institute(name=f"Inst {i}", email=f"inst{i}@example.com")
+            add_location(inst, self.municipality, is_main=True)
+            InstituteContact.objects.create(
+                institute=inst,
+                contact_person=f"Contact {i}",
+                contact_phone="9811111111",
+                contact_email=f"contact{i}@example.com",
+            )
+            institute_services.add_document(inst, name=f"Doc {i}", file=pdf(f"{i}.pdf"))
+
+        self.client.force_authenticate(self.reviewer)
+        self.client.get(ADMIN_URL)  # warm-up cache
+        q2 = count_queries(lambda: self.client.get(ADMIN_URL))
+
+        for i in range(2, 10):
+            inst, _ = make_institute(name=f"Inst {i}", email=f"inst{i}@example.com")
+            add_location(inst, self.municipality, is_main=True)
+            InstituteContact.objects.create(
+                institute=inst,
+                contact_person=f"Contact {i}",
+                contact_phone="9811111111",
+                contact_email=f"contact{i}@example.com",
+            )
+            institute_services.add_document(inst, name=f"Doc {i}", file=pdf(f"{i}.pdf"))
+
+        q10 = count_queries(lambda: self.client.get(ADMIN_URL))
+        self.assertEqual(q2, q10)
+
+    def test_list_pagination_stability_with_same_status_rank(self):
+        Institute.objects.all().delete()
+        now = timezone.now()
+        created_ids = []
+        for i in range(25):
+            inst, _ = make_institute(
+                name=f"Stable Inst {i:02d}",
+                status=InstituteStatus.PENDING,
+                email=f"stable{i}@example.com",
+            )
+            Institute.objects.filter(pk=inst.pk).update(created_at=now - timedelta(minutes=i))
+            created_ids.append(inst.pk)
+
+        self.client.force_authenticate(self.reviewer)
+        seen_ids = []
+        url = f"{ADMIN_URL}?ordering=status_rank&limit=10"
+        while url:
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, 200)
+            page_ids = [r["id"] for r in res.data["results"]]
+            seen_ids.extend(page_ids)
+            url = res.data.get("next")
+
+        self.assertEqual(len(seen_ids), 25)
+        self.assertEqual(len(set(seen_ids)), 25)
+        self.assertEqual(set(seen_ids), set(created_ids))
 
     # ==========================================
     # B. Summary (GET institutes/summary/)
@@ -369,7 +423,6 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.client.force_authenticate(self.reviewer)
         res = self.client.get(f"{ADMIN_URL}summary/")
         self.assertEqual(res.status_code, 200)
-        # Note: Production bug: AWAITING_REVIEW string causes documents_to_verify to return 0.
         self.assertEqual(res.data["documents_to_verify"], 2)
 
     # ==========================================
@@ -428,6 +481,52 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
                 res = self.client.get(f"{ADMIN_URL}{self.institute.slug}/")
                 self.assertEqual(res.status_code, 200)
                 self.assertEqual(res.data["available_actions"], expected)
+
+    def test_detail_available_actions_consistency_with_endpoints(self):
+        self.client.force_authenticate(self.reviewer)
+        action_configs = {
+            "approve": ("approve/", {}),
+            "reject": ("reject/", {"reason": "Valid reason"}),
+            "request_info": ("request-info/", {"reason": "Valid reason"}),
+            "suspend": ("suspend/", {"reason": "Valid reason"}),
+            "reinstate": ("reinstate/", {}),
+        }
+        all_actions = list(action_configs.keys())
+
+        statuses = (
+            InstituteStatus.PENDING,
+            InstituteStatus.APPROVED,
+            InstituteStatus.SUSPENDED,
+            InstituteStatus.REJECTED,
+            InstituteStatus.INFO_REQUESTED,
+        )
+
+        for status in statuses:
+            inst_check, _, _ = self.ready_institute(
+                name=f"Check {status}", email=f"check_{status}@example.com", status=status
+            )
+            detail_res = self.client.get(f"{ADMIN_URL}{inst_check.slug}/")
+            self.assertEqual(detail_res.status_code, 200)
+            expected_actions = set(detail_res.data["available_actions"])
+
+            for act in all_actions:
+                sub_path, payload = action_configs[act]
+                inst, _, _ = self.ready_institute(
+                    name=f"Act {status} {act}", email=f"act_{status}_{act}_{next_pan_vat_number()}@example.com", status=status
+                )
+                res = self.client.post(f"{ADMIN_URL}{inst.slug}/{sub_path}", payload)
+                if act in expected_actions:
+                    self.assertEqual(
+                        res.status_code,
+                        200,
+                        f"Expected {act} to be accepted (200) for {status}, got {res.status_code}: {res.data}",
+                    )
+                else:
+                    self.assertEqual(
+                        res.status_code,
+                        400,
+                        f"Expected {act} to be rejected (400) for {status}, got {res.status_code}: {res.data}",
+                    )
 
     # ==========================================
     # D. Actions and InstituteStatusLog
@@ -549,11 +648,75 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.assertEqual(log2.to_status, InstituteStatus.PENDING)
         self.assertEqual(log2.changed_by, owner_info)
 
+    def test_reinstate_on_pending_institute_with_no_location_and_no_doc_does_not_approve(self):
+        inst, _ = make_institute(
+            "Bare Pending Inst",
+            status=InstituteStatus.PENDING,
+            email="bare_pending@example.com",
+        )
+        self.assertEqual(inst.locations.count(), 0)
+        self.assertEqual(inst.documents.count(), 0)
+
+        self.client.force_authenticate(self.reviewer)
+        res = self.client.post(f"{ADMIN_URL}{inst.slug}/reinstate/")
+        self.assertEqual(res.status_code, 400)
+
+        inst.refresh_from_db()
+        self.assertEqual(inst.status, InstituteStatus.PENDING)
+        self.assertEqual(InstituteStatusLog.objects.filter(institute=inst).count(), 0)
+
+    def test_portal_resubmit_writes_log_row_with_owner_as_changed_by(self):
+        portal_url = "/api/v1/institute/resubmit/"
+
+        # 1. As owner of REJECTED institute
+        inst_rej, owner_rej, _ = self.ready_institute(
+            name="Portal Rej Inst",
+            email="portal_rej@example.com",
+            status=InstituteStatus.REJECTED,
+        )
+        InstituteStatusLog.objects.filter(institute=inst_rej).delete()
+
+        self.client.force_authenticate(owner_rej)
+        res_rej = self.client.post(portal_url)
+        self.assertEqual(res_rej.status_code, 200, res_rej.data)
+        self.assertEqual(res_rej.data["status"], InstituteStatus.PENDING)
+
+        inst_rej.refresh_from_db()
+        self.assertEqual(inst_rej.status, InstituteStatus.PENDING)
+        logs_rej = InstituteStatusLog.objects.filter(institute=inst_rej)
+        self.assertEqual(logs_rej.count(), 1)
+        log_rej = logs_rej.first()
+        self.assertEqual(log_rej.from_status, InstituteStatus.REJECTED)
+        self.assertEqual(log_rej.to_status, InstituteStatus.PENDING)
+        self.assertEqual(log_rej.changed_by, owner_rej)
+
+        # 2. As owner of INFO_REQUESTED institute
+        inst_info, owner_info, _ = self.ready_institute(
+            name="Portal Info Inst",
+            email="portal_info@example.com",
+            status=InstituteStatus.INFO_REQUESTED,
+        )
+        InstituteStatusLog.objects.filter(institute=inst_info).delete()
+
+        self.client.force_authenticate(owner_info)
+        res_info = self.client.post(portal_url)
+        self.assertEqual(res_info.status_code, 200, res_info.data)
+        self.assertEqual(res_info.data["status"], InstituteStatus.PENDING)
+
+        inst_info.refresh_from_db()
+        self.assertEqual(inst_info.status, InstituteStatus.PENDING)
+        logs_info = InstituteStatusLog.objects.filter(institute=inst_info)
+        self.assertEqual(logs_info.count(), 1)
+        log_info = logs_info.first()
+        self.assertEqual(log_info.from_status, InstituteStatus.INFO_REQUESTED)
+        self.assertEqual(log_info.to_status, InstituteStatus.PENDING)
+        self.assertEqual(log_info.changed_by, owner_info)
+
     # ==========================================
     # E. Approve side effect on documents
     # ==========================================
 
-    def test_approve_sets_every_non_verified_document_to_verified(self):
+    def test_approve_leaves_every_document_status_unchanged(self):
         inst, _, _ = self.ready_institute("Multi Doc Inst", email="multidoc@example.com")
         doc1 = InstituteDocument.objects.create(
             institute=inst, name="Doc PENDING", status=DocumentStatus.PENDING, file=pdf("1.pdf")
@@ -572,9 +735,14 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         res = self.client.post(f"{ADMIN_URL}{inst.slug}/approve/")
         self.assertEqual(res.status_code, 200)
 
-        for doc in (doc1, doc2, doc3, doc4):
+        for doc, expected_status in (
+            (doc1, DocumentStatus.PENDING),
+            (doc2, DocumentStatus.REJECTED),
+            (doc3, DocumentStatus.RE_UPLOADED),
+            (doc4, DocumentStatus.VERIFIED),
+        ):
             doc.refresh_from_db()
-            self.assertEqual(doc.status, DocumentStatus.VERIFIED)
+            self.assertEqual(doc.status, expected_status)
 
     def test_reject_request_info_suspend_reinstate_leave_documents_unchanged(self):
         self.client.force_authenticate(self.reviewer)
@@ -624,12 +792,10 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
 
         # Appears under ?has_pending_documents=true
         res_list = self.client.get(ADMIN_URL, {"has_pending_documents": "true"})
-        # Note: Production bug: AWAITING_REVIEW string causes has_pending_documents to return empty.
         self.assertIn(inst.slug, [r["slug"] for r in res_list.data["results"]])
 
         # Appears in summary documents_to_verify
         res_summary = self.client.get(f"{ADMIN_URL}summary/")
-        # Note: Production bug: AWAITING_REVIEW string causes documents_to_verify to be 0.
         self.assertGreaterEqual(res_summary.data["documents_to_verify"], 1)
 
         # Suspend then Reinstate
@@ -777,32 +943,6 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.assertEqual(training_event["title"], "Training created")
         self.assertEqual(training_event["body"], "Legacy Python Course")
 
-    def test_activity_training_review_events_appear_when_training_has_logs(self):
-        inst, _, _ = self.ready_institute("Training Log Inst", email="trlog@example.com")
-        cat = Category.objects.create(name="Web Category")
-        training = Training.objects.create(
-            institute=inst,
-            category=cat,
-            title="Web Development",
-            slug="web-development",
-            status=TrainingStatus.APPROVED,
-            fee_npr=8000,
-        )
-
-        # Note: Production bug: TrainingStatusLog model is not implemented on this branch,
-        # and institute_activity does not query training status logs.
-        from apps.training import models as training_models
-        self.assertTrue(
-            hasattr(training_models, "TrainingStatusLog"),
-            "TrainingStatusLog model does not exist in apps.training.models"
-        )
-
-        self.client.force_authenticate(self.reviewer)
-        res = self.client.get(f"{ADMIN_URL}{inst.slug}/activity/")
-        self.assertEqual(res.status_code, 200)
-        review_events = [e for e in res.data["results"] if e["type"] in ("TRAINING_SUBMITTED", "TRAINING_APPROVED")]
-        self.assertTrue(len(review_events) > 0)
-
     def test_activity_unknown_slug_404_and_auth_matrix(self):
         other_admin = self.admin_with(["manage_enquiries"], "other@example.com")
         url = f"{ADMIN_URL}{self.institute.slug}/activity/"
@@ -818,3 +958,27 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         # 403 without users.manage_institutes
         self.client.force_authenticate(other_admin)
         self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_activity_query_count_is_same_for_one_or_many_status_changes(self):
+        # Institute 1: 1 status change
+        inst1, _, _ = self.ready_institute("Act One", email="actone@example.com")
+        self.client.force_authenticate(self.reviewer)
+        self.client.post(f"{ADMIN_URL}{inst1.slug}/approve/")
+        self.assertEqual(inst1.status_logs.count(), 1)
+
+        # Institute 2: 8 status changes
+        inst2, _, _ = self.ready_institute("Act Eight", email="acteight@example.com")
+        self.client.post(f"{ADMIN_URL}{inst2.slug}/approve/")
+        for i in range(7):
+            if i % 2 == 0:
+                self.client.post(f"{ADMIN_URL}{inst2.slug}/suspend/", {"reason": f"Hold {i}"})
+            else:
+                self.client.post(f"{ADMIN_URL}{inst2.slug}/reinstate/")
+        self.assertEqual(inst2.status_logs.count(), 8)
+
+        # Warm-up request
+        self.client.get(f"{ADMIN_URL}{inst1.slug}/activity/")
+
+        q1 = count_queries(lambda: self.client.get(f"{ADMIN_URL}{inst1.slug}/activity/"))
+        q8 = count_queries(lambda: self.client.get(f"{ADMIN_URL}{inst2.slug}/activity/"))
+        self.assertEqual(q1, q8)

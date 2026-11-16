@@ -782,8 +782,6 @@ class AdminApiTests(TempMediaMixin, APITestCase):
         make_institute(name="Beta", email="beta@example.com", status=InstituteStatus.APPROVED)
         self.client.force_authenticate(self.reviewer)
         res = self.client.get(ADMIN_URL, {"status": "APPROVED"})
-        # Note: Production bug in AdminInstituteFilter (lookup_expr="in, choices=InstituteStatus.CHOICES")
-        # causes valid status choices to be rejected with 400.
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual([r["name"] for r in res.data["results"]], ["Beta"])
 
