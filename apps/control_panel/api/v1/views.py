@@ -135,6 +135,20 @@ def _locations_queryset():
     ).order_by("-is_main", "pk")
 
 
+class StableOrderingFilter(OrderingFilter):
+    """Adds -pk after any requested ordering, so rows with equal values keep a fixed order
+    and pages never repeat or skip a row."""
+
+    def get_ordering(self, request, queryset, view):
+        ordering = super().get_ordering(request, queryset, view)
+        if not ordering:
+            return ordering
+        ordering = list(ordering)
+        if not any(field.lstrip("-") in ("pk", "id") for field in ordering):
+            ordering.append("-pk")
+        return ordering
+
+
 class AdminInstituteViewSet(ReadOnlyViewSet):
     """List: ?status=PENDING,INFO_REQUESTED (the Pending tab), ?type=, ?search=, ?ordering=.
     Tab counts: GET summary/. Review history: GET {slug}/activity/.
@@ -144,7 +158,7 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     required_permission = "users.manage_institutes"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
-    filter_backends = (DjangoFilterBackend, SearchFilter, OrderingFilter)
+    filter_backends = (DjangoFilterBackend, SearchFilter, StableOrderingFilter)
     filterset_class = AdminInstituteFilter
     search_fields = ("name", "registration_number", "pan_vat_number")
     ordering_fields = ("name", "created_at", "status_rank")
@@ -205,7 +219,8 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
         # approved institutes that uploaded a document after approval and wait for a review
         documents_to_verify = (
             InstituteDocument.objects.filter(
-                status__in=DocumentStatus.AWAITING_REVIEW, institute__status=InstituteStatus.APPROVED
+                status__in=DocumentStatus.AWAITING_REVIEW,
+                institute__status=InstituteStatus.APPROVED,
             )
             .values("institute")
             .distinct()
