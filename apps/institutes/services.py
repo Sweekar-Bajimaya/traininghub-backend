@@ -31,6 +31,7 @@ from apps.institutes.models import (
     InstituteLocation,
     InstituteMember,
     InstituteSocialLink,
+    InstituteStatusLog,
 )
 from apps.institutes.validators import validate_institute_location
 from apps.users import services as user_services
@@ -40,11 +41,14 @@ User = get_user_model()
 
 
 # status workflow
-def _transition(institute, to, *, reason="", check=None):
-    """Move an institute to a new status. Caller must be inside transaction.atomic()."""
+def _transition(institute, to, *, reason="", check=None, by=None, only_from=None):
+    """Move an institute to a new status and log it. Caller must be inside transaction.atomic()."""
     institute = Institute.objects.select_for_update().get(pk=institute.pk)
-    if to not in InstituteStatus.TRANSITIONS[institute.status]:
-        raise ValidationError(f"Cannot move from {institute.status} to {to}.")
+    previous = institute.status
+    if to not in InstituteStatus.TRANSITIONS[previous] or (
+        only_from is not None and previous not in only_from
+    ):
+        raise ValidationError(f"Cannot move from {previous} to {to}.")
     if to in InstituteStatus.REASON_REQUIRED and not reason.strip():
         raise ValidationError({"reason": "A reason is required."})
     if check:
@@ -52,6 +56,13 @@ def _transition(institute, to, *, reason="", check=None):
     institute.status = to
     institute.status_reason = reason
     institute.save(update_fields=["status", "status_reason", "modified_at"])
+    InstituteStatusLog.objects.create(
+        institute=institute,
+        from_status=previous,
+        to_status=to,
+        reason=reason.strip(),
+        changed_by=by,
+    )
     return institute
 
 
@@ -66,35 +77,48 @@ def _ready_for_approval(institute):
 
 @transaction.atomic
 def approve(institute, *, by):
-    # TODO(audit) + TODO(notify): the institute owner
-    return _transition(institute, InstituteStatus.APPROVED, check=_ready_for_approval)
+    # TODO(notify): the institute owner
+    institute = _transition(
+        institute,
+        InstituteStatus.APPROVED,
+        check=_ready_for_approval,
+        only_from={InstituteStatus.PENDING},
+        by=by,
+    )
+    return institute
 
 
 @transaction.atomic
 def reject(institute, *, by, reason):
-    return _transition(institute, InstituteStatus.REJECTED, reason=reason)
+    return _transition(institute, InstituteStatus.REJECTED, reason=reason, by=by)
 
 
 @transaction.atomic
 def request_info(institute, *, by, reason):
-    return _transition(institute, InstituteStatus.INFO_REQUESTED, reason=reason)
+    return _transition(institute, InstituteStatus.INFO_REQUESTED, reason=reason, by=by)
 
 
 @transaction.atomic
 def suspend(institute, *, by, reason):
     # Staff keep their accounts (they can still log in); the public queries hide the institute.
-    return _transition(institute, InstituteStatus.SUSPENDED, reason=reason)
+    return _transition(institute, InstituteStatus.SUSPENDED, reason=reason, by=by)
 
 
 @transaction.atomic
 def reinstate(institute, *, by):
-    return _transition(institute, InstituteStatus.APPROVED)
+    """Lift a suspension. Only from SUSPENDED: PENDING must go through `approve`, with its checks."""
+    return _transition(
+        institute,
+        InstituteStatus.APPROVED,
+        only_from={InstituteStatus.SUSPENDED},
+        by=by,
+    )
 
 
 @transaction.atomic
-def resubmit(institute):
+def resubmit(institute, *, by=None):
     """The owner answers an info request, or re-applies after a rejection."""
-    return _transition(institute, InstituteStatus.PENDING)
+    return _transition(institute, InstituteStatus.PENDING, by=by)
 
 
 @transaction.atomic
@@ -157,7 +181,9 @@ def register(
     return institute
 
 
-def _create_registration(*, institute_data, owner, contact, locations, ceo, social_links):
+def _create_registration(
+    *, institute_data, owner, contact, locations, ceo, social_links
+):
     for item in locations:
         validate_institute_location(
             item["location"]
@@ -174,7 +200,9 @@ def _create_registration(*, institute_data, owner, contact, locations, ceo, soci
         ]
     )
     contact = dict(contact)
-    website = contact.pop("website", None)  # not a column: it is the "website" social link
+    website = contact.pop(
+        "website", None
+    )  # not a column: it is the "website" social link
     InstituteContact.objects.create(institute=institute, **contact)
     if ceo:
         InstituteCEO.objects.create(institute=institute, **ceo)
@@ -253,7 +281,9 @@ def add_document(institute, *, name, file):
     name = name.strip()
     # one upload per institute at a time, so two requests cannot both find "no such name"
     Institute.objects.select_for_update().get(pk=institute.pk)
-    if InstituteDocument.objects.filter(institute=institute, name__iexact=name).exists():
+    if InstituteDocument.objects.filter(
+        institute=institute, name__iexact=name
+    ).exists():
         raise ValidationError(
             {
                 "name": "A document with this name already exists. If it was rejected, "
@@ -275,7 +305,9 @@ def reupload_document(document, *, file):
     document.file = file
     document.status = DocumentStatus.RE_UPLOADED
     document.save(update_fields=["file", "status", "modified_at"])
-    transaction.on_commit(lambda: storage.delete(old_name))  # the rejected file is not kept
+    transaction.on_commit(
+        lambda: storage.delete(old_name)
+    )  # the rejected file is not kept
     return document
 
 

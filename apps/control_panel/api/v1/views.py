@@ -1,29 +1,44 @@
 from django.contrib.auth import get_user_model
-from django.db.models import Prefetch
+from django.db.models import (
+    Case,
+    Count,
+    F,
+    Func,
+    IntegerField,
+    OuterRef,
+    Prefetch,
+    Subquery,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import GenericAPIView, get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
-from apps.common.viewsets import (
-    CreateListRetrieveUpdateViewSet,
-    ListViewSet,
-    ReadOnlyViewSet,
-)
+from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
+from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
     AdminCategoryFilter,
+    AdminInstituteFilter,
     AdminEnquiryFilter,
     AdminTrainingFilter,
+)
+from apps.common.viewsets import (
+    ListViewSet,
 )
 from apps.control_panel.api.v1.serializers import (
     AdminCategorySerializer,
     AdminDocumentSerializer,
     AdminEnquiryListSerializer,
     AdminInstituteSerializer,
+    AdminInstituteListSerializer,
     AdminSerializer,
+    AdminTrainingFeaturedSerializer,
     AdminTrainingListSerializer,
     AdminTrainingSerializer,
     DocumentReviewSerializer,
@@ -33,7 +48,7 @@ from apps.enquiries import services as enquiry_services
 from apps.enquiries.models import Enquiry
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
-from apps.institutes.constants import MemberRole
+from apps.institutes.constants import InstituteStatus, DocumentStatus, MemberRole
 from apps.institutes.models import (
     Institute,
     InstituteDocument,
@@ -81,36 +96,150 @@ class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
 
 
 # institutes
+def _trainings_count():
+    """All trainings of the institute, any status. A correlated subquery: no join fan-out."""
+    counted = (
+        Training.objects.filter(institute=OuterRef("pk"))
+        .order_by()
+        .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
+    )
+    return Coalesce(Subquery(counted.values("n"), output_field=IntegerField()), 0)
+
+
+def _pending_documents_count():
+    """Documents of the institute waiting for an admin (new, or rejected and uploaded again)."""
+    counted = (
+        InstituteDocument.objects.filter(
+            institute=OuterRef("pk"), status__in=DocumentStatus.AWAITING_REVIEW
+        )
+        .order_by()
+        .annotate(n=Func(F("pk"), function="COUNT", output_field=IntegerField()))
+    )
+    return Coalesce(Subquery(counted.values("n"), output_field=IntegerField()), 0)
+
+
+def _owner_prefetch():
+    return Prefetch(
+        "members",
+        queryset=InstituteMember.objects.filter(role=MemberRole.OWNER).select_related(
+            "user"
+        ),
+        to_attr="owner_members",
+    )
+
+
+def _locations_queryset():
+    return InstituteLocation.objects.select_related(
+        "location", "location__district", "location__province"
+    ).order_by("-is_main", "pk")
+
+
+class StableOrderingFilter(OrderingFilter):
+    """Adds -pk after any requested ordering, so rows with equal values keep a fixed order
+    and pages never repeat or skip a row."""
+
+    def get_ordering(self, request, queryset, view):
+        ordering = super().get_ordering(request, queryset, view)
+        if not ordering:
+            return ordering
+        ordering = list(ordering)
+        if not any(field.lstrip("-") in ("pk", "id") for field in ordering):
+            ordering.append("-pk")
+        return ordering
+
+
 class AdminInstituteViewSet(ReadOnlyViewSet):
-    serializer_class = AdminInstituteSerializer
+    """List: ?status=PENDING,INFO_REQUESTED (the Pending tab), ?type=, ?search=, ?ordering=.
+    Tab counts: GET summary/. Review history: GET {slug}/activity/.
+    Default order: waiting for review first, then newest."""
+
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_institutes"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
-    filter_backends = (DjangoFilterBackend, SearchFilter)
-    filterset_fields = ("status", "type")
-    search_fields = ("name",)
-    queryset = (
-        Institute.objects.select_related("contact", "ceo")
-        .prefetch_related(
+    filter_backends = (DjangoFilterBackend, SearchFilter, StableOrderingFilter)
+    filterset_class = AdminInstituteFilter
+    search_fields = ("name", "registration_number", "pan_vat_number")
+    ordering_fields = ("name", "created_at", "status_rank")
+    ordering = ("status_rank", "-created_at", "-pk")
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return AdminInstituteListSerializer
+        return AdminInstituteSerializer
+
+    def get_queryset(self):
+        queryset = Institute.objects.annotate(
+            # PENDING first, then INFO_REQUESTED, then the rest
+            status_rank=Case(
+                When(status=InstituteStatus.PENDING, then=Value(0)),
+                When(status=InstituteStatus.INFO_REQUESTED, then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        )
+        if self.action == "list":
+            return (
+                queryset.select_related("contact")
+                .prefetch_related(
+                    Prefetch(
+                        "locations",
+                        queryset=_locations_queryset().filter(is_active=True),
+                    )
+                )
+                .annotate(
+                    trainings_count=_trainings_count(),
+                    pending_documents_count=_pending_documents_count(),
+                )
+            )
+        return queryset.select_related("contact", "ceo").prefetch_related(
             "documents",
             "social_links",
-            Prefetch(
-                "locations",
-                queryset=InstituteLocation.objects.select_related(
-                    "location", "location__district", "location__province"
-                ).order_by("-is_main", "pk"),
-            ),
-            Prefetch(
-                "members",
-                queryset=InstituteMember.objects.filter(
-                    role=MemberRole.OWNER
-                ).select_related("user"),
-                to_attr="owner_members",
-            ),
+            Prefetch("locations", queryset=_locations_queryset()),
+            _owner_prefetch(),
         )
-        .order_by("-created_at", "-pk")
-    )
+
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Counts for the tabs. `pending` includes the institutes waiting for the owner's reply
+        (INFO_REQUESTED). `by_status` has the raw counts. `documents_to_verify` is the number of
+        approved institutes with an uploaded document still to review."""
+        rows = Institute.objects.order_by().values("status").annotate(n=Count("pk"))
+        by_status = {code: 0 for code, _ in InstituteStatus.CHOICES}
+        by_status.update({row["status"]: row["n"] for row in rows})
+        tabs = {
+            "all": sum(by_status.values()),
+            "pending": by_status[InstituteStatus.PENDING]
+            + by_status[InstituteStatus.INFO_REQUESTED],
+            "approved": by_status[InstituteStatus.APPROVED],
+            "rejected": by_status[InstituteStatus.REJECTED],
+            "suspended": by_status[InstituteStatus.SUSPENDED],
+        }
+        # approved institutes that uploaded a document after approval and wait for a review
+        documents_to_verify = (
+            InstituteDocument.objects.filter(
+                status__in=DocumentStatus.AWAITING_REVIEW,
+                institute__status=InstituteStatus.APPROVED,
+            )
+            .values("institute")
+            .distinct()
+            .count()
+        )
+        return Response(
+            {
+                "tabs": tabs,
+                "by_status": by_status,
+                "documents_to_verify": documents_to_verify,
+            }
+        )
+
+    @action(detail=True, methods=["get"])
+    def activity(self, request, *args, **kwargs):
+        """Registration, training submissions and status changes of the institute, newest first."""
+        institute = get_object_or_404(
+            Institute.objects.only("id", "created_at"), slug=kwargs["slug"]
+        )
+        return Response({"results": selectors.institute_activity(institute)})
 
     def _review(self, request, service, *, with_reason):
         kwargs = {}
@@ -140,11 +269,10 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
     def suspend(self, request, *args, **kwargs):
         return self._review(request, institute_services.suspend, with_reason=True)
 
-    # Disabled until it is decided what suspending an institute means and whether it can be undone.
-    # `institute_services.reinstate` and `InstituteStatus.TRANSITIONS[SUSPENDED]` are unchanged.
-    # @action(detail=True, methods=["post"])
-    # def reinstate(self, request, pk=None):
-    #     return self._review(request, institute_services.reinstate, with_reason=False)
+    @action(detail=True, methods=["post"])
+    def reinstate(self, request, *args, **kwargs):
+        """Lift a suspension: SUSPENDED back to APPROVED."""
+        return self._review(request, institute_services.reinstate, with_reason=False)
 
 
 class AdminDocumentView(GenericAPIView):
@@ -183,12 +311,13 @@ class AdminDocumentDownloadView(APIView):
 
 # trainings
 class AdminTrainingViewSet(ReadOnlyViewSet):
-    """Review queue: ?status=SUBMITTED."""
+    """Review queue: ?status=SUBMITTED. The only edit is PATCH {"is_featured": true|false}."""
 
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_trainings"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
+    http_method_names = ["get", "post", "patch", "head", "options"]
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
@@ -201,6 +330,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
             return AdminTrainingListSerializer
         if self.action in ("request_changes", "reject"):
             return ReasonSerializer
+        if self.action == "partial_update":
+            return AdminTrainingFeaturedSerializer
         return AdminTrainingSerializer
 
     def get_queryset(self):
@@ -209,8 +340,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
             return queryset
         return with_content(queryset)
 
-    def _review(self, request, service, *, with_reason):
-        kwargs = {}
+    def _review(self, request, service, *, with_reason, **extra):
+        kwargs = dict(extra)
         if with_reason:
             serializer = ReasonSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
@@ -221,6 +352,17 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
                 self.get_queryset().get(pk=training.pk),
                 context=self.get_serializer_context(),
             ).data
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        """PATCH {"is_featured": true|false}: feature or un-feature an approved training."""
+        serializer = AdminTrainingFeaturedSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return self._review(
+            request,
+            training_services.set_featured,
+            with_reason=False,
+            featured=serializer.validated_data["is_featured"],
         )
 
     @action(detail=True, methods=["post"])

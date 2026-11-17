@@ -11,7 +11,7 @@ from apps.institutes.tests.helpers import (
 )
 from apps.users.constants import Role
 
-LIST_URL = "/admin/institutes/institute/"
+LIST_URL = "/django-admin/institutes/institute/"
 CONTACT_URL = "/api/v1/institute/contact/"
 
 

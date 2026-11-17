@@ -16,7 +16,7 @@ from apps.institutes.api.v1.serializers import (
     InstituteLocationSerializer,
     InstituteSocialLinkSerializer,
 )
-from apps.institutes.constants import DocumentStatus
+from apps.institutes.constants import DocumentStatus, InstituteStatus
 from apps.institutes.models import Institute, InstituteDocument
 from apps.training.api.v1.serializers import (
     LearningOutcomeSerializer,
@@ -156,6 +156,14 @@ class DocumentReviewSerializer(serializers.Serializer):
     )
 
 
+# the review actions an admin can take, by the status they move the institute to
+_INSTITUTE_ACTIONS = {
+    InstituteStatus.PENDING: ["approve", "reject", "request_info"],
+    InstituteStatus.APPROVED: ["suspend"],
+    InstituteStatus.SUSPENDED: ["reinstate"],
+}
+
+
 class AdminInstituteSerializer(DynamicFieldsModelSerializer):
     """Read-only view of an institute for the reviewer: what it gave at registration (locations,
     contact person) and what it added since, with every location, retired ones included."""
@@ -166,6 +174,7 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
     ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
     locations = InstituteLocationSerializer(many=True, read_only=True)
+    available_actions = serializers.SerializerMethodField()
 
     class Meta:
         model = Institute
@@ -187,19 +196,93 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "social_links",
             "locations",
             "documents",
+            "available_actions",
         )
 
     def get_owner_email(self, obj):
         owners = getattr(obj, "owner_members", [])  # prefetched by the admin viewset
         return owners[0].user.email if owners else None
 
+    def get_available_actions(self, obj):
+        return list(_INSTITUTE_ACTIONS.get(obj.status, []))
+
+
+class AdminInstituteListSerializer(DynamicFieldsModelSerializer):
+    """One row of the institutes list: only what the table shows (no documents, social links or
+    CEO). Reads the annotations and prefetches set by AdminInstituteViewSet.get_queryset."""
+
+    contact_person = serializers.CharField(
+        source="contact.contact_person", read_only=True, default=None
+    )
+    contact_email = serializers.CharField(
+        source="contact.contact_email", read_only=True, default=None
+    )
+    contact_phone = serializers.CharField(
+        source="contact.contact_phone", read_only=True, default=None
+    )
+    city = serializers.SerializerMethodField()
+    district = serializers.SerializerMethodField()
+    province = serializers.SerializerMethodField()
+    trainings_count = serializers.IntegerField(read_only=True)
+    # documents waiting for review: new uploads, and rejected ones uploaded again
+    pending_documents_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Institute
+        fields = (
+            "id",
+            "slug",
+            "name",
+            "type",
+            "status",
+            "created_at",
+            "contact_person",
+            "contact_email",
+            "contact_phone",
+            "city",
+            "district",
+            "province",
+            "trainings_count",
+            "pending_documents_count",
+        )
+
+    def _main_location(self, obj):
+        locations = list(obj.locations.all())  # prefetched: active ones, main first
+        return locations[0].location if locations else None
+
+    def get_city(self, obj):
+        location = self._main_location(obj)
+        return location.name if location else None
+
+    def get_district(self, obj):
+        location = self._main_location(obj)
+        return location.district.name if location else None
+
+    def get_province(self, obj):
+        location = self._main_location(obj)
+        return location.province.name if location else None
+
 
 # trainings
+class AdminTrainingFeaturedSerializer(serializers.Serializer):
+    """The body of PATCH trainings/{slug}/: the one thing an admin changes on a training."""
+
+    is_featured = serializers.BooleanField()
+
+    def to_internal_value(self, data):
+        extra = set(data) - set(self.fields)
+        if extra:
+            raise serializers.ValidationError(
+                {key: "This field cannot be changed here." for key in sorted(extra)}
+            )
+        return super().to_internal_value(data)
+        
+
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
 
     class Meta(PortalTrainingListSerializer.Meta):
-        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name",)
+        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name", "is_featured")
 
 
 class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -215,7 +298,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
 
     class Meta:
         model = Training
-        fields = PortalTrainingSerializer.Meta.fields + ("institute",)
+        fields = PortalTrainingSerializer.Meta.fields + ("institute", "is_featured")
         read_only_fields = fields
 
     def get_institute(self, obj):
