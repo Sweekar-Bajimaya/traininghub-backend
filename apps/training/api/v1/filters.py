@@ -70,7 +70,7 @@ class TrainingFilter(django_filters.FilterSet):
 
     class Meta:
         model = Training
-        fields = ("mode",)
+        fields = ("mode", "is_featured")
 
     def filter_category(self, queryset, name, value):
         return queryset.filter(

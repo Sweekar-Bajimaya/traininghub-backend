@@ -255,12 +255,17 @@ def _transition(training, to, *, only_from=None, reason="", check=None):
         raise ValidationError({"reason": "A reason is required."})
     if check:
         check(training)
+        previous = training.status
     training.status = to
     if to in TrainingStatus.REASON_REQUIRED:
         training.review_feedback = reason
     elif to == TrainingStatus.APPROVED:
         training.review_feedback = ""
-    training.save(update_fields=["status", "review_feedback", "modified_at"])
+    if previous == TrainingStatus.APPROVED and to != TrainingStatus.APPROVED:
+        training.is_featured = False  # no longer live, so no longer featured
+    training.save(
+        update_fields=["status", "review_feedback", "is_featured", "modified_at"]
+    )
     return training
 
 
@@ -334,6 +339,25 @@ def request_changes(training, *, by, reason):
 
 
 @transaction.atomic
+def set_featured(training, *, featured, by):
+    """Feature or un-feature a training on the front page. Only an approved training of an
+    approved institute can be featured; un-featuring is always allowed."""
+    training = (
+        Training.objects.select_for_update(of=("self",))
+        .select_related("institute")
+        .get(pk=training.pk)
+    )
+    if featured:
+        if training.status != TrainingStatus.APPROVED:
+            raise ValidationError("Only an approved training can be featured.")
+        _require_approved_institute(training.institute)
+    if training.is_featured != featured:
+        training.is_featured = featured
+        training.save(update_fields=["is_featured", "modified_at"])
+    return training
+
+
+@transaction.atomic
 def reject(training, *, by, reason):
     return _transition(
         training,
@@ -349,7 +373,7 @@ def expire_trainings(today=None):
     today = today or timezone.localdate()
     return Training.objects.filter(
         status__in=TrainingStatus.LIVE, end_date__lt=today
-    ).update(status=TrainingStatus.EXPIRED, modified_at=timezone.now())
+    ).update(status=TrainingStatus.EXPIRED, is_featured=False)
 
 
 # content

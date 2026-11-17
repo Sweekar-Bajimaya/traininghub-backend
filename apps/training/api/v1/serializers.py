@@ -71,6 +71,7 @@ class PublicTrainingListSerializer(DynamicFieldsModelSerializer):
             "category",
             "location",
             "published_at",
+            "is_featured",
         )
 
     def get_duration(self, obj):
@@ -175,12 +176,12 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
             "email": (own.contact_email if own else "")
             or (institute.contact_email if institute else ""),
         }
-    
+
     def get_institute(self, obj):
-            data = super().get_institute(obj)
-            data["experience"] = institute_experience(obj.institute.established_year)
-            data["training_count"] = obj.institute_training_count
-            return data
+        data = super().get_institute(obj)
+        data["experience"] = institute_experience(obj.institute.established_year)
+        data["training_count"] = obj.institute_training_count
+        return data
 
 
 # portal (the institute's own staff)
@@ -376,6 +377,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
 class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     municipality = serializers.SerializerMethodField()
+    is_featured = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Training
@@ -392,6 +394,7 @@ class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
             "end_date",
             "municipality",
             "created_at",
+            "is_featured",
         )
 
     def get_municipality(self, obj):

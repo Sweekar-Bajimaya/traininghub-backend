@@ -1,7 +1,11 @@
+from django_filters import BaseInFilter
 import django_filters
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 
 from apps.common.models.category import Category
+from apps.institutes.constants import DocumentStatus, InstituteStatus
+from apps.institutes.models import Institute, InstituteDocument
+
 from apps.enquiries.models import Enquiry
 from apps.training.models import Training
 
@@ -19,7 +23,35 @@ class AdminTrainingFilter(django_filters.FilterSet):
 
     class Meta:
         model = Training
-        fields = ("status", "mode", "institute")
+        fields = ("status", "mode", "institute", "is_featured")
+
+
+class ChoiceInFilter(django_filters.BaseInFilter, django_filters.ChoiceFilter):
+    """Comma separated values, each checked against `choices`: ?status=PENDING,INFO_REQUESTED"""
+
+
+class AdminInstituteFilter(django_filters.FilterSet):
+    status = ChoiceInFilter(
+        field_name="status",
+        lookup_expr="in",
+        choices=InstituteStatus.CHOICES,
+    )
+    # ?has_pending_documents=true -> institutes with a document waiting for review (new or re-uploaded)
+    has_pending_documents = django_filters.BooleanFilter(
+        method="filter_has_pending_documents"
+    )
+
+    class Meta:
+        model = Institute
+        fields = ("status", "type", "has_pending_documents")
+
+    def filter_has_pending_documents(self, queryset, name, value):
+        pending = Exists(
+            InstituteDocument.objects.filter(
+                institute=OuterRef("pk"), status__in=DocumentStatus.AWAITING_REVIEW
+            )
+        )
+        return queryset.filter(pending) if value else queryset.exclude(pending)
 
 
 class AdminEnquiryFilter(django_filters.FilterSet):

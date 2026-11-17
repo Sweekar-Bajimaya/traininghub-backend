@@ -51,6 +51,7 @@ class MemberRole:
 class DocumentStatus:
     PENDING, VERIFIED, REJECTED = "PENDING", "VERIFIED", "REJECTED"
     RE_UPLOADED = "RE_UPLOADED"  # a rejected document the institute has uploaded again
+    AWAITING_REVIEW = (PENDING, RE_UPLOADED)    # documents an admin still has to look at: new uploads, and rejected ones uploaded again
     CHOICES = (
         (PENDING, "Pending"),
         (VERIFIED, "Verified"),
@@ -68,4 +69,3 @@ class InvitationStatus:
 DESCRIPTION_MIN_LENGTH = 150  # characters
 GALLERY_MIN_PHOTOS = 4
 SOCIAL_LINKS_MIN = 2
-
