@@ -122,7 +122,6 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     ).order_by("-created_at", "-pk")
 
     def get_serializer_class(self):
-        import ipdb; ipdb.set_trace()
         if self.action == "list":
             return PortalTrainingListSerializer
         if self.action == "cover":
