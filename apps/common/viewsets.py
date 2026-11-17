@@ -60,8 +60,10 @@ class BaseViewSet(GenericViewSet):
         serializer_class = self.get_serializer_class()
         kwargs["context"] = self.get_serializer_context()
 
-        kwargs["fields"] = self.get_serializer_include_fields()
-        kwargs["exclude_fields"] = self.get_serializer_exclude_fields()
+        if (fields := self.get_serializer_include_fields()) is not None:
+            kwargs.setdefault("fields", fields)
+        if (exclude_fields := self.get_serializer_exclude_fields()) is not None:
+            kwargs.setdefault("exclude_fields", exclude_fields)
         return serializer_class(*args, **kwargs)
 
     def get_serializer_include_fields(self):

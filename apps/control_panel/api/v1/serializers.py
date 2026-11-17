@@ -264,7 +264,7 @@ class AdminInstituteListSerializer(DynamicFieldsModelSerializer):
 
 
 # trainings
-class AdminTrainingFeaturedSerializer(serializers.Serializer):
+class AdminTrainingFeaturedSerializer(DynamicFieldsSerializer):
     """The body of PATCH trainings/{slug}/: the one thing an admin changes on a training."""
 
     is_featured = serializers.BooleanField()
