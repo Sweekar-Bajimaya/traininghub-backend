@@ -377,6 +377,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
 class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     municipality = serializers.SerializerMethodField()
+    is_featured = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Training
@@ -393,6 +394,7 @@ class PortalTrainingListSerializer(DynamicFieldsModelSerializer):
             "end_date",
             "municipality",
             "created_at",
+            "is_featured",
         )
 
     def get_municipality(self, obj):

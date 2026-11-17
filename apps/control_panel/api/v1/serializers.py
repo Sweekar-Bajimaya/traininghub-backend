@@ -264,11 +264,25 @@ class AdminInstituteListSerializer(DynamicFieldsModelSerializer):
 
 
 # trainings
+class AdminTrainingFeaturedSerializer(serializers.Serializer):
+    """The body of PATCH trainings/{slug}/: the one thing an admin changes on a training."""
+
+    is_featured = serializers.BooleanField()
+
+    def to_internal_value(self, data):
+        extra = set(data) - set(self.fields)
+        if extra:
+            raise serializers.ValidationError(
+                {key: "This field cannot be changed here." for key in sorted(extra)}
+            )
+        return super().to_internal_value(data)
+        
+
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
 
     class Meta(PortalTrainingListSerializer.Meta):
-        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name",)
+        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name", "is_featured")
 
 
 class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -284,7 +298,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
 
     class Meta:
         model = Training
-        fields = PortalTrainingSerializer.Meta.fields + ("institute",)
+        fields = PortalTrainingSerializer.Meta.fields + ("institute", "is_featured")
         read_only_fields = fields
 
     def get_institute(self, obj):

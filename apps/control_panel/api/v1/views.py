@@ -13,9 +13,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.generics import GenericAPIView, get_object_or_404
 from rest_framework.response import Response
@@ -40,6 +38,7 @@ from apps.control_panel.api.v1.serializers import (
     AdminInstituteSerializer,
     AdminInstituteListSerializer,
     AdminSerializer,
+    AdminTrainingFeaturedSerializer,
     AdminTrainingListSerializer,
     AdminTrainingSerializer,
     DocumentReviewSerializer,
@@ -312,12 +311,13 @@ class AdminDocumentDownloadView(APIView):
 
 # trainings
 class AdminTrainingViewSet(ReadOnlyViewSet):
-    """Review queue: ?status=SUBMITTED."""
+    """Review queue: ?status=SUBMITTED. The only edit is PATCH {"is_featured": true|false}."""
 
     permission_classes = [HasPlatformPermission]
     required_permission = "users.manage_trainings"
     lookup_field = "slug"
     lookup_value_regex = r"[-a-zA-Z0-9_]+"
+    http_method_names = ["get", "post", "patch", "head", "options"]
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
@@ -330,6 +330,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
             return AdminTrainingListSerializer
         if self.action in ("request_changes", "reject"):
             return ReasonSerializer
+        if self.action == "partial_update":
+            return AdminTrainingFeaturedSerializer
         return AdminTrainingSerializer
 
     def get_queryset(self):
@@ -338,8 +340,8 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
             return queryset
         return with_content(queryset)
 
-    def _review(self, request, service, *, with_reason):
-        kwargs = {}
+    def _review(self, request, service, *, with_reason, **extra):
+        kwargs = dict(extra)
         if with_reason:
             serializer = ReasonSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
@@ -350,6 +352,17 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
                 self.get_queryset().get(pk=training.pk),
                 context=self.get_serializer_context(),
             ).data
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        """PATCH {"is_featured": true|false}: feature or un-feature an approved training."""
+        serializer = AdminTrainingFeaturedSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return self._review(
+            request,
+            training_services.set_featured,
+            with_reason=False,
+            featured=serializer.validated_data["is_featured"],
         )
 
     @action(detail=True, methods=["post"])

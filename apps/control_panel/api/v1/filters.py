@@ -23,7 +23,7 @@ class AdminTrainingFilter(django_filters.FilterSet):
 
     class Meta:
         model = Training
-        fields = ("status", "mode", "institute")
+        fields = ("status", "mode", "institute", "is_featured")
 
 
 class ChoiceInFilter(django_filters.BaseInFilter, django_filters.ChoiceFilter):
