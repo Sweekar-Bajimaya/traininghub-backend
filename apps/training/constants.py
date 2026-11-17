@@ -123,3 +123,6 @@ class StartBucket:
         (LATER, "Later"),
     )
     DAYS = {WITHIN_2_WEEKS: 14, WITHIN_30_DAYS: 30, WITHIN_60_DAYS: 60}
+
+LOCATION_COUNTS_CACHE_KEY = "training:location-counts:v1"
+LOCATION_COUNTS_TTL = 300 # seconds

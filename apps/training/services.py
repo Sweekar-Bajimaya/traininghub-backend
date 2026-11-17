@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.contrib.postgres.search import SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Value
+from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -253,9 +253,9 @@ def _transition(training, to, *, only_from=None, reason="", check=None):
         raise ValidationError(f"Cannot move from {training.status} to {to}.")
     if to in TrainingStatus.REASON_REQUIRED and not reason.strip():
         raise ValidationError({"reason": "A reason is required."})
+    previous = training.status
     if check:
         check(training)
-        previous = training.status
     training.status = to
     if to in TrainingStatus.REASON_REQUIRED:
         training.review_feedback = reason
@@ -584,6 +584,40 @@ def annotate_institute_public_counts(institutes):
         training_count=scalar(Count("pk")),
         category_count=scalar(Count(top_level, distinct=True)),
     )
+
+
+def training_counts_by_location():
+    """Public trainings per district (the same rule as the public list: APPROVED trainings of
+    APPROVED institutes), biggest first, then one "Online" entry last. Online trainings have no
+    municipality, so they are counted on their own, by mode, which is what `?mode=ONLINE` filters
+    on: that entry has `id` None, and the other entries link to `?district=<id>`. Districts and
+    Online are left out when they have no training. Two queries."""
+
+    public = Training.objects.filter(
+        status=TrainingStatus.APPROVED, institute__status=InstituteStatus.APPROVED
+    )
+    rows = (
+        public.filter(venue__location__district__is_active=True)
+        .values(
+            district_id=F("venue__location__district_id"),
+            district_name=F("venue__location__district__name"),
+        )
+        .annotate(training_count=Count("pk"))
+        .order_by("-training_count", "district_name")
+    )
+    # an alias called `id` would clash with Training.id, so rename here
+    counts = [
+        {
+            "id": r["district_id"],
+            "name": r["district_name"],
+            "training_count": r["training_count"],
+        }
+        for r in rows
+    ]
+    online = public.filter(mode=TrainingMode.ONLINE).count()
+    if online:
+        counts.append({"id": None, "name": "Online", "training_count": online})
+    return counts
 
 
 def start_date_range(bucket, today=None):

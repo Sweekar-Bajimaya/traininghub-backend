@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter
@@ -16,7 +17,13 @@ from apps.training.api.v1.serializers import (
     PublicTrainingDetailSerializer,
     PublicTrainingListSerializer,
 )
-from apps.training.constants import DurationBucket, StartBucket, TrainingStatus
+from apps.training.constants import (
+    LOCATION_COUNTS_CACHE_KEY,
+    LOCATION_COUNTS_TTL,
+    DurationBucket,
+    StartBucket,
+    TrainingStatus,
+)
 from apps.training.models import Training
 
 # Child models are ordered in their Meta, so these prefetches come back in display order.
@@ -74,6 +81,16 @@ class PublicTrainingViewSet(ReadOnlyViewSet):
     def start_dates(self, request):
         return Response(as_options(StartBucket.CHOICES))
 
+    @action(detail=False, methods=["get"])
+    def count_by_locations(self, request):
+        return Response(
+            cache.get_or_set(
+                LOCATION_COUNTS_CACHE_KEY,
+                services.training_counts_by_location,
+                timeout=LOCATION_COUNTS_TTL,
+            )
+        )
+
 
 # portal (the institute's own staff)
 def transition(service):
@@ -105,6 +122,7 @@ class PortalTrainingViewSet(InstituteScopedMixin, CustomModelViewSet):
     ).order_by("-created_at", "-pk")
 
     def get_serializer_class(self):
+        import ipdb; ipdb.set_trace()
         if self.action == "list":
             return PortalTrainingListSerializer
         if self.action == "cover":
