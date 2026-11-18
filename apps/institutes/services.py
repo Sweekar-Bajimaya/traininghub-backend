@@ -574,3 +574,11 @@ def admin_counts(institutes):
         pending=Count("pk", filter=Q(status=InstituteStatus.PENDING)),
         approved=Count("pk", filter=Q(status=InstituteStatus.APPROVED)),
     )
+
+
+def staff_users(institute, *, exclude=None):
+    """Active users of an institute (owner and staff). `exclude` leaves out the person who acted."""
+    users = User.objects.filter(membership__institute=institute, is_active=True)
+    if exclude is not None:
+        users = users.exclude(pk=exclude.pk)
+    return users

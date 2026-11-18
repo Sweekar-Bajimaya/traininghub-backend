@@ -6,6 +6,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django_q.tasks import async_task
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -250,4 +251,21 @@ def send_registration_otp_email(email, otp):
         from_email=None,
         recipient_list=[email],
         html_message=html_message,
+    )
+
+
+def admins_with_permission(codename):
+    """Active admins who hold `users.<codename>`, plus the Super Admin, who passes every check
+    without a grant. One query, so a notification never calls has_perm once per admin."""
+    return (
+        User.objects.filter(is_active=True)
+        .filter(
+            Q(role=Role.SUPER_ADMIN)
+            | Q(
+                role=Role.ADMIN,
+                user_permissions__content_type__app_label="users",
+                user_permissions__codename=codename,
+            )
+        )
+        .distinct()
     )

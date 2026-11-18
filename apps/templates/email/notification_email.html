@@ -1,0 +1,12 @@
+{% extends "email/base_email.html" %}
+{% block title %}{{ notification.title }} - TrainingHub{% endblock %}
+{% block icon %}🔔{% endblock %}
+{% block heading %}{{ notification.title }}{% endblock %}
+{% block content %}
+<p style="margin: 0 0 24px 0; font-size: 15px; color: #5a6478; line-height: 1.6">
+  {{ notification.body }}
+</p>
+<p style="margin: 0 0 24px 0; font-size: 15px">
+  <a href="{{ frontend_url }}" style="color: #00a9d5">Open TrainingHub</a>
+</p>
+{% endblock %}
