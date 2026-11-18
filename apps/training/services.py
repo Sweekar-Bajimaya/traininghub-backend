@@ -7,8 +7,11 @@ from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Valu
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import Institute
+from apps.notification import services as notification_services
+from apps.notification.constants import EventType
 from apps.training.constants import (
     SEARCH_CONFIG,
     DurationUnit,
@@ -26,6 +29,7 @@ from apps.training.models import (
     TrainingModule,
     TrainingSession,
 )
+from apps.users import services as user_services
 
 
 # derived values and search
@@ -269,19 +273,59 @@ def _transition(training, to, *, only_from=None, reason="", check=None):
     return training
 
 
+def _notify_review_requested(training, *, action):
+    institute = training.institute
+    notification_services.notify(
+        EventType.TRAINING_SUBMITTED,
+        recipients=institute_services.staff_users(institute),
+        payload={
+            "training_title": training.title,
+            "training_slug": training.slug,
+            "action": action,
+        },
+    )
+    notification_services.notify(
+        EventType.ADMIN_TRAINING_REVIEW,
+        recipients=user_services.admins_with_permission("manage_trainings"),
+        payload={
+            "institute_name": institute.name,
+            "institute_slug": institute.slug,
+            "training_title": training.title,
+            "training_slug": training.slug,
+            "action": action,
+        },
+    )
+
+
+def _notify_outcome(training, event, **extra):
+    notification_services.notify(
+        event,
+        recipients=institute_services.staff_users(training.institute),
+        payload={
+            "training_title": training.title,
+            "training_slug": training.slug,
+            **extra,
+        },
+    )
+
+
 # institute actions
-
-
 @transaction.atomic
 def submit(training, *, by):
     _require_approved_institute(training.institute)
-    # TODO(notify): admins with manage_trainings
-    return _transition(
+    resubmitted = (
+        training.status != TrainingStatus.DRAFT
+    )  # changes were requested, or it was rejected
+    training = _transition(
         training,
         TrainingStatus.SUBMITTED,
         check=_ready_for_submission,
         only_from=TrainingStatus.EDITABLE,
     )
+    _notify_review_requested(
+        training, action="resubmitted" if resubmitted else "submitted"
+    )
+    return training
 
 
 @transaction.atomic
@@ -324,18 +368,20 @@ def approve(training, *, by):
     if training.published_at is None:
         training.published_at = timezone.now()
         training.save(update_fields=["published_at", "modified_at"])
-    # TODO(audit) + TODO(notify): the institute
+    _notify_outcome(training, EventType.TRAINING_APPROVED)
     return training
 
 
 @transaction.atomic
 def request_changes(training, *, by, reason):
-    return _transition(
+    training = _transition(
         training,
         TrainingStatus.CHANGES_REQUESTED,
         reason=reason,
         only_from={TrainingStatus.SUBMITTED},
     )
+    _notify_outcome(training, EventType.TRAINING_CHANGES_REQUESTED, reason=reason)
+    return training
 
 
 @transaction.atomic
@@ -359,12 +405,14 @@ def set_featured(training, *, featured, by):
 
 @transaction.atomic
 def reject(training, *, by, reason):
-    return _transition(
+    training = _transition(
         training,
         TrainingStatus.REJECTED,
         reason=reason,
         only_from={TrainingStatus.SUBMITTED},
     )
+    _notify_outcome(training, EventType.TRAINING_REJECTED, reason=reason)
+    return training
 
 
 # the system
@@ -483,6 +531,7 @@ def update_training(
         training = _transition(
             training, TrainingStatus.SUBMITTED, check=_ready_for_submission
         )
+        _notify_review_requested(training, action="resubmitted")
     return training
 
 

@@ -34,10 +34,19 @@ from apps.institutes.models import (
     InstituteStatusLog,
 )
 from apps.institutes.validators import validate_institute_location
+from apps.notification import services as notification_services
+from apps.notification.constants import EventType
 from apps.users import services as user_services
 from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
 User = get_user_model()
+
+_STATUS_EVENTS = {
+    InstituteStatus.APPROVED: EventType.INSTITUTE_APPROVED,
+    InstituteStatus.REJECTED: EventType.INSTITUTE_REJECTED,
+    InstituteStatus.INFO_REQUESTED: EventType.INSTITUTE_INFO_REQUESTED,
+    InstituteStatus.SUSPENDED: EventType.INSTITUTE_SUSPENDED,
+}
 
 
 # status workflow
@@ -63,7 +72,44 @@ def _transition(institute, to, *, reason="", check=None, by=None, only_from=None
         reason=reason.strip(),
         changed_by=by,
     )
+    _notify_status_change(institute, previous, to, reason=reason.strip())
     return institute
+
+
+def _notify_status_change(institute, previous, to, *, reason):
+    """Every status change goes through `_transition`, so this is the one place that tells people."""
+    if to == InstituteStatus.PENDING:
+        # the owner answered an info request, or re-applied after a rejection: admins look again
+        action = (
+            "re-applied"
+            if previous == InstituteStatus.REJECTED
+            else "answered the information request"
+        )
+        notification_services.notify(
+            EventType.ADMIN_INSTITUTE_VERIFICATION,
+            recipients=user_services.admins_with_permission("manage_institutes"),
+            payload={
+                "institute_name": institute.name,
+                "institute_slug": institute.slug,
+                "action": action,
+            },
+        )
+        return
+    if to == InstituteStatus.APPROVED and previous == InstituteStatus.SUSPENDED:
+        event = (
+            EventType.INSTITUTE_REINSTATED
+        )  # lifting a suspension is not a first approval
+    else:
+        event = _STATUS_EVENTS[to]
+    notification_services.notify(
+        event,
+        recipients=staff_users(institute),
+        payload={
+            "institute_name": institute.name,
+            "institute_slug": institute.slug,
+            "reason": reason,
+        },
+    )
 
 
 def _ready_for_approval(institute):
@@ -77,7 +123,6 @@ def _ready_for_approval(institute):
 
 @transaction.atomic
 def approve(institute, *, by):
-    # TODO(notify): the institute owner
     institute = _transition(
         institute,
         InstituteStatus.APPROVED,
@@ -178,6 +223,15 @@ def register(
         # Last, so that of two parallel requests with the same code only one gets through; the
         # other raises here and its writes are rolled back.
         user_services.consume_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+        notification_services.notify(
+            EventType.ADMIN_INSTITUTE_VERIFICATION,
+            recipients=user_services.admins_with_permission("manage_institutes"),
+            payload={
+                "institute_name": institute.name,
+                "institute_slug": institute.slug,
+                "action": "requested verification",
+            },
+        )
     return institute
 
 

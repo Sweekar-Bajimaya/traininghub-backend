@@ -178,6 +178,7 @@ REST_FRAMEWORK = {
         "register_otp": "5/hour",
         "register_otp_verify": "30/hour",
         "invitation_accept": "10/hour",
+        "notifications": "120/min",
     },
 }
 

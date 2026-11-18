@@ -65,7 +65,7 @@ def notify(event, *, recipients, payload, dedupe_key=""):
 
 
 def unread_count(user):
-    return Notification.objects.filter(recipient=user, read_at__is_null=True).count()
+    return Notification.objects.filter(recipient=user, read_at__isnull=True).count()
 
 
 def mark_read(notification):
