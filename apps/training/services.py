@@ -521,6 +521,18 @@ def institute_counts(trainings):
     )
 
 
+def admin_counts(trainings):
+    """The admin dashboard's cards, in one query. `total` leaves out drafts (an institute's private
+    work: the admin never reviews one), so it means "submitted at some point"; `pending_review` is
+    `SUBMITTED` and `rejected` is `REJECTED` only (not `CHANGES_REQUESTED`)."""
+    return trainings.aggregate(
+        total=Count("pk", filter=~Q(status=TrainingStatus.DRAFT)),
+        pending_review=Count("pk", filter=Q(status=TrainingStatus.SUBMITTED)),
+        approved=Count("pk", filter=Q(status=TrainingStatus.APPROVED)),
+        rejected=Count("pk", filter=Q(status=TrainingStatus.REJECTED)),
+    )
+
+
 def annotate_category_training_count(categories):
     """Annotate categories with `training_count`: the trainings the public can see (`APPROVED`,
     of an `APPROVED` institute) in the category itself and, for a top-level one, in its

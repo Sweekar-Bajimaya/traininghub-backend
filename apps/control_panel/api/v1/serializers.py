@@ -364,3 +364,32 @@ class AdminEnquiryListSerializer(DynamicFieldsModelSerializer):
         # Training.category is the leaf: a sub-category has a parent, a top-level one does not
         category = obj.training.category
         return (category.parent or category).name
+
+
+class DashboardInstituteCountsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    pending = serializers.IntegerField()
+    approved = serializers.IntegerField()
+
+
+class DashboardTrainingCountsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    pending_review = serializers.IntegerField()
+    approved = serializers.IntegerField()
+    rejected = serializers.IntegerField()
+
+
+class DashboardEnquiryCountsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    new = serializers.IntegerField()
+    converted = serializers.IntegerField()
+
+
+class AdminDashboardSummarySerializer(serializers.Serializer):
+    """The admin dashboard's counts. A section is left out (not null) when the caller lacks its
+    permission: `institutes` needs `manage_institutes`, `trainings` `manage_trainings`, `enquiries`
+    `manage_enquiries`."""
+
+    institutes = DashboardInstituteCountsSerializer(required=False)
+    trainings = DashboardTrainingCountsSerializer(required=False)
+    enquiries = DashboardEnquiryCountsSerializer(required=False)

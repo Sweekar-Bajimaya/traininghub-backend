@@ -43,7 +43,7 @@ def make_admin(email, permissions=("manage_trainings",)):
     return User.objects.get(pk=admin.pk)  # fresh instance: permissions are cached per object
 
 
-DETAIL_FIELDS = ("overview", "eligibility", "certification", "skills")
+DETAIL_FIELDS = ("overview", "eligibility", "certification", "skills", "target_audience")
 CONTACT_FIELDS = ("contact_person", "contact_phone", "contact_email")
 
 
@@ -72,7 +72,11 @@ def make_training(
     )
     if location is not None:
         fields["mode"] = "PHYSICAL"  # a located training is physical unless the test says otherwise
-    detail = dict(overview="A detailed description", skills=["Python", "Git"])
+    detail = dict(
+        overview="A detailed description",
+        skills=["Python", "Git"],
+        target_audience=["Fresh graduates"],  # required before a training can be submitted
+    )
     contact = {}
     fields.update(overrides)
     for name in DETAIL_FIELDS:
@@ -125,6 +129,7 @@ def training_payload(category, **overrides):
         "start_date": str(today + timedelta(days=30)),
         "end_date": str(today + timedelta(days=72)),
         "skills": ["Espresso", "Latte art"],
+        "target_audience": ["Hospitality students"],
         "sessions": [
             {"class_days": ["SUN", "MON", "TUE", "WED", "THU", "FRI"], "start_time": "07:00", "end_time": "09:00"}
         ],

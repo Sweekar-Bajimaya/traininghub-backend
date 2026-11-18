@@ -59,6 +59,7 @@ class TrainingTestCase(TestCase):
             fee_npr=Decimal("18500"),
             start_date=self.today + timedelta(days=30),
             end_date=self.today + timedelta(days=72),
+            detail={"target_audience": ["Fresh graduates"]},  # required before a training can be submitted
         )
         data.update(overrides)
         return data
@@ -317,7 +318,7 @@ class SubmitTests(TrainingTestCase):
         self.assertEqual(
             set(caught.exception.message_dict),
             {"short_description", "level", "shifts", "duration_value", "duration_unit", "fee_npr",
-             "start_date", "end_date", "venue", "sessions"},
+             "start_date", "end_date", "target_audience", "venue", "sessions"},
         )
 
     def test_a_start_date_in_the_past_is_refused(self):
