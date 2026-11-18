@@ -937,11 +937,33 @@ class AdminInstitutesApiTests(TempMediaMixin, APITestCase):
         self.assertEqual(set(types), {"REGISTERED", "TRAINING_CREATED"})
 
         training_event = next(e for e in events if e["type"] == "TRAINING_CREATED")
-        # Note: Production bug in apps.control_panel.api.v1.selectors.institute_activity:
-        # sets title to training.title instead of "Training created" and body to
-        # f"{training.title} — {status}" instead of training title only.
-        self.assertEqual(training_event["title"], "Training created")
-        self.assertEqual(training_event["body"], "Legacy Python Course")
+        # the title is the training's own, the body adds its current status label
+        self.assertEqual(training_event["title"], "Legacy Python Course")
+        self.assertEqual(training_event["body"], "Legacy Python Course — Pending review")
+        self.assertEqual(
+            training_event["training"],
+            {
+                "slug": "legacy-python-course",
+                "title": "Legacy Python Course",
+                "status": TrainingStatus.SUBMITTED,
+            },
+        )
+
+    def test_activity_leaves_out_draft_trainings(self):
+        inst, _ = make_institute("Draft Inst", email="draftinst@example.com")
+        cat = Category.objects.create(name="Draft Category")
+        for slug, status in (
+            ("draft-course", TrainingStatus.DRAFT),
+            ("approved-course", TrainingStatus.APPROVED),
+        ):
+            Training.objects.create(
+                institute=inst, category=cat, title=slug, slug=slug, status=status, fee_npr=5000
+            )
+
+        self.client.force_authenticate(self.reviewer)
+        events = self.client.get(f"{ADMIN_URL}{inst.slug}/activity/").data["results"]
+        created = [e["training"]["slug"] for e in events if e["type"] == "TRAINING_CREATED"]
+        self.assertEqual(created, ["approved-course"])
 
     def test_activity_unknown_slug_404_and_auth_matrix(self):
         other_admin = self.admin_with(["manage_enquiries"], "other@example.com")

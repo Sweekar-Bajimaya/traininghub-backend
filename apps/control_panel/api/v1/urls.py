@@ -14,6 +14,11 @@ router.register("enquiries", views.AdminEnquiryViewSet, basename="admin-enquiry"
 
 urlpatterns = [
     path(
+        "dashboard/summary/",
+        views.AdminDashboardSummaryView.as_view(),
+        name="admin-dashboard-summary",
+    ),
+    path(
         "institutes/<slug:institute_slug>/documents/<int:pk>/",
         views.AdminDocumentView.as_view(),
         name="admin-document",

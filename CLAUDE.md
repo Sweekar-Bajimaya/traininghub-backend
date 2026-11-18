@@ -78,13 +78,16 @@ or an open question gets answered. Rules:
   `EXPIRED` (set by a daily job after `end_date`). Editing an `APPROVED` / `UNPUBLISHED` training sends it back to
   `SUBMITTED`; only a `DRAFT` can be deleted; only an `APPROVED` institute creates, submits or republishes. Empty
   `seats` means unlimited.
+  `is_featured` is set only by an admin (`PATCH admin/trainings/{slug}/` through `services.set_featured`), only on an `APPROVED`
+  training of an `APPROVED` institute, and clears itself when the training leaves `APPROVED`; it is shown and filterable
+  (`?is_featured=`) but no ordering uses it yet.
 - Institute types (fixed list): Private Training Affiliated, CTEVT Affiliated, Vocational Training, Language School,
   Company, NGO/INGO, Government.
 - Institute status workflow: `PENDING` → `APPROVED` / `REJECTED` / `INFO_REQUESTED`; a rejected institute can re-apply
   (`REJECTED` → `PENDING`). Only `APPROVED` institutes are visible publicly. Registration is JSON only (institute with its
   registration number and a unique nine-digit PAN/VAT number, owner with a verified email, contact person, at least one
   location); the owner then logs in (even while `PENDING`) and
-  uploads verification documents. Approval needs at least one active location and one document. A suspended institute's staff keep their accounts.
+  uploads verification documents. Approval needs at least one active location and one document. A suspended institute's staff keep their accounts. Every status change (the admin actions and the owner's resubmit) writes an `InstituteStatusLog` row through `services._transition`; `GET admin/institutes/{slug}/activity/` turns that log, the registration date and the non-draft trainings into the review page's timeline.
 - Verification documents: one row per name per institute (`Lower(name)` is unique in the database). `POST institute/documents/`
   only adds (a name the institute already has is a 400, in any status). A rejected document is uploaded again with
   `PATCH institute/documents/{id}/` (only `file`; same id, status `RE_UPLOADED`, the rejected file deleted after commit);
@@ -145,21 +148,21 @@ apps/
                           (one row each, created with the training; the API still shows them as flat fields),
                           `TrainingLocation` (the venue, one row), `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
                           the order they were sent in: ordered by pk, no position column);
-                          `services.py` (create / edit with the review rule, workflow, search vector, expiry),
+                          `services.py` (create / edit with the review rule, workflow, `set_featured`, search vector, expiry),
                           `tasks.py` (search refreshes, `expire_trainings`), management command `expire_trainings`;
                           APIs: public `trainings/` (filters, prefix search, ordering; the `duration` and `start` filter
                           options are served by `trainings/durations/` and `trainings/start-dates/`, built from
                           `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
-                          cover); the admin review API is in `control_panel`. `services.institute_counts` feeds the
+                          cover); the admin review API and the featuring are in `control_panel`. `services.institute_counts` feeds the
                           portal's `institute/summary/` (served by `institutes`)
-  institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links; `services.py` (status
+  institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links, `InstituteStatusLog` (one row per status change); `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
                           (register, `register/send-otp/`, `register/verify-otp/`, profile, cover-image, contact, ceo,
                           social-links, locations, documents, gallery, staff, invitations, resubmit, action-required,
                           `summary/`: the counts of the institute's trainings and enquiries, one nested answer, from the
-                          `training` and `enquiries` services); the admin review API is in `control_panel`
+                          `training` and `enquiries` services); the admin review API and the activity timeline are in `control_panel`
   enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
                           `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
                           and training; `change_status`: free moves, the seat guard; notes, `summary`),
@@ -168,12 +171,15 @@ apps/
                           portal's `institute/summary/` (served by `institutes`). The admin monitor is
                           in `control_panel`; `services.counts` (total and converted) feeds its `summary/`
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
-                          `serializers.py`, `views.py`, `urls.py` and `filters.py` (split them per resource if they
+                          `serializers.py`, `views.py`, `urls.py`, `filters.py` and `selectors.py` (read-only queries that join several apps, today the institute activity timeline; split them per resource if they
                           grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),
                           `categories/` (`users.manage_categories`, no DELETE), `institutes/` (review actions, document
-                          review and download; `users.manage_institutes`), `trainings/` (approve, request-changes,
-                          reject; `users.manage_trainings`), `enquiries/` (list and `summary/` only, read-only; `users.manage_enquiries`);
-                          `GET admin/` lists the five. It only calls the services
+                          review and download, `{slug}/activity/`: the review timeline; `users.manage_institutes`), `trainings/` (approve, request-changes,
+                          reject, and `PATCH {slug}/` to feature or un-feature; `users.manage_trainings`), `enquiries/` (list and `summary/` only, read-only; `users.manage_enquiries`);
+                          `GET admin/` lists the five. Also `dashboard/summary/` (a plain `path`, so not in that list): the
+                          console's cards for institutes, trainings and enquiries in one call, a section per permission
+                          (`HasAnyPlatformPermission`; a section the caller may not see is left out), from each app's
+                          `services.admin_counts`. It only calls the services
                           of the other apps, which keep the rules. `users/{id}/status/` (suspend) is still in `users`.
                           Nothing imports `control_panel` except `apps/api/v1/urls.py`; new admin endpoints go here,
                           not in the resource's own app
@@ -186,7 +192,7 @@ graphify-out/             the generated knowledge graph (graph.json, GRAPH_REPOR
 
 Planned apps (not created yet): `notifications`, `analytics`; later `applications`,
 `learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
-code (send and verify exist; nothing sets the new password yet).
+code (send and verify exist; nothing sets the new password yet). Planned in `training`: a status log of its own, so training approvals and rejections join the institute activity timeline.
 Each app (except `control_panel`, which has no models) follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
 (`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/`,
 `apps/training/api/v1/urls/` and `apps/enquiries/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
@@ -209,7 +215,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 | query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
 | refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |
@@ -343,6 +349,15 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   `\d enquiries_enquiry`, and fix with `python manage.py migrate enquiries zero` then `migrate` (this deletes every enquiry).
 - **Registration checks the code before writing and uses it up inside the transaction** (`institutes/services.register`), so
   a failed registration keeps the code and a code works once. Every caller of `register` must pass the code.
+- **The institute activity timeline only knows what `InstituteStatusLog` recorded.** `institutes/services._transition` is the only
+  writer, so a status set with `QuerySet.update()` or in the shell leaves no row; changes made before `institutes/0006` (2026-11-04)
+  have none either and nothing backfills them. Training approvals and rejections are not in the timeline (trainings keep no status
+  log), and a `TRAINING_CREATED` event shows the training's current status, not the one it was created with.
+- **`Training.is_featured` follows the status only through the services.** `training/services._transition` clears it when a
+  training leaves `APPROVED`, and `expire_trainings` clears it on expiry; a status written any other way (shell, `QuerySet.update()`)
+  leaves a non-live training featured, and it shows as featured again once approved. Suspending an institute does not clear it (the
+  public rule hides the training; `reinstate` brings it back). Feature through `set_featured`, which locks the row and refuses a
+  training that is not `APPROVED` or whose institute is not.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
   uploads raise `AttributeError` until it is added to `base.py`.
 
@@ -355,8 +370,8 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - The team still has to document where the location data came from.
 - Who edits Nepal locations at runtime (today only `load_locations` writes them; the admin site is read-only).
 - Whether enquirers are told when a training is cancelled, and whether "Instructor name" search is needed.
-- Whether the contact person's name and the CEO profile stay public, whether `registration_number` must be unique, and the
-  featured flag / view counts for relevance sort.
+- Whether the contact person's name and the CEO profile stay public, whether `registration_number` must be unique, and
+  whether the relevance sort ranks featured trainings first and uses view counts (the featured flag exists, view counts do not).
 
 ## Verification
 

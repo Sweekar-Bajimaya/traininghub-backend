@@ -185,3 +185,13 @@ def counts(enquiries):
         total=Count("pk"),
         converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
     )
+
+
+def admin_counts(enquiries):
+    """The admin dashboard's cards, in one query: total, new and converted (the frontend shows
+    converted / total as a percentage). Pass an unfiltered queryset."""
+    return enquiries.aggregate(
+        total=Count("pk"),
+        new=Count("pk", filter=Q(status=EnquiryStatus.NEW)),
+        converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
+    )

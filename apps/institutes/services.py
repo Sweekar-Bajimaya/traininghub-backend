@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.functions import Length
 from django.db.models.lookups import GreaterThanOrEqual
 from django.utils import timezone
@@ -563,4 +563,14 @@ def annotate_profile_completion(queryset):
         has_social_links=_at_least(
             InstituteSocialLink.objects.filter(**mine), SOCIAL_LINKS_MIN
         ),
+    )
+
+
+def admin_counts(institutes):
+    """The admin dashboard's cards, in one query: every institute, those waiting for an admin
+    (`PENDING` only: `INFO_REQUESTED` is waiting for the owner) and the approved ones."""
+    return institutes.aggregate(
+        total=Count("pk"),
+        pending=Count("pk", filter=Q(status=InstituteStatus.PENDING)),
+        approved=Count("pk", filter=Q(status=InstituteStatus.APPROVED)),
     )
