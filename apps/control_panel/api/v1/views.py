@@ -92,9 +92,7 @@ class AdminDashboardSummaryView(RetrieveAPIView):
                 Training.objects.all()
             )
         if user.has_perm("users.manage_enquiries"):
-            summary["enquiries"] = enquiry_services.admin_counts(
-                Enquiry.objects.all()
-            )
+            summary["enquiries"] = enquiry_services.admin_counts(Enquiry.objects.all())
         return summary
 
 
@@ -324,7 +322,10 @@ class AdminDocumentView(GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = institute_services.review_document(
-            document, status=serializer.validated_data["status"], by=request.user
+            document,
+            status=serializer.validated_data["status"],
+            reason=serializer.validated_data.get("reason", ""),
+            by=request.user,
         )
         return Response(
             AdminDocumentSerializer(

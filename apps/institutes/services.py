@@ -359,19 +359,42 @@ def reupload_document(document, *, file):
     document.file = file
     document.status = DocumentStatus.RE_UPLOADED
     document.save(update_fields=["file", "status", "modified_at"])
-    transaction.on_commit(
-        lambda: storage.delete(old_name)
-    )  # the rejected file is not kept
+    transaction.on_commit(lambda: storage.delete(old_name))
+    institute = document.institute  # new from here
+    notification_services.notify(
+        EventType.ADMIN_DOCUMENT_REUPLOADED,
+        recipients=user_services.admins_with_permission("manage_institutes"),
+        payload={
+            "institute_name": institute.name,
+            "institute_slug": institute.slug,
+            "document_name": document.name,
+        },
+    )
     return document
 
 
 @transaction.atomic
-def review_document(document, *, status, by):
+def review_document(document, *, status, by, reason=""):
     if status not in (DocumentStatus.VERIFIED, DocumentStatus.REJECTED):
         raise ValidationError({"status": "Choose VERIFIED or REJECTED."})
-    document = InstituteDocument.objects.select_for_update().get(pk=document.pk)
+    document = (
+        InstituteDocument.objects.select_for_update(of=("self",))
+        .select_related("institute")
+        .get(pk=document.pk)
+    )
     document.status = status
-    document.save(update_fields=["status", "modified_at"])
+    document.reason = reason.strip() if status == DocumentStatus.REJECTED else ""
+    document.save(update_fields=["status", "reason", "modified_at"])
+    if status == DocumentStatus.REJECTED:
+        notification_services.notify(
+            EventType.DOCUMENT_REJECTED,
+            recipients=staff_users(document.institute),
+            payload={
+                "institute_name": document.institute.name,
+                "document_name": document.name,
+                "reason": document.reason or "No reason was given.",
+            },
+        )
     return document
 
 

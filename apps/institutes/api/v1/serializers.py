@@ -367,8 +367,8 @@ class InstituteDocumentSerializer(DynamicFieldsModelSerializer):
 
     class Meta:
         model = InstituteDocument
-        fields = ("id", "name", "file", "status", "created_at")
-        read_only_fields = ("id", "status", "created_at")
+        fields = ("id", "name", "file", "status", "reason", "created_at")
+        read_only_fields = ("id", "status", "reason", "created_at")
         create_only_fields = ("name",)
         extra_kwargs = {"file": {"write_only": True}}  # never echoed back
 

@@ -112,6 +112,7 @@ class InstituteDocument(BaseModel):
     status = models.CharField(
         max_length=20, choices=DocumentStatus.CHOICES, default=DocumentStatus.PENDING
     )
+    reason = models.TextField(blank=True)
 
     class Meta:
         indexes = [

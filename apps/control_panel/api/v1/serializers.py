@@ -146,14 +146,21 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
 class AdminDocumentSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = InstituteDocument
-        fields = ("id", "name", "status", "created_at")  # never the file path or URL
-        read_only_fields = ("id", "name", "created_at")
+        fields = (
+            "id",
+            "name",
+            "status",
+            "reason",
+            "created_at",
+        )  # never the file path or URL
+        read_only_fields = ("id", "name", "reason", "created_at")
 
 
 class DocumentReviewSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=(DocumentStatus.VERIFIED, DocumentStatus.REJECTED)
     )
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 
 # the review actions an admin can take, by the status they move the institute to
@@ -276,13 +283,16 @@ class AdminTrainingFeaturedSerializer(DynamicFieldsSerializer):
                 {key: "This field cannot be changed here." for key in sorted(extra)}
             )
         return super().to_internal_value(data)
-        
+
 
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
 
     class Meta(PortalTrainingListSerializer.Meta):
-        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name", "is_featured")
+        fields = PortalTrainingListSerializer.Meta.fields + (
+            "institute_name",
+            "is_featured",
+        )
 
 
 class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):

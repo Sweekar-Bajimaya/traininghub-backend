@@ -6,7 +6,7 @@ from apps.notification.registry import EVENTS
 
 
 def send(notification):
-    spec = EVENTS(notification.type)
+    spec = EVENTS[notification.type]
     # one line: a newline in a subject is an error in Django's mail layer
     subject = " ".join(spec.subject(notification.payload).split())
     send_mail(

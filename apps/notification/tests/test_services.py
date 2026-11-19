@@ -48,7 +48,10 @@ class NotifyTests(NoQueueMixin, TestCase):
     def test_a_failed_insert_leaves_the_callers_transaction_usable(self):
         bad_type = "x" * 60  # longer than the column, so the database refuses the row
         with mock.patch.dict(EVENTS, {bad_type: Event(IN_APP, "Title")}):
-            self.assertEqual(services.notify(bad_type, recipients=[self.owner], payload={}), [])
+            # the failure is logged (and captured here, so the traceback stays out of the test run)
+            with self.assertLogs("apps.notification.services", level="ERROR"):
+                result = services.notify(bad_type, recipients=[self.owner], payload={})
+        self.assertEqual(result, [])
         self.assertTrue(User.objects.exists())  # raises if the transaction were broken
 
     def test_an_unknown_event_type_raises(self):
