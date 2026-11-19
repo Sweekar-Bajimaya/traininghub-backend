@@ -21,6 +21,8 @@ from apps.training.models import (
     TrainingModule,
     TrainingSession,
 )
+from apps.faq.api.v1.serializers import FAQSerializer
+from apps.faq.constants import FAQ_MAX_PER_TRAINING
 
 DAY_LABELS = dict(WeekDay.CHOICES)
 
@@ -128,6 +130,7 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
     schedule = serializers.SerializerMethodField()
     modules = serializers.SerializerMethodField()
     outcomes = serializers.SerializerMethodField()
+    faqs = serializers.SerializerMethodField()
     contact = serializers.SerializerMethodField()
     target_audience = serializers.ListField(
         source="detail.target_audience", read_only=True
@@ -143,6 +146,7 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
             "schedule",
             "modules",
             "outcomes",
+            "faqs",
             "contact",
         )
 
@@ -164,6 +168,9 @@ class PublicTrainingDetailSerializer(PublicTrainingListSerializer):
 
     def get_outcomes(self, obj):
         return [o.text for o in obj.outcomes.all()]
+
+    def get_faqs(self, obj):
+        return FAQSerializer(obj.faqs.all(), many=True).data
 
     def get_contact(self, obj):
         # a missing row raises an AttributeError subclass, so getattr falls back to the default
@@ -277,6 +284,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
     sessions = TrainingSessionSerializer(many=True, required=False)
     modules = TrainingModuleSerializer(many=True, required=False)
     outcomes = LearningOutcomeSerializer(many=True, required=False)
+    faqs = FAQSerializer(many=True, required=False, max_length=FAQ_MAX_PER_TRAINING)
 
     class Meta:
         model = Training
@@ -314,6 +322,7 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
             "sessions",
             "modules",
             "outcomes",
+            "faqs",
             "created_at",
         )
         read_only_fields = (
@@ -360,7 +369,15 @@ class PortalTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializ
     def _children(data):
         return {
             key: data.pop(key, None)
-            for key in ("sessions", "modules", "outcomes", "detail", "contact", "venue")
+            for key in (
+                "sessions",
+                "modules",
+                "outcomes",
+                "faqs",
+                "detail",
+                "contact",
+                "venue",
+            )
         }
 
     def create(self, validated_data):
