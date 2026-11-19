@@ -139,10 +139,11 @@ class AdminCategoryApiTests(APITestCase):
         self.assertEqual((top.data["name"], top.data["hue"]), ("Hospitality", 50))
         other = self.client.post(ADMIN_URL, {"name": "Healthcare"}, format="json").data
         sub = self.client.post(
-            ADMIN_URL, {"name": "Culinary", "parent": top.data["id"]}, format="json"
+            ADMIN_URL, {"name": "Culinary", "parent": top.data["slug"]}, format="json"
         ).data
-        url = f"{ADMIN_URL}{sub['id']}/"
-        res = self.client.patch(url, {"name": "Cooking", "parent": other["id"]}, format="json")
+        self.assertEqual(sub["parent"], top.data["slug"])
+        url = f"{ADMIN_URL}{sub['slug']}/"  # the admin API takes and routes by slug
+        res = self.client.patch(url, {"name": "Cooking", "parent": other["slug"]}, format="json")
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(res.data["parent_name"], "Healthcare")
         res = self.client.patch(url, {"is_active": False}, format="json")
@@ -158,8 +159,9 @@ class AdminCategoryApiTests(APITestCase):
     def test_a_sub_category_cannot_be_a_parent(self):
         self.client.force_authenticate(self.reviewer)
         sub = make_category()
-        res = self.client.post(ADMIN_URL, {"name": "Deep", "parent": sub.pk}, format="json")
+        res = self.client.post(ADMIN_URL, {"name": "Deep", "parent": sub.slug}, format="json")
         self.assertEqual(res.status_code, 400)
+        self.assertIn("parent", res.data)  # only a top-level category is accepted as a parent
 
     def test_a_hue_above_360_is_400_not_a_database_error(self):
         self.client.force_authenticate(self.reviewer)
@@ -170,7 +172,7 @@ class AdminCategoryApiTests(APITestCase):
     def test_there_is_no_delete(self):
         self.client.force_authenticate(self.reviewer)
         category = make_category()
-        self.assertEqual(self.client.delete(f"{ADMIN_URL}{category.pk}/").status_code, 405)
+        self.assertEqual(self.client.delete(f"{ADMIN_URL}{category.slug}/").status_code, 405)
 
 
 class LoadCategoriesTests(TestCase):

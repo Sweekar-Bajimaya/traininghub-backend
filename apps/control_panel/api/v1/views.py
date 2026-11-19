@@ -15,28 +15,30 @@ from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.generics import GenericAPIView, get_object_or_404
+from rest_framework.generics import GenericAPIView, RetrieveAPIView, get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.models.category import Category
-from apps.common.viewsets import CreateListRetrieveUpdateViewSet, ReadOnlyViewSet
+from apps.common.viewsets import (
+    CreateListRetrieveUpdateViewSet,
+    ListViewSet,
+    ReadOnlyViewSet,
+)
 from apps.control_panel.api.v1 import selectors
 from apps.control_panel.api.v1.filters import (
     AdminCategoryFilter,
-    AdminInstituteFilter,
     AdminEnquiryFilter,
+    AdminInstituteFilter,
     AdminTrainingFilter,
-)
-from apps.common.viewsets import (
-    ListViewSet,
 )
 from apps.control_panel.api.v1.serializers import (
     AdminCategorySerializer,
+    AdminDashboardSummarySerializer,
     AdminDocumentSerializer,
     AdminEnquiryListSerializer,
-    AdminInstituteSerializer,
     AdminInstituteListSerializer,
+    AdminInstituteSerializer,
     AdminSerializer,
     AdminTrainingFeaturedSerializer,
     AdminTrainingListSerializer,
@@ -48,7 +50,7 @@ from apps.enquiries import services as enquiry_services
 from apps.enquiries.models import Enquiry
 from apps.institutes import services as institute_services
 from apps.institutes.api.v1.views import private_file_response
-from apps.institutes.constants import InstituteStatus, DocumentStatus, MemberRole
+from apps.institutes.constants import DocumentStatus, InstituteStatus, MemberRole
 from apps.institutes.models import (
     Institute,
     InstituteDocument,
@@ -59,9 +61,41 @@ from apps.training import services as training_services
 from apps.training.api.v1.views import with_content
 from apps.training.models import Training
 from apps.users.constants import Role
-from apps.users.permissions import HasPlatformPermission
+from apps.users.permissions import HasAnyPlatformPermission, HasPlatformPermission
 
 User = get_user_model()
+
+
+# dashboard
+class AdminDashboardSummaryView(RetrieveAPIView):
+    """The admin dashboard's cards in one call: `institutes`, `trainings` and `enquiries`, each with
+    its own counts, unfiltered. A section is left out when the caller lacks its permission, and an
+    admin with none of the three gets 403. One aggregate query per section."""
+
+    serializer_class = AdminDashboardSummarySerializer
+    permission_classes = [HasAnyPlatformPermission]
+    required_permissions = (
+        "users.manage_institutes",
+        "users.manage_trainings",
+        "users.manage_enquiries",
+    )
+
+    def get_object(self):
+        user = self.request.user
+        summary = {}
+        if user.has_perm("users.manage_institutes"):
+            summary["institutes"] = institute_services.admin_counts(
+                Institute.objects.all()
+            )
+        if user.has_perm("users.manage_trainings"):
+            summary["trainings"] = training_services.admin_counts(
+                Training.objects.all()
+            )
+        if user.has_perm("users.manage_enquiries"):
+            summary["enquiries"] = enquiry_services.admin_counts(
+                Enquiry.objects.all()
+            )
+        return summary
 
 
 # admins

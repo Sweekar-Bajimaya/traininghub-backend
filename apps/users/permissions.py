@@ -17,6 +17,17 @@ class HasPlatformPermission(IsPlatformAdmin):
         )
 
 
+class HasAnyPlatformPermission(IsPlatformAdmin):
+    """Set `required_permissions = ("users.manage_a", "users.manage_b")` on the view: an admin passes
+    with at least one. For a view that answers in sections and leaves out the ones the caller
+    may not see."""
+
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and any(
+            request.user.has_perm(permission) for permission in view.required_permissions
+        )
+
+
 class IsInstituteStaff(BasePermission):
     def has_permission(self, request, view):
         u = request.user

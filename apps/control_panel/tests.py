@@ -3,13 +3,20 @@ from rest_framework.test import APITestCase
 
 from apps.common.models.category import Category
 from apps.enquiries.constants import EnquiryStatus
+from apps.enquiries.models import Enquiry
 from apps.enquiries.tests.helpers import (
     approved_institute,
     count_queries,
     make_admin,
+    make_category,
     make_enquiry,
     make_training,
 )
+from apps.institutes.constants import InstituteStatus
+from apps.institutes.models import Institute
+from apps.institutes.tests.helpers import make_institute
+from apps.training.constants import TrainingStatus
+from apps.training.models import Training
 from apps.users.constants import Role
 
 User = get_user_model()
@@ -164,3 +171,115 @@ class AdminEnquiryTests(APITestCase):
         for _ in range(5):
             make_enquiry(self.training)
         self.assertEqual(count_queries(lambda: self.client.get(self.URL)), before)
+
+
+class AdminDashboardSummaryTests(APITestCase):
+    """`admin/dashboard/summary/`: the dashboard's cards in one call, a section per permission."""
+
+    URL = ROOT + "dashboard/summary/"
+
+    def setUp(self):
+        # institutes: 5 in all, 1 PENDING (INFO_REQUESTED waits for the owner, so it is not counted), 2 APPROVED
+        self.institute, _, _ = approved_institute()
+        for number, status in enumerate(
+            (
+                InstituteStatus.APPROVED,
+                InstituteStatus.PENDING,
+                InstituteStatus.INFO_REQUESTED,
+                InstituteStatus.REJECTED,
+            )
+        ):
+            make_institute(f"Institute {number}", status, f"owner{number}@example.com")
+        # trainings: 9 rows, the DRAFT is left out of the total (8); CHANGES_REQUESTED is not "rejected"
+        self.category = make_category()
+        self.trainings = {}
+        for number, status in enumerate(
+            (
+                TrainingStatus.DRAFT,
+                TrainingStatus.SUBMITTED,
+                TrainingStatus.SUBMITTED,
+                TrainingStatus.APPROVED,
+                TrainingStatus.APPROVED,
+                TrainingStatus.APPROVED,
+                TrainingStatus.REJECTED,
+                TrainingStatus.CHANGES_REQUESTED,
+                TrainingStatus.UNPUBLISHED,
+            )
+        ):
+            self.trainings[number] = make_training(
+                self.institute, category=self.category, status=status, title=f"Course {number}"
+            )
+        # enquiries: 4 in all, 2 NEW, 1 CONVERTED
+        training = self.trainings[3]
+        make_enquiry(training)
+        make_enquiry(training)
+        make_enquiry(training, status=EnquiryStatus.CONTACTED)
+        make_enquiry(training, status=EnquiryStatus.CONVERTED)
+        self.root = User.objects.create_superuser("root@example.com", PASSWORD)
+        self.client.force_authenticate(self.root)
+
+    def test_every_section_for_a_super_admin(self):
+        res = self.client.get(self.URL)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res.data,
+            {
+                "institutes": {"total": 5, "pending": 1, "approved": 2},
+                "trainings": {"total": 8, "pending_review": 2, "approved": 3, "rejected": 1},
+                "enquiries": {"total": 4, "new": 2, "converted": 1},
+            },
+        )
+
+    def test_an_empty_platform_reads_zero(self):
+        Enquiry.objects.all().delete()
+        Training.objects.all().delete()
+        Institute.objects.all().delete()
+        self.assertEqual(
+            self.client.get(self.URL).data,
+            {
+                "institutes": {"total": 0, "pending": 0, "approved": 0},
+                "trainings": {"total": 0, "pending_review": 0, "approved": 0, "rejected": 0},
+                "enquiries": {"total": 0, "new": 0, "converted": 0},
+            },
+        )
+
+    def test_access(self):
+        owner = make_institute("Gamma", InstituteStatus.APPROVED, "gamma@example.com")[1]
+        no_rights = make_admin("none@example.com", permissions=())
+        cases = ((None, 401), (owner, 403), (no_rights, 403), (self.root, 200))
+        for user, expected in cases:
+            with self.subTest(user=getattr(user, "email", "anonymous")):
+                self.client.force_authenticate(user)
+                self.assertEqual(self.client.get(self.URL).status_code, expected)
+
+    def test_a_section_needs_its_own_permission(self):
+        cases = (
+            (("manage_institutes",), {"institutes"}),
+            (("manage_trainings",), {"trainings"}),
+            (("manage_enquiries",), {"enquiries"}),
+            (("manage_institutes", "manage_enquiries"), {"institutes", "enquiries"}),
+        )
+        for permissions, expected in cases:
+            with self.subTest(permissions=permissions):
+                admin = make_admin("admin@example.com", permissions=permissions)
+                self.client.force_authenticate(admin)
+                res = self.client.get(self.URL)
+                self.assertEqual(res.status_code, 200)
+                self.assertEqual(set(res.data), expected)
+                admin.delete()
+
+    def test_the_counts_ignore_filters(self):
+        res = self.client.get(self.URL, {"status": "APPROVED", "institute": self.institute.slug})
+        self.assertEqual(res.data["enquiries"]["total"], 4)
+        self.assertEqual(res.data["institutes"]["total"], 5)
+
+    def test_nothing_can_be_written(self):
+        for method in (self.client.post, self.client.put, self.client.patch, self.client.delete):
+            with self.subTest(method=method.__name__):
+                self.assertEqual(method(self.URL).status_code, 405)
+
+    def test_three_queries_however_many_rows(self):
+        self.assertEqual(count_queries(lambda: self.client.get(self.URL)), 3)
+        for _ in range(5):
+            make_enquiry(self.trainings[3])
+        self.assertEqual(count_queries(lambda: self.client.get(self.URL)), 3)

@@ -330,7 +330,7 @@ class DetailTests(PublicTrainingTestCase):
         shown = make_training(self.institute, location=self.location)
         make_training(self.institute, title="Second")
         make_training(self.institute, title="Draft", status=S.DRAFT)  # not counted
-        other, _, _ = approved_institute()  # hypothetical second institute; adapt to the helper
+        other, _, _ = approved_institute("Beta Institute", "beta@example.com", code=2)
         make_training(other, title="Elsewhere")  # not counted
         data = self.client.get(f"{URL}{shown.slug}/").data
         self.assertEqual(data["institute"]["training_count"], 2)
