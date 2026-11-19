@@ -11,11 +11,13 @@ class FAQAdmin(admin.ModelAdmin):
         "answer",
         "created_at",
     )
+    list_select_related = ("training",)
     search_fields = (
         "question",
         "answer",
         "training__title",
     )
     list_filter = ("created_at", "training")
+    raw_id_fields = ("training",) 
     ordering = ("-created_at",)
     list_per_page = 10

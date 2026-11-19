@@ -27,7 +27,6 @@ from apps.training.models import (
     TrainingModule,
     TrainingSession,
 )
-from apps.faq.models import FAQ
 
 
 # derived values and search
@@ -415,7 +414,7 @@ def create_training(
     _save_extras(training, detail or {}, contact or {})  # every training has both rows
     _save_venue(training, venue)  # create requires one, so this is never skipped
     _replace_children(training, sessions, modules, outcomes)
-    faq_services.replace_faqs(training, faq)
+    faq_services.replace_faqs(training, faqs)
     refresh_search_vector(training)
     return training
 
