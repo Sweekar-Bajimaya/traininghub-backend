@@ -101,6 +101,10 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
         allow_null=True,
     )
     parent_name = serializers.SerializerMethodField()
+    # annotated by AdminCategoryViewSet: approved trainings of approved institutes in the category
+    # (sub-categories included), and every enquiry that came for the category's trainings
+    live_trainings_count = serializers.IntegerField(read_only=True)
+    enquiries_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Category
@@ -113,6 +117,8 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
             "icon",
             "hue",
             "is_active",
+            "live_trainings_count",
+            "enquiries_count",
             "created_at",
         )
         read_only_fields = ("id", "slug", "created_at")
@@ -176,6 +182,9 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
     locations = InstituteLocationSerializer(many=True, read_only=True)
     available_actions = serializers.SerializerMethodField()
+    trainings_count = serializers.IntegerField(
+        read_only=True
+    )  # all its trainings, any status
 
     class Meta:
         model = Institute
@@ -198,6 +207,7 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "locations",
             "documents",
             "available_actions",
+            "trainings_count",
         )
 
     def get_owner_email(self, obj):
@@ -277,13 +287,20 @@ class AdminTrainingFeaturedSerializer(DynamicFieldsSerializer):
                 {key: "This field cannot be changed here." for key in sorted(extra)}
             )
         return super().to_internal_value(data)
-        
+
 
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
+    enquiries_count = serializers.IntegerField(
+        read_only=True
+    )  # annotated by the viewset
 
     class Meta(PortalTrainingListSerializer.Meta):
-        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name", "is_featured")
+        fields = PortalTrainingListSerializer.Meta.fields + (
+            "institute_name",
+            "is_featured",
+            "enquiries_count",
+        )
 
 
 class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -297,10 +314,17 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     modules = TrainingModuleSerializer(many=True, read_only=True)
     outcomes = LearningOutcomeSerializer(many=True, read_only=True)
     faqs = FAQSerializer(many=True, read_only=True)
+    enquiries_count = serializers.IntegerField(
+        read_only=True
+    )  # annotated by the viewset
 
     class Meta:
         model = Training
-        fields = PortalTrainingSerializer.Meta.fields + ("institute", "is_featured")
+        fields = PortalTrainingSerializer.Meta.fields + (
+            "institute",
+            "is_featured",
+            "enquiries_count",
+        )
         read_only_fields = fields
 
     def get_institute(self, obj):
