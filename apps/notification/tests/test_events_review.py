@@ -13,6 +13,7 @@ from apps.notification.tests.helpers import (
 from apps.training import services as training_services
 from apps.training.constants import TrainingStatus
 from apps.training.tests.helpers import make_training
+from apps.users import services as user_services
 
 
 class InstituteReviewEventTests(NoQueueMixin, TestCase):
@@ -99,3 +100,18 @@ class TrainingReviewEventTests(NoQueueMixin, TestCase):
             recipient=self.owner, type=EventType.TRAINING_REJECTED
         )
         self.assertEqual(row.payload["reason"], "Duplicate")
+
+
+class AdminAccountEventTests(NoQueueMixin, TestCase):
+    def test_a_new_admin_gets_a_password_note_and_no_email(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            admin = user_services.create_admin(
+                email="new@example.com",
+                password="Str0ng-pass-123",
+                full_name="New Admin",
+            )
+        row = Notification.objects.get(
+            recipient=admin, type=EventType.ADMIN_ACCOUNT_CREATED
+        )
+        self.assertIn("password", row.body)
+        self.queued.assert_not_called()  # admin events are in-app only

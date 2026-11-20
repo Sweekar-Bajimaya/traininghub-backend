@@ -15,6 +15,8 @@ from rest_framework_simplejwt.token_blacklist.models import (
 )
 
 from apps.common.exceptions import TooManyRequests
+from apps.notification import services as notification_services
+from apps.notification.constants import EventType
 from apps.users.constants import (
     GRANTABLE_PERMISSIONS,
     OTP_COOLDOWN_SECONDS,
@@ -59,6 +61,11 @@ def create_admin(*, email, password, full_name, permissions=(), **extra):
         **extra,
     )
     _set_permissions(admin, permissions)
+    notification_services.notify(
+        EventType.ADMIN_ACCOUNT_CREATED,
+        recipients=[admin],
+        payload={"full_name": admin.full_name},
+    )
     # TODO(audit): AuditService.record(actor, "admin.created", admin)
     return admin
 
