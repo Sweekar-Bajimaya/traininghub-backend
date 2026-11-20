@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,6 +24,21 @@ APPS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "apps")
 # a deploy that forgets to set it does not accidentally ship the toolbar
 # or dev-relaxed security headers).
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
+
+# True under `manage.py test`. The test client speaks plain HTTP and the tests use their own Redis
+# database, so a few settings below stand down for it.
+TESTING = "test" in sys.argv
+
+
+def env_flag(name, default):
+    value = os.environ.get(name)
+    return default if value is None else value.lower() in ("true", "1", "yes")
+
+
+def env_list(name):
+    """A comma-separated environment variable as a list; unset or empty is []."""
+    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+
 
 # Application definition
 DJANGO_APPS = [
@@ -159,7 +175,8 @@ REST_FRAMEWORK = {
         "apps.users.authentication.ActiveAccountJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
+    # limit/offset with `limit` capped at 100 (a bare LimitOffsetPagination has no ceiling).
+    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.CappedLimitOffsetPagination",
     "PAGE_SIZE": 10,
     # Maps django.core.exceptions.ValidationError to a 400 instead of a 500.
     "EXCEPTION_HANDLER": "config.exception_handlers.api_exception_handler",
@@ -185,8 +202,35 @@ REST_FRAMEWORK = {
 LOGIN_URL = "rest_framework:login"
 LOGOUT_URL = "rest_framework:logout"
 
-# CORS Settings
+# The Next.js frontend, used for links in emails and as the default CORS origin.
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+
+# CORS is an explicit allow-list of frontend origins (docs/System Design.md, section 6). It defaults
+# to the origin of FRONTEND_BASE_URL; set CORS_ALLOWED_ORIGINS (comma-separated) to allow others.
+# Allow-all is a development choice that belongs in env.py (see env.sample.py), never here.
+_frontend = urlsplit(FRONTEND_BASE_URL)
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS") or [
+    f"{_frontend.scheme}://{_frontend.netloc}"
+]
+# `App-Key` is the header apps.app_key reads; a browser may only send it if the preflight allows it.
+CORS_ALLOW_HEADERS = (*default_headers, "app-key")
+
+# Transport security, on whenever DEBUG is off (never under `manage.py test`). Behind a proxy that
+# ends TLS, set TRUST_X_FORWARDED_PROTO=true so Django sees the original https request: without it
+# SECURE_SSL_REDIRECT loops. Only do that when the proxy overwrites X-Forwarded-Proto itself.
+# HSTS starts at one hour because a browser keeps the rule for that long and a mistake cannot be
+# undone sooner; raise SECURE_HSTS_SECONDS once https works everywhere. Subdomains and preload stay
+# off because they bind every subdomain of the host.
+if not DEBUG and not TESTING:
+    SECURE_SSL_REDIRECT = env_flag("SECURE_SSL_REDIRECT", True)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_flag("SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
+    SECURE_HSTS_PRELOAD = env_flag("SECURE_HSTS_PRELOAD", False)
+    if env_flag("TRUST_X_FORWARDED_PROTO", False):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),
@@ -251,7 +295,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 # The tests clear one-time codes and throttle counters (cache.delete_pattern), so `manage.py test`
 # gets its own Redis database for the cache. Sharing REDIS_URL's would wipe the codes someone just
 # requested from the dev server. Only the cache moves: the django-q broker stays on REDIS_URL.
-if "test" in sys.argv:
+if TESTING:
     CACHE_REDIS_URL = os.environ.get("REDIS_TEST_URL") or (
         urlsplit(REDIS_URL)._replace(path="/15").geturl()
     )
@@ -303,7 +347,6 @@ INSTITUTE_INVITATION_TTL_DAYS = 7
 INSTITUTE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 INSTITUTE_DOCUMENT_EXTENSIONS = ("pdf", "jpg", "jpeg", "png")
 INSTITUTE_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png")
-FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
 # Image file
 ATTACHMENT_MAX_UPLOAD_SIZE = 5 * 1024 * 1024

@@ -128,11 +128,20 @@ or an open question gets answered. Rules:
 ```
 config/
   settings/__init__.py    `from .base import *` then `from .env import *`
-  settings/base.py        shared settings; reads secrets/toggles from os.environ
-  settings/env.sample.py  template -> copy to env.py (gitignored): DB, SECRET_KEY, JWT key loading
+  settings/base.py        shared settings; reads secrets/toggles from os.environ; the CORS allow-list and, with DEBUG off,
+                          the transport-security settings (see Landmines)
+  settings/env.sample.py  template -> copy to env.py (gitignored): DB, SECRET_KEY (required when DEBUG is off), ALLOWED_HOSTS,
+                          allow-all CORS only under DEBUG, JWT key loading
   exception_handlers.py   maps Django ValidationError -> 400, database IntegrityError -> 409 and `TooManyRequests` -> 429
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
+  app_key/                `DistributedAppKey` (a UUID key per client, managed in the Django admin) and the permission
+                          `api/v1/permissions.DistributedKeyAuthentication`: a signed-in user, an `Origin` in `CORS_ALLOWED_ORIGINS`
+                          or a valid `App-Key` header passes, anything else is a 403. `services.is_valid_key` caches a key that exists
+                          for 5 minutes and a `post_delete` signal forgets it at once. Required (decided 2026-11-20) on the public
+                          write endpoints only: `POST enquiries/`, `institute/register/` and its `send-otp/` / `verify-otp/`; every
+                          read, login, the password-reset codes and the invitation accept stay open. Those views set `authentication_classes = []`,
+                          so on them a signed-in user gets no pass: the origin or the key decides. Imports no domain app
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
                           `enquiries/`, `institute/trainings/`, `institute/enquiries/`, `institute/`, `admin/`, `notifications/` (one
                           include per resource group; `admin/` is one include, of `control_panel`)
@@ -140,7 +149,8 @@ apps/
                           `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
                           `category.py`; `BaseViewSet` + mixin viewsets, `ActionAPIView` (POST that answers 200),
                           DynamicFields serializers, validators, `exceptions.py` (`TooManyRequests`), `throttling.py`
-                          (`IdentityScopedRateThrottle`: keyed on the submitted email), `utils/` (plain helpers, no models).
+                          (`IdentityScopedRateThrottle`: keyed on the submitted email), `pagination.py`
+                          (`CappedLimitOffsetPagination`, the project default: `limit` capped at 100), `utils/` (plain helpers, no models).
                           `Location` (province / district / municipality in one table, denormalised
                           `province` / `district`), management command `load_locations` (data in
                           `common/data/`: provinces.json, districts.json, cities.json), public read-only API
@@ -246,7 +256,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails, notification emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts), `apps/enquiries/tests/` and `apps/notification/tests/` (the notify service, the inbox API, one file per group of events, the purge); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/app_key/tests.py` (the key permission, its cache and revocation, the CORS header) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts), `apps/enquiries/tests/` and `apps/notification/tests/` (the notify service, the inbox API, one file per group of events, the purge); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 | query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
 | refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |
@@ -292,6 +302,9 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Public vs authenticated: `ActiveAccountJWTAuthentication` (default auth class) treats a deactivated
   user's token as anonymous on public views and rejects it elsewhere. Suspending = `is_active=False`.
 - Public listings return only `APPROVED` trainings of `APPROVED` institutes.
+- Lists are paged with `limit` / `offset` through `CappedLimitOffsetPagination` (the `DEFAULT_PAGINATION_CLASS`, page size
+  10): a `limit` above 100 is lowered to 100, not refused. A view that really shows every row sets `pagination_class = None`
+  and says why (the locations and notes lists do).
 - Throttle by scope (`throttle_scope` on the view); rates are in `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`. A scope
   with no rate there makes every request to that view a 500 (`ImproperlyConfigured`). The OTP views use
   `IdentityScopedRateThrottle` (scopes `otp`, `register_otp`, `register_otp_verify`). The public enquiry form uses the plain
@@ -311,6 +324,16 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 
 ## Landmines
 
+- **With `DEBUG` off, `base.py` turns on transport security** (never under `manage.py test`, which sets `TESTING`):
+  `SECURE_SSL_REDIRECT`, secure session and CSRF cookies, HSTS for 3600 seconds. Behind a proxy that ends TLS, set
+  `TRUST_X_FORWARDED_PROTO=true` or every request redirects forever (only when the proxy overwrites `X-Forwarded-Proto`
+  itself). `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`, `SECURE_HSTS_INCLUDE_SUBDOMAINS` and `SECURE_HSTS_PRELOAD` are
+  environment variables too; raise the HSTS seconds only once https works everywhere. `DEBUG=false python manage.py check --deploy`
+  is clean except W005 / W021 (subdomains and preload stay off on purpose: they bind every subdomain of the host).
+- **CORS is an allow-list**: the origin of `FRONTEND_BASE_URL` plus `CORS_ALLOWED_ORIGINS` (comma-separated). Allow-all is set
+  only in `env.py` (`CORS_ALLOW_ALL_ORIGINS = DEBUG` in `env.sample.py`). An `env.py` copied before 2026-11-20 still has
+  `CORS_ORIGIN_ALLOW_ALL = True`, `ALLOWED_HOSTS = ["*"]`, an insecure `SECRET_KEY` fallback and a one-day access token
+  whatever `DEBUG` says: copy those lines from the current `env.sample.py` before deploying.
 - **`config/settings/env.py` is gitignored.** A fresh clone won't boot until `env.sample.py` is copied
   to `env.py` and filled in. `DEBUG` is read from the environment in `base.py`, so it must be set before
   `base.py` is imported (`env.py` does this with `os.environ.setdefault`), otherwise debug toolbar is
