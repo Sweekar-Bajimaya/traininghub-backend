@@ -51,9 +51,21 @@ or an open question gets answered. Rules:
   `NOT_INTERESTED`, `CLOSED`); any status moves to any other, staff and owner both change them, only `CONVERTED` is
   guarded by `seats`. `type` is `ENQUIRY` or `INTEREST`: an interest is always accepted for a published training, a plain
   enquiry is refused when registration has closed (`training.services.registration_open_q`) or the seats are full. One
-  open enquiry per phone number and training; 3 a day per phone number. Notes are internal. No preferred-location field,
-  no email alert for a new enquiry (decided 2026-10-10). Admins only read: `admin/enquiries/` (`users.manage_enquiries`)
+  open enquiry per phone number and training; 3 a day per phone number. Notes are internal. No preferred-location field.
+  The institute's staff are notified of a new enquiry, a converted one and the milestones (see Notifications below;
+  the no-alert decision of 2026-10-10 was reversed on 2026-11-18). Admins only read: `admin/enquiries/` (`users.manage_enquiries`)
   lists every institute's enquiries and counts them; only the institute's own staff change a status or add a note.
+- Notifications (`apps/notification`, decided 2026-11-18): two audiences. The institute's staff (owner and staff) get
+  in-app and email; admins get in-app only (email is one registry entry per event plus a template). An admin audience is
+  `users.services.admins_with_permission("manage_x")`: the admins holding that permission plus the Super Admin. Enquirers
+  are never notified (no email, no SMS). Events (`notification/constants.py::EventType`): an institute status change, a
+  rejected document, a training submitted / approved / rejected / sent back for changes, a new enquiry or interest, an
+  enquiry set to `CONVERTED` (the other staff, not the person who changed it) and per-training milestones (10 / 25 / 50 / 100
+  enquiries, the same counts of interests, 50% / 100% of `seats` converted; each fires once, only the highest newly
+  crossed). Admins are told of an institute registering or resubmitting, a training submitted or resubmitted and a
+  re-uploaded rejected document; a new admin gets a note to change the initial password (nothing forces it yet). A row is
+  plain text (`title`, `body`) plus a JSON `payload`, one per recipient; the frontend polls `GET notifications/unread-count/`
+  about once a minute (no websockets). A daily purge deletes read rows after 90 days and any row after 180.
 - Learner **Applications** (approve/reject/capacity) are phase 2 - keep the schema open to them.
 - Providers are verified **Institutes** only; an Institute has several staff users (owner + staff; the owner
   can invite more) and **several locations** (its offices; a training's venue is separate, see below).
@@ -92,7 +104,8 @@ or an open question gets answered. Rules:
   only adds (a name the institute already has is a 400, in any status). A rejected document is uploaded again with
   `PATCH institute/documents/{id}/` (only `file`; same id, status `RE_UPLOADED`, the rejected file deleted after commit);
   any other status is a 400. No `PUT` or `DELETE`. Statuses: `PENDING`, `VERIFIED`, `REJECTED`, `RE_UPLOADED`; an admin
-  reviews with `VERIFIED` or `REJECTED`.
+  reviews with `VERIFIED` or `REJECTED`, and may send a `reason` with a rejection (kept only for `REJECTED`; the institute
+  sees it on the document and its staff are notified).
 - Registration email: the institute's login is `owner.email` + `owner.password` (there is no separate institute email
   column). It is verified with a one-time code: `POST institute/register/send-otp/` emails the code to that address (400 if
   a user already has it), then the code goes in `POST institute/register/` as `otp` (`verify-otp/` is an optional check in
@@ -121,8 +134,8 @@ config/
   urls.py                 admin/, api/v1/ -> apps.api.v1.urls; swagger/redoc/debug toolbar only if DEBUG
 apps/
   api/v1/urls.py          declares every URL prefix: `user/`, `locations/`, `categories/`, `trainings/`, `institutes/`,
-                          `enquiries/`, `institute/trainings/`, `institute/enquiries/`, `institute/`, `admin/` (one include
-                          per resource group; `admin/` is one include, of `control_panel`)
+                          `enquiries/`, `institute/trainings/`, `institute/enquiries/`, `institute/`, `admin/`, `notifications/` (one
+                          include per resource group; `admin/` is one include, of `control_panel`)
   common/                 the one shared app (installed, label `common`): base classes and reference data.
                           `models/`: `base.py` (`BaseModel` created_at/modified_at, `SlugModel`), `location.py`,
                           `category.py`; `BaseViewSet` + mixin viewsets, `ActionAPIView` (POST that answers 200),
@@ -143,7 +156,9 @@ apps/
                           emails), API under `user/` (auth/, me/, users/{id}/status/,
                           auth/otp/{send,verify}/ for password reset; the admin-team API is in `control_panel`),
                           management command `generate_rsa_keys`;
-                          also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use
+                          also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use;
+                          `services.admins_with_permission` resolves the admin recipients of a notification, and `create_admin`
+                          notifies the new admin
   training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills) and `TrainingContact`
                           (one row each, created with the training; the API still shows them as flat fields),
                           `TrainingLocation` (the venue, one row), `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
@@ -155,21 +170,34 @@ apps/
                           `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
                           (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
                           cover); the admin review API and the featuring are in `control_panel`. `services.institute_counts` feeds the
-                          portal's `institute/summary/` (served by `institutes`)
+                          portal's `institute/summary/` (served by `institutes`). `submit`, the review rule in `update_training`,
+                          `approve`, `reject` and `request_changes` call `notification.services.notify`
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links, `InstituteStatusLog` (one row per status change); `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
                           (register, `register/send-otp/`, `register/verify-otp/`, profile, cover-image, contact, ceo,
                           social-links, locations, documents, gallery, staff, invitations, resubmit, action-required,
                           `summary/`: the counts of the institute's trainings and enquiries, one nested answer, from the
-                          `training` and `enquiries` services); the admin review API and the activity timeline are in `control_panel`
+                          `training` and `enquiries` services); the admin review API and the activity timeline are in `control_panel`.
+                          `InstituteDocument.reason` holds the admin's rejection reason. `services.staff_users` resolves an
+                          institute's notification recipients; `_transition`, `register`, `review_document` and `reupload_document`
+                          call `notify`
   enquiries/              `Enquiry` (training and institute, name, phone, `type`, `preferred_time`, status) and
                           `EnquiryNote`; `services.py` (`submit_enquiry`: rules, per-phone allowance, one open enquiry per phone
                           and training; `change_status`: free moves, the seat guard; notes, `summary`),
                           `validators.py` (Nepal mobile number); APIs: public `enquiries/` (POST only) and portal
                           `institute/enquiries/` (list, detail, PATCH status, `{id}/notes/`). `services.summary` feeds the
                           portal's `institute/summary/` (served by `institutes`). The admin monitor is
-                          in `control_panel`; `services.counts` (total and converted) feeds its `summary/`
+                          in `control_panel`; `services.counts` (total and converted) feeds its `summary/`. `constants.py` holds the
+                          milestone thresholds (`MILESTONE_COUNTS`, `MILESTONE_SEAT_PERCENTS`); `submit_enquiry` and `change_status`
+                          notify the institute's staff and check them
+  notification/           `Notification` (one row per recipient per event: `type`, `title`, `body`, JSON `payload`, `read_at`) and
+                          `NotificationDedupe` (recipient + key, unique, never purged); `registry.py` (`EVENTS`: channels, title and
+                          body templates, `email_subject`), `constants.py` (`EventType`, `Channel`, retention), `services.py`
+                          (`notify` is the only writer; `claim`, `mark_seen`, `unread_count`, `mark_read`, `mark_all_read`,
+                          `purge_old`), `emails.py` and `tasks.py` (the email task, `purge_notifications`), management command
+                          `purge_notifications`; API `notifications/` (list, `unread-count/`, `{id}/read/`, `read-all/`) for any
+                          signed-in user, so it is not in `control_panel`. Imports no domain app
   control_panel/          the one home of the admin API, served under `admin/`. No models. `api/v1/` is flat for now: one
                           `serializers.py`, `views.py`, `urls.py`, `filters.py` and `selectors.py` (read-only queries that join several apps, today the institute activity timeline; split them per resource if they
                           grow). Groups: `users/admins/` (`users.manage_admins`; Super Admin only, no DELETE),
@@ -182,17 +210,19 @@ apps/
                           `services.admin_counts`. It only calls the services
                           of the other apps, which keep the rules. `users/{id}/status/` (suspend) is still in `users`.
                           Nothing imports `control_panel` except `apps/api/v1/urls.py`; new admin endpoints go here,
-                          not in the resource's own app
-  templates/email/        HTML email templates (`base_email`, `otp_email`, `registration_otp_email`);
+                          not in the resource's own app (the notification inbox is the exception: it serves every signed-in user)
+  templates/email/        HTML email templates (`base_email`, `otp_email`, `registration_otp_email`, `notification_email`);
                           `TEMPLATES["DIRS"]` points at `apps/templates`
 docs/  design/            see "Source of truth"
 .graphifyignore           what the knowledge graph leaves out; see "Knowledge graph scope"
 graphify-out/             the generated knowledge graph (graph.json, GRAPH_REPORT.md, graph.html); written by graphify, never hand-edited; only graph.json and GRAPH_REPORT.md are committed
 ```
 
-Planned apps (not created yet): `notifications`, `analytics`; later `applications`,
+Planned apps (not created yet): `analytics`; later `applications`,
 `learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
-code (send and verify exist; nothing sets the new password yet). Planned in `training`: a status log of its own, so training approvals and rejections join the institute activity timeline.
+code (send and verify exist; nothing sets the new password yet), and forcing a new admin to change the initial password
+(`must_change_password`). Planned in `training`: a status log of its own, so training approvals and rejections join the institute activity timeline.
+Planned in `notification`: a link per event in the email (needs the frontend routes) and email for admins (a registry entry plus a template).
 Each app (except `control_panel`, which has no models) follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
 (`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/`,
 `apps/training/api/v1/urls/` and `apps/enquiries/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
@@ -212,10 +242,11 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | load locations | `python manage.py load_locations` (upserts from `apps/common/data/`; safe to re-run, never re-activates a retired location) |
 | load categories | `python manage.py load_categories` (the UI's 13 categories and 22 sub-categories from `apps/common/data/categories.json`; only creates missing rows, never re-activates or overwrites an admin's change) |
 | expire trainings | `python manage.py expire_trainings` (sets `EXPIRED` after `end_date`; safe any time). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.training.tasks.expire_trainings` |
+| purge notifications | `python manage.py purge_notifications` (deletes read notifications older than 90 days and any older than 180; the once-only `NotificationDedupe` rows stay; safe any time, prints `Deleted N notification(s)`). Schedule it daily: Django admin > Django Q > Scheduled tasks, function `apps.notification.tasks.purge_notifications` |
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
-| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) and `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails, notification emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts), `apps/enquiries/tests/` and `apps/notification/tests/` (the notify service, the inbox API, one file per group of events, the purge); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 | query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
 | refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |
@@ -225,7 +256,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Models extend `apps.common.models.base.BaseModel`; add `SlugModel` (same module) for public-URL objects (needs `name`
   or `title`). Import `Location` and `Category` from `apps.common.models.location` / `.category`.
 - `common` holds base classes and reference data that several apps point to (today the locations and categories).
-  Anything with its own workflow (enquiries, notifications, analytics) gets its own app. `common/models/`,
+  Anything with its own workflow (enquiries, notification, analytics) gets its own app. `common/models/`,
   `constants.py`, `utils/` and `validators.py` never import another domain app (every app imports them, so it would be a
   cycle); only `common/api/` and `common/tests/` reach into `users` and `institutes`.
 - Viewsets extend `apps.common.viewsets.BaseViewSet`. Per-action permissions go in `permission_class_mapper`
@@ -264,7 +295,12 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Throttle by scope (`throttle_scope` on the view); rates are in `REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]`. A scope
   with no rate there makes every request to that view a 500 (`ImproperlyConfigured`). The OTP views use
   `IdentityScopedRateThrottle` (scopes `otp`, `register_otp`, `register_otp_verify`). The public enquiry form uses the plain
-  scoped throttle (`enquiry`, per client IP) and the service adds a per-phone allowance.
+  scoped throttle (`enquiry`, per client IP) and the service adds a per-phone allowance. The notification inbox uses the plain
+  scoped throttle too (`notifications`, 120/min, because the frontend polls the unread count).
+- `notification` sits below the domain apps: `users`, `institutes`, `training` and `enquiries` import
+  `apps.notification.services`, never the reverse. The caller resolves the recipients (`users.services.admins_with_permission`,
+  `institutes.services.staff_users`) and passes them to `notify()`; call it from a service, inside the transaction that
+  changes the state.
 - A service that needs the caller to wait raises `TooManyRequests(message, wait=seconds)`; the exception handler answers
   429 with `Retry-After`.
 
@@ -358,6 +394,22 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   leaves a non-live training featured, and it shows as featured again once approved. Suspending an institute does not clear it (the
   public rule hides the training; `reinstate` brings it back). Feature through `set_featured`, which locks the row and refuses a
   training that is not `APPROVED` or whose institute is not.
+- **Notifications are written only through `apps/notification/services.notify`.** A direct `Notification.objects.create`
+  skips the registry, the once-only key and the email. `notify` raises `KeyError` for an unknown event type or a payload that
+  lacks a key its templates use (outside the savepoint, so it fails in the caller's tests), but it logs and swallows a
+  database error (logger `apps.notification.services`): when a notification is missing, read the log before the calling code.
+- **Notification emails need `qcluster`**, which does not reload code: restart it after a deploy. The purge needs a Schedule
+  (see the command table); `NotificationDedupe` is never purged, so a milestone cannot fire twice.
+- **Milestone keys are `milestone:<metric>:<training id>:<threshold>`** (built in `enquiries/services._fire_highest`; the
+  format is stored, so do not change it). Adding a threshold to `MILESTONE_COUNTS` or `MILESTONE_SEAT_PERCENTS` fires once
+  for a training that is already past it, if it becomes that training's highest crossed threshold; one below a threshold
+  already sent is recorded silently.
+- **Notification text is plain text and can hold what a visitor typed** (an enquirer's name). The email template escapes it
+  (never use `|safe`), and the registry's `email_subject` keeps the name out of subjects. `Event.render` cuts the title to 200
+  and the body to 500 characters, the column sizes; `Notification.type` is `varchar(50)`, so keep event types short.
+- **Tests for notifications:** `TestCase` does not run `transaction.on_commit` callbacks, so a test that checks the email queue
+  uses `captureOnCommitCallbacks(execute=True)` and mocks `apps.notification.services.async_task`. `create_admin` and the
+  review, registration and enquiry services now write notification rows, so a test that counts notifications filters by type.
 - `validate_attachment` reads `settings.ATTACHMENT_MAX_UPLOAD_SIZE`, which is not defined yet; image
   uploads raise `AttributeError` until it is added to `base.py`.
 
@@ -369,7 +421,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 - Whether `/admin/` is renamed or restricted at the proxy before production (it is on the default path, no 2FA).
 - The team still has to document where the location data came from.
 - Who edits Nepal locations at runtime (today only `load_locations` writes them; the admin site is read-only).
-- Whether enquirers are told when a training is cancelled, and whether "Instructor name" search is needed.
+- Whether "Instructor name" search is needed.
 - Whether the contact person's name and the CEO profile stay public, whether `registration_number` must be unique, and
   whether the relevance sort ranks featured trainings first and uses view counts (the featured flag exists, view counts do not).
 

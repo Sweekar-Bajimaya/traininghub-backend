@@ -353,7 +353,6 @@ def republish(training, *, by):
 
 @transaction.atomic
 def cancel(training, *, by):
-    # TODO(notify): people who sent an enquiry (once enquiries exist)
     return _transition(
         training, TrainingStatus.CANCELLED, only_from=TrainingStatus.LIVE
     )
