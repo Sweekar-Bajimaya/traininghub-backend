@@ -30,6 +30,7 @@ from apps.training.models import Training
 from apps.users import services as user_services
 from apps.users.api.v1.serializers import ProfileSerializer
 from apps.users.constants import GRANTABLE_PERMISSIONS
+from apps.faq.api.v1.serializers import FAQSerializer
 
 User = get_user_model()
 
@@ -305,6 +306,7 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     sessions = TrainingSessionSerializer(many=True, read_only=True)
     modules = TrainingModuleSerializer(many=True, read_only=True)
     outcomes = LearningOutcomeSerializer(many=True, read_only=True)
+    faqs = FAQSerializer(many=True, read_only=True)
 
     class Meta:
         model = Training
