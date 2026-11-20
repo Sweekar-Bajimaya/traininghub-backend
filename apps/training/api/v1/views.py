@@ -27,7 +27,7 @@ from apps.training.constants import (
 from apps.training.models import Training
 
 # Child models are ordered in their Meta, so these prefetches come back in display order.
-CHILDREN = ("sessions", "modules", "outcomes")
+CHILDREN = ("sessions", "modules", "outcomes", "faqs")
 
 
 def with_content(queryset):

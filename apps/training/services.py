@@ -7,6 +7,7 @@ from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Valu
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.faq import services as faq_services
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import Institute
 from apps.training.constants import (
@@ -384,6 +385,7 @@ def create_training(
     sessions=None,
     modules=None,
     outcomes=None,
+    faqs=None,
     detail=None,
     contact=None,
     venue=None,
@@ -412,6 +414,7 @@ def create_training(
     _save_extras(training, detail or {}, contact or {})  # every training has both rows
     _save_venue(training, venue)  # create requires one, so this is never skipped
     _replace_children(training, sessions, modules, outcomes)
+    faq_services.replace_faqs(training, faqs)
     refresh_search_vector(training)
     return training
 
@@ -423,6 +426,7 @@ def update_training(
     sessions=None,
     modules=None,
     outcomes=None,
+    faqs=None,
     detail=None,
     contact=None,
     venue=None,
@@ -477,6 +481,7 @@ def update_training(
     _save_extras(training, detail, contact)
     _save_venue(training, venue)
     _replace_children(training, sessions, modules, outcomes)
+    faq_services.replace_faqs(training, faqs)
     refresh_search_vector(training)
     if back_to_review:
         _require_approved_institute(training.institute)

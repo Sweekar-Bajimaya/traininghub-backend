@@ -14,5 +14,3 @@ class TrainingAdmin(admin.ModelAdmin):
     list_select_related = ("institute", "category")
     exclude = ("search_vector",)
     ordering = ("-created_at",)
-
-
