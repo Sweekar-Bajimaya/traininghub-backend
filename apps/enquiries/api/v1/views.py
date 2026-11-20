@@ -3,9 +3,9 @@ from django.utils.functional import cached_property
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from rest_framework.generics import CreateAPIView, ListCreateAPIView
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.app_key.api.v1.permissions import DistributedKeyAuthentication
 from apps.common.viewsets import ListRetrieveUpdateViewSet
 from apps.enquiries import services
 from apps.enquiries.api.v1.filters import PortalEnquiryFilter
@@ -22,7 +22,7 @@ from apps.institutes.permissions import InstituteScopedMixin, IsInstituteMember
 # public
 class EnquiryCreateView(CreateAPIView):
     serializer_class = EnquiryCreateSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [DistributedKeyAuthentication]  # our frontend's origin, or an App-Key
     authentication_classes = []
     throttle_scope = "enquiry"  # per client IP; the per-phone limit is in the service
 

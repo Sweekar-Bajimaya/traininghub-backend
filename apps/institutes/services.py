@@ -34,10 +34,19 @@ from apps.institutes.models import (
     InstituteStatusLog,
 )
 from apps.institutes.validators import validate_institute_location
+from apps.notification import services as notification_services
+from apps.notification.constants import EventType
 from apps.users import services as user_services
 from apps.users.constants import OTPPurpose, Role, SocialPlatform
 
 User = get_user_model()
+
+_STATUS_EVENTS = {
+    InstituteStatus.APPROVED: EventType.INSTITUTE_APPROVED,
+    InstituteStatus.REJECTED: EventType.INSTITUTE_REJECTED,
+    InstituteStatus.INFO_REQUESTED: EventType.INSTITUTE_INFO_REQUESTED,
+    InstituteStatus.SUSPENDED: EventType.INSTITUTE_SUSPENDED,
+}
 
 
 # status workflow
@@ -63,7 +72,44 @@ def _transition(institute, to, *, reason="", check=None, by=None, only_from=None
         reason=reason.strip(),
         changed_by=by,
     )
+    _notify_status_change(institute, previous, to, reason=reason.strip())
     return institute
+
+
+def _notify_status_change(institute, previous, to, *, reason):
+    """Every status change goes through `_transition`, so this is the one place that tells people."""
+    if to == InstituteStatus.PENDING:
+        # the owner answered an info request, or re-applied after a rejection: admins look again
+        action = (
+            "re-applied"
+            if previous == InstituteStatus.REJECTED
+            else "answered the information request"
+        )
+        notification_services.notify(
+            EventType.ADMIN_INSTITUTE_VERIFICATION,
+            recipients=user_services.admins_with_permission("manage_institutes"),
+            payload={
+                "institute_name": institute.name,
+                "institute_slug": institute.slug,
+                "action": action,
+            },
+        )
+        return
+    if to == InstituteStatus.APPROVED and previous == InstituteStatus.SUSPENDED:
+        event = (
+            EventType.INSTITUTE_REINSTATED
+        )  # lifting a suspension is not a first approval
+    else:
+        event = _STATUS_EVENTS[to]
+    notification_services.notify(
+        event,
+        recipients=staff_users(institute),
+        payload={
+            "institute_name": institute.name,
+            "institute_slug": institute.slug,
+            "reason": reason,
+        },
+    )
 
 
 def _ready_for_approval(institute):
@@ -77,7 +123,6 @@ def _ready_for_approval(institute):
 
 @transaction.atomic
 def approve(institute, *, by):
-    # TODO(notify): the institute owner
     institute = _transition(
         institute,
         InstituteStatus.APPROVED,
@@ -178,6 +223,15 @@ def register(
         # Last, so that of two parallel requests with the same code only one gets through; the
         # other raises here and its writes are rolled back.
         user_services.consume_otp(email, purpose=OTPPurpose.INSTITUTE_REGISTRATION)
+        notification_services.notify(
+            EventType.ADMIN_INSTITUTE_VERIFICATION,
+            recipients=user_services.admins_with_permission("manage_institutes"),
+            payload={
+                "institute_name": institute.name,
+                "institute_slug": institute.slug,
+                "action": "requested verification",
+            },
+        )
     return institute
 
 
@@ -305,19 +359,42 @@ def reupload_document(document, *, file):
     document.file = file
     document.status = DocumentStatus.RE_UPLOADED
     document.save(update_fields=["file", "status", "modified_at"])
-    transaction.on_commit(
-        lambda: storage.delete(old_name)
-    )  # the rejected file is not kept
+    transaction.on_commit(lambda: storage.delete(old_name))
+    institute = document.institute  # new from here
+    notification_services.notify(
+        EventType.ADMIN_DOCUMENT_REUPLOADED,
+        recipients=user_services.admins_with_permission("manage_institutes"),
+        payload={
+            "institute_name": institute.name,
+            "institute_slug": institute.slug,
+            "document_name": document.name,
+        },
+    )
     return document
 
 
 @transaction.atomic
-def review_document(document, *, status, by):
+def review_document(document, *, status, by, reason=""):
     if status not in (DocumentStatus.VERIFIED, DocumentStatus.REJECTED):
         raise ValidationError({"status": "Choose VERIFIED or REJECTED."})
-    document = InstituteDocument.objects.select_for_update().get(pk=document.pk)
+    document = (
+        InstituteDocument.objects.select_for_update(of=("self",))
+        .select_related("institute")
+        .get(pk=document.pk)
+    )
     document.status = status
-    document.save(update_fields=["status", "modified_at"])
+    document.reason = reason.strip() if status == DocumentStatus.REJECTED else ""
+    document.save(update_fields=["status", "reason", "modified_at"])
+    if status == DocumentStatus.REJECTED:
+        notification_services.notify(
+            EventType.DOCUMENT_REJECTED,
+            recipients=staff_users(document.institute),
+            payload={
+                "institute_name": document.institute.name,
+                "document_name": document.name,
+                "reason": document.reason or "No reason was given.",
+            },
+        )
     return document
 
 
@@ -574,3 +651,11 @@ def admin_counts(institutes):
         pending=Count("pk", filter=Q(status=InstituteStatus.PENDING)),
         approved=Count("pk", filter=Q(status=InstituteStatus.APPROVED)),
     )
+
+
+def staff_users(institute, *, exclude=None):
+    """Active users of an institute (owner and staff). `exclude` leaves out the person who acted."""
+    users = User.objects.filter(membership__institute=institute, is_active=True)
+    if exclude is not None:
+        users = users.exclude(pk=exclude.pk)
+    return users
