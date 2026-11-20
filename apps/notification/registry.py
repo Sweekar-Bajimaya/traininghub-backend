@@ -99,7 +99,8 @@ EVENTS = {
         "“{training_title}” is {percent}% full",
         "{converted} of {seats} seats are taken by converted enquiries.",
     ),
-    # --- to admins: in-app only. To switch email on, use BOTH and add a template. ---
+    # --- to admins: in-app only, except admin.account_created (in-app + email).
+    # --- to switch email on for another event, use BOTH. -----
     # payload: institute_name, institute_slug, action ("requested verification", "re-applied" or
     # "answered the information request")
     EventType.ADMIN_INSTITUTE_VERIFICATION: Event(
@@ -121,7 +122,7 @@ EVENTS = {
     ),
     # payload: full_name
     EventType.ADMIN_ACCOUNT_CREATED: Event(
-        IN_APP,
+        BOTH,
         "Welcome to the admin console",
         "Your account was created by the Super Admin. Change your password after you sign in.",
     ),

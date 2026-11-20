@@ -56,14 +56,16 @@ or an open question gets answered. Rules:
   the no-alert decision of 2026-10-10 was reversed on 2026-11-18). Admins only read: `admin/enquiries/` (`users.manage_enquiries`)
   lists every institute's enquiries and counts them; only the institute's own staff change a status or add a note.
 - Notifications (`apps/notification`, decided 2026-11-18): two audiences. The institute's staff (owner and staff) get
-  in-app and email; admins get in-app only (email is one registry entry per event plus a template). An admin audience is
+  in-app and email; admins get in-app only, except the welcome note for a new admin, which is also emailed (email for another admin event is
+  one registry entry plus a template). An admin audience is
   `users.services.admins_with_permission("manage_x")`: the admins holding that permission plus the Super Admin. Enquirers
   are never notified (no email, no SMS). Events (`notification/constants.py::EventType`): an institute status change, a
   rejected document, a training submitted / approved / rejected / sent back for changes, a new enquiry or interest, an
   enquiry set to `CONVERTED` (the other staff, not the person who changed it) and per-training milestones (10 / 25 / 50 / 100
   enquiries, the same counts of interests, 50% / 100% of `seats` converted; each fires once, only the highest newly
   crossed). Admins are told of an institute registering or resubmitting, a training submitted or resubmitted and a
-  re-uploaded rejected document; a new admin gets a note to change the initial password (nothing forces it yet). A row is
+  re-uploaded rejected document; a new admin gets a note, in-app and by email, to change the initial password (nothing forces it yet; the email
+  never holds the password, the Super Admin hands it over separately). A row is
   plain text (`title`, `body`) plus a JSON `payload`, one per recipient; the frontend polls `GET notifications/unread-count/`
   about once a minute (no websockets). A daily purge deletes read rows after 90 days and any row after 180.
 - Learner **Applications** (approve/reject/capacity) are phase 2 - keep the schema open to them.
@@ -118,7 +120,12 @@ or an open question gets answered. Rules:
   links (one per platform, any number of `other`) are separate tables edited at `institute/contact/`, `institute/ceo/` and
   `institute/social-links/`. The contact's `website` has no column: it is the `website` social link, written through
   `services.update_contact` / `register` (`InstituteContactSerializer.to_representation` only reads it). The public detail shows them, the
-  locations and the gallery, never the owner's login; the public card and detail carry the `logo` and the `cover_img`.
+  locations and the gallery, never the owner's login; the public card and detail carry the `logo` and the `cover_img`. The
+  detail also lists `categories` (`[{id, slug, name}]`): the active top-level categories of the institute's `APPROVED` trainings
+  (a retired top-level category is left out, a retired sub-category does not hide its active parent), the same rule as the
+  card's `category_count` (`training.services.annotate_institute_public_categories`, applied to the detail only). It also lists
+  `training_modes` (`["ONLINE", "PHYSICAL"]`, alphabetical): the distinct modes of its `APPROVED` trainings, `[]` when it has none
+  (`annotate_institute_public_training_modes`, detail only).
 - Reviews & ratings are out of the MVP.
 - The Next.js app calls this API directly from the browser (may change): CORS allow-list, throttling can key
   on client IP.
@@ -232,7 +239,7 @@ Planned apps (not created yet): `analytics`; later `applications`,
 `learners`, `reviews`. Planned in `users`: a password-reset endpoint that consumes a verified `OTPPurpose.PASSWORD_RESET`
 code (send and verify exist; nothing sets the new password yet), and forcing a new admin to change the initial password
 (`must_change_password`). Planned in `training`: a status log of its own, so training approvals and rejections join the institute activity timeline.
-Planned in `notification`: a link per event in the email (needs the frontend routes) and email for admins (a registry entry plus a template).
+Planned in `notification`: a link per event in the email (needs the frontend routes) and email for the other admin events (a registry entry each).
 Each app (except `control_panel`, which has no models) follows `models.py`, `admin.py`, `migrations/`, `api/v1/{serializers,views,urls}.py`
 (`apps/users/api/v1/urls/users.py` and the modules in `apps/common/api/v1/urls/`, `apps/institutes/api/v1/urls/`,
 `apps/training/api/v1/urls/` and `apps/enquiries/api/v1/urls/` are the package form: one module per URL group; `apps/common/models/` likewise has one
@@ -256,7 +263,7 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
 | dev server | `python manage.py runserver` |
 | list URLs and their views | `DEBUG=true python manage.py show_urls` (django-extensions: `DEBUG` must be in the process environment, because `settings/__init__.py` imports `base` before `env.py` can set it; filter with `grep institute/trainings`) |
 | task worker | `python manage.py qcluster` (needs Redis); without it, staff invitation emails, one-time-code emails, notification emails and search-vector refreshes (institute rename, category rename or move) stay queued; it does not reload code, so restart it after changing a task or a service it calls |
-| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/app_key/tests.py` (the key permission, its cache and revocation, the CORS header) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts), `apps/enquiries/tests/` and `apps/notification/tests/` (the notify service, the inbox API, one file per group of events, the purge); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
+| tests | `python manage.py test` - `apps/users/tests.py` (User constraints, users API, one-time codes) `apps/app_key/tests.py` (the key permission, its cache and revocation, the CORS header) `apps/common/tests/` (Location and Category constraints, loaders, locations and categories API), `apps/control_panel/tests.py` (admin API root, `admin/users/admins/`, `admin/enquiries/`, `admin/dashboard/summary/`; the rest of the admin API is tested with its resource), `apps/institutes/tests/` (constraints, services, registration and its email verification, public / admin / portal API, end-to-end journey) `apps/training/tests/` (constraints, services and workflow, search, public / portal / admin API, lifecycle, query counts, the categories and training modes on the public institute detail), `apps/enquiries/tests/` and `apps/notification/tests/` (the notify service, the inbox API, one file per group of events, the purge); needs Postgres where the test DB can be created, and Redis for throttling and the tree caches (a test run uses its own Redis database, so it leaves the dev server's codes alone) |
 | lint / typecheck | unverified - pylint is in dev.txt but there is no config |
 | query the knowledge graph | `graphify query "<symbol or phrase>"`, `graphify explain "<name>"`, `graphify path "<A>" "<B>" --undirected`. `query` matches keywords ("which tests cover X" also hits anything named `cover`), so name the symbol; `path` is directed by default and finds nothing for most pairs without `--undirected` |
 | refresh the knowledge graph | `graphify update .` after code changes (code only, no LLM, no API key). After a docs change run `/graphify --update` in Claude Code. For a full rebuild first delete `graph.json`, `graph.html`, `GRAPH_REPORT.md` and `manifest.json` in `graphify-out/` (keep `cache/`, so unchanged docs are not read again), then run `/graphify .`; otherwise the shrink guard refuses to write a smaller graph. graphify is installed on the machine (`uv tool`), it is not in `requirements/` |

@@ -222,6 +222,10 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
     # to hide the person's name publicly: InstituteContactSerializer(read_only=True, allow_null=True, exclude_fields=("contact_person",))
     ceo = InstituteCEOSerializer(read_only=True, allow_null=True)
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
+    # [{id, slug, name}]: the top-level categories of its approved trainings; annotated in the view
+    categories = serializers.JSONField(read_only=True)
+    # ["ONLINE", "PHYSICAL"]: the modes of its approved trainings; annotated in the view
+    training_modes = serializers.ListField(child=serializers.CharField(), read_only=True)
     locations = serializers.SerializerMethodField()
     gallery = serializers.SerializerMethodField()
     member_since = serializers.SerializerMethodField()
@@ -230,6 +234,8 @@ class PublicInstituteDetailSerializer(PublicInstituteListSerializer):
         fields = PublicInstituteListSerializer.Meta.fields + (
             "established_year",
             "description",
+            "categories",
+            "training_modes",
             "contact",
             "ceo",
             "social_links",

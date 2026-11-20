@@ -71,7 +71,11 @@ from apps.institutes.permissions import (
 )
 from apps.training import services as training_services
 from apps.training.models import Training
-from apps.training.services import annotate_institute_public_counts
+from apps.training.services import (
+    annotate_institute_public_categories,
+    annotate_institute_public_counts,
+    annotate_institute_public_training_modes,
+)
 from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
@@ -160,6 +164,8 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
             queryset = queryset.select_related("contact", "ceo").prefetch_related(
                 "social_links"
             )
+            queryset = annotate_institute_public_categories(queryset)
+            queryset = annotate_institute_public_training_modes(queryset)
         return annotate_institute_public_counts(queryset)
 
 

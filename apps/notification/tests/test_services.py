@@ -30,7 +30,9 @@ class NotifyTests(NoQueueMixin, TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             services.notify(EventType.INSTITUTE_APPROVED, recipients=[self.owner], payload=PAYLOAD)
             services.notify(
-                EventType.ADMIN_ACCOUNT_CREATED, recipients=[self.admin], payload={"full_name": "A"}
+                EventType.ADMIN_DOCUMENT_REUPLOADED,
+                recipients=[self.admin],
+                payload={"institute_name": "Alpha", "institute_slug": "alpha", "document_name": "PAN"},
             )
         self.queued.assert_called_once()  # the admin event is in-app only
 

@@ -103,7 +103,7 @@ class TrainingReviewEventTests(NoQueueMixin, TestCase):
 
 
 class AdminAccountEventTests(NoQueueMixin, TestCase):
-    def test_a_new_admin_gets_a_password_note_and_no_email(self):
+    def test_a_new_admin_gets_a_password_note_and_an_email(self):
         with self.captureOnCommitCallbacks(execute=True):
             admin = user_services.create_admin(
                 email="new@example.com",
@@ -114,4 +114,6 @@ class AdminAccountEventTests(NoQueueMixin, TestCase):
             recipient=admin, type=EventType.ADMIN_ACCOUNT_CREATED
         )
         self.assertIn("password", row.body)
-        self.queued.assert_not_called()  # admin events are in-app only
+        self.queued.assert_called_once_with(
+            "apps.notification.tasks.send_notification_email", row.pk, save=False
+        )

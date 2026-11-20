@@ -1,12 +1,26 @@
 from datetime import timedelta
 
+from django.contrib.postgres.aggregates import ArrayAgg, JSONBAgg
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.search import SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value
-from django.db.models.functions import Coalesce
+from django.db.models import (
+    CharField,
+    Count,
+    Exists,
+    F,
+    IntegerField,
+    JSONField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+)
+from django.db.models.functions import Coalesce, JSONObject
 from django.utils import timezone
 
+from apps.common.models.category import Category
 from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
 from apps.institutes.models import Institute
@@ -622,8 +636,9 @@ def annotate_institute_training_count(trainings):
 
 def annotate_institute_public_counts(institutes):
     """Annotate institutes with `training_count` (their `APPROVED` trainings) and `category_count`
-    (the distinct top-level categories those trainings fall in; a sub-category counts as its
-    parent). One query, however many rows. Pass approved institutes only (the public list)."""
+    (the distinct active top-level categories those trainings fall in; a sub-category counts as
+    its parent, and a retired top-level category is not counted). One query, however many rows.
+    Pass approved institutes only (the public list)."""
     approved = Training.objects.filter(
         institute=OuterRef("pk"), status=TrainingStatus.APPROVED
     ).order_by()
@@ -640,9 +655,74 @@ def annotate_institute_public_counts(institutes):
     top_level = Coalesce(
         "category__parent_id", "category_id", output_field=IntegerField()
     )
+    # the top-level category is the parent when there is one, else the category itself
+    top_level_is_active = Q(category__parent__is_active=True) | Q(
+        category__parent__isnull=True, category__is_active=True
+    )
     return institutes.annotate(
         training_count=scalar(Count("pk")),
-        category_count=scalar(Count(top_level, distinct=True)),
+        category_count=scalar(
+            Count(top_level, distinct=True, filter=top_level_is_active)
+        ),
+    )
+
+
+def annotate_institute_public_categories(institutes):
+    """Annotate institutes with `categories`: a list of `{id, slug, name}`, the active top-level
+    categories their `APPROVED` trainings fall in (a training in a sub-category counts for its
+    parent; a retired top-level category is left out, like in the public category tree), ordered
+    by name. The same rule as `category_count`, so the two always agree. It is computed inside
+    the institute query (no extra query), so use it on the detail only: the list does not show
+    it. Pass approved institutes only (the public detail)."""
+    # inner OuterRef is the category, outer OuterRef is the institute
+    uses_category = Exists(
+        Training.objects.filter(
+            institute=OuterRef(OuterRef("pk")), status=TrainingStatus.APPROVED
+        )
+        .filter(Q(category=OuterRef("pk")) | Q(category__parent=OuterRef("pk")))
+        .order_by()
+    )
+    used = (
+        Category.objects.filter(parent__isnull=True, is_active=True)
+        .filter(uses_category)
+        .order_by()  # the order is set inside the aggregate
+        .values(group=Value(1))  # one group, so the subquery answers a single row
+        .annotate(
+            items=JSONBAgg(
+                JSONObject(id="id", slug="slug", name="name"), order_by=("name", "pk")
+            )
+        )
+        .values("items")
+    )
+    return institutes.annotate(
+        categories=Coalesce(
+            Subquery(used, output_field=JSONField()),
+            Value([], output_field=JSONField()),  # no approved training: an empty list
+        )
+    )
+
+
+def annotate_institute_public_training_modes(institutes):
+    """Annotate institutes with `training_modes`: the distinct modes (`ONLINE`, `PHYSICAL`) of
+    their `APPROVED` trainings, in alphabetical order, so a list of zero, one or two values. The
+    same trainings as `training_count`. It is computed inside the institute query (no extra
+    query), so use it on the detail only: the list does not show it. Pass approved institutes
+    only (the public detail)."""
+    modes_field = ArrayField(CharField(max_length=10))
+    used = (
+        Training.objects.filter(
+            institute=OuterRef("pk"), status=TrainingStatus.APPROVED
+        )
+        .order_by()
+        .values(group=Value(1))  # one group, so the subquery answers a single row
+        .annotate(items=ArrayAgg("mode", distinct=True, order_by="mode"))
+        .values("items")
+    )
+    return institutes.annotate(
+        training_modes=Coalesce(
+            Subquery(used, output_field=modes_field),
+            Value([], output_field=modes_field),  # no approved training: an empty list
+        )
     )
 
 

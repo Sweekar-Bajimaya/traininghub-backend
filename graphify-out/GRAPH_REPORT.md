@@ -1,17 +1,17 @@
 # Graph Report - traininghub-backend  (2026-11-20)
 
 ## Corpus Check
-- 125 files · ~75,931 words
+- 127 files · ~77,049 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 3 file(s) not represented in the graph (top: (none) 3)
 
 ## Summary
-- 2383 nodes · 5539 edges · 123 communities (71 shown, 52 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 729 edges (avg confidence: 0.94)
+- 2423 nodes · 5633 edges · 135 communities (67 shown, 68 thin omitted)
+- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 736 edges (avg confidence: 0.94)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `541e7630`
+- Built from commit: `e52ca46d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,141 +19,150 @@
 - .create
 - training/services.py
 - training/models.py
-- InstituteRegistrationSerializer
-- institutes/api/v1/views.py
+- Institute
+- IsInstituteMember
 - institutes/services.py
 - ActionRequiredTests
-- institutes/models.py
-- users/api/v1/views.py
+- control_panel/api/v1/views.py
+- users/api/v1/serializers.py
 - InvitationTests
 - RegistrationApiTests
-- EditTests
+- TrainingTestCase
 - AdminInstituteViewSet
 - viewsets.py
 - AdminInstitutesApiTests
 - FilterTests
 - Institute model
 - AdminEnquiryTests
-- training/api/v1/views.py
+- PublicTrainingViewSet
 - institutes app
 - SubmitTests
 - .as_
-- InstituteSocialLink
-- review_document
+- control_panel/api/v1/serializers.py
+- InstituteDocument
 - Training
 - institutes/tests/test_api_portal.py
-- .get_object
-- CappedLimitOffsetPaginationTests
-- models/base.py
-- 2. What was built
-- enquiries-status.md
-- Product Requirements Document (PRD)
 - enquiries/services.py
+- CappedLimitOffsetPaginationTests
+- slugify.py
+- EnquiryNote
+- enquiries-status.md
 - 8. Open questions
-- control_panel/api/v1/views.py
+- OtpApiTests
+- InstituteCategoriesTests
+- HasPlatformPermission
 - SubmitTests
 - AdminApiTests
-- Notification
+- common/validators.py
 - training/api/v1/serializers.py
 - notify() service (notification.services.notify)
 - .url
 - DocumentTests
-- django_db
-- institutes/api/v1/serializers.py
-- CategoryConstraintTests
-- AdminInstituteListSerializer
-- settings/base.py
-- AppKeyPermissionTests
-- LocationApiTests
-- PublicInstituteApiTests
-- RegistrationOtpApiTests
-- users/api/v1/serializers.py
-- common/validators.py
-- Enquiry
-- ContactTests
-- OtpApiTests
-- DynamicFieldsSerializer
-- Enquiry model (apps/enquiries)
-- EnquiryConstraintTests
+- Location
 - DynamicFieldsModelSerializer
+- test_categories.py
+- RegistrationTests
+- institutes/validators.py
+- AppKeyPermissionTests
+- LoadLocationsTests
+- PublicInstituteApiTests
+- InvitationSerializer
+- NotificationViewset
+- enquiries/api/v1/views.py
+- ContactTests
+- RegistrationOtpApiTests
+- InstituteDocumentSerializer
+- validate_phone_number
+- EnquiryConstraintTests
+- app_key/tests.py
 - AdminTrainingsFeaturedAndReviewApiTests
 - Notification event registry (registry.EVENTS)
 - EnquiryEventTests
 - notify
 - AdminCategoryApiTests
-- is_valid_key
-- Institute
+- Enquiry model (apps/enquiries)
+- InstituteProfileSerializer
 - users/services.py
-- AdminTrainingViewSet
-- Category
+- EditTests
+- load_categories.py
 - notification/services.py
-- TooManyRequests
+- EnforcedEndpointTests
 - training app
 - InvitationTests
-- apps_notification_init
-- enquiries/tests/test_services.py
+- purge_old
+- TooManyRequests
 - PortalTestCase
-- RegistrationTests
+- InstituteTrainingModesTests
 - BaseViewSet
-- StatusChangeTests
+- LocationModelTests
 - LocationTests
 - add_location
 - NotificationApiTests
-- TrainingConstraintTests
-- EnforcedEndpointTests
-- AdminTrainingSerializer
+- TrainingSession
+- Enquiry
+- BaseModel
 - User
 - create_admin
-- InstituteContact
+- InstituteAdminSiteTests
 - InstituteSummaryView
 - UserConstraintTests
-- Command
-- LocationTests
-- PortalTrainingSerializer
+- Notification
+- AuthApiTests
+- AdminTrainingSerializer
 - InstituteConstraintTests
-- InstituteReviewEventTests
-- InstituteLocation
-- CEOTests
-- GuardedView
-- app_key/tests.py
+- TrainingReviewEventTests
+- UpdateStatusSerializer
+- DistributedAppKey
+- LocationTests
 - GalleryTests
 - SocialLinkTests
-- InstituteDocumentSerializer
-- AdminSerializer
-- ActiveAccountJWTAuthentication
-- .summary
-- AcceptInvitationSerializer
-- AuthApiTests
-- ResubmitView
-- InstituteCEO
-- reset_keys
-- UserManager
-- IsInstituteMember
+- LocationApiTests
+- users/api/v1/views.py
+- rest_framework_permissions
+- StatusChangeTests
+- common/api/v1/views.py
+- InstituteGalleryImage
+- PrivateStorage
+- notification/tasks.py
+- is_valid_key
+- ActionAPIView
+- institutes/api/v1/views.py
 - summary
-- expire_trainings
+- AdminSerializer
+- ListTests
 - Dependency: Django 5.2.4
 - Dependency: django-q2 1.8.0
 - Dependency: django-redis 6.0.0
 - Dependency: djangorestframework 3.16.0
 - Dev extras: debug toolbar, django-extensions, ipdb, ipython, fabric3, pylint
 - TrainingHub Backend System Design (DRAFT v0.6)
+- InstituteCoverSerializer
 - PasswordChangeSerializer
+- StableOrderingFilter
+- CategoryConstraintTests
+- IdentityScopedRateThrottle
+- UserManager
+- AppKeyModelTests
+- apps_notification_init
+- SlugModel
+- SendOTPSerializer
+- VerifyOTPSerializer
 
 ## God Nodes (most connected - your core abstractions)
-1. `Training` - 86 edges
+1. `Training` - 88 edges
 2. `Institute` - 65 edges
 3. `InstituteStatus` - 62 edges
-4. `Enquiry` - 53 edges
-5. `AdminInstitutesApiTests` - 52 edges
-6. `TrainingStatus` - 50 edges
+4. `TrainingStatus` - 54 edges
+5. `Enquiry` - 53 edges
+6. `AdminInstitutesApiTests` - 52 edges
 7. `RegistrationApiTests` - 49 edges
 8. `Role` - 46 edges
 9. `DynamicFieldsModelSerializer` - 40 edges
-10. `BaseModel` - 34 edges
+10. `Category` - 36 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Decision: PAN/VAT number unique, nine digits, contact telephone optional` --references--> `validate_pan_vat_number()`  [EXTRACTED]
-  docs/System Design.md → apps/common/validators.py
+- `2.1 Data (`apps/enquiries/models.py`)` --references--> `Enquiry`  [INFERRED]
+  docs/enquiries-status.md → apps/enquiries/models.py
 - `2.2 Rules (`apps/enquiries/services.py`)` --references--> `submit_enquiry()`  [INFERRED]
   docs/enquiries-status.md → apps/enquiries/services.py
 - `2.2 Rules (`apps/enquiries/services.py`)` --references--> `change_status()`  [INFERRED]
@@ -171,55 +180,51 @@
 - **Notification dispatch pipeline: notify() looks up the registry, writes rows, queues email after commit** — docs_system_design_notify_service, docs_system_design_event_registry, docs_system_design_notification_model, docs_system_design_notificationdedupe, docs_system_design_notification_email_task, docs_system_design_savepoint_isolation [EXTRACTED 1.00]
 - **Domain apps that call notify() and resolve their own recipients** — docs_system_design_users_app, docs_system_design_institutes_app, docs_system_design_training_app, docs_system_design_enquiries_app, docs_system_design_notify_service, docs_system_design_recipient_resolution [EXTRACTED 1.00]
 
-## Communities (123 total, 52 thin omitted)
+## Communities (135 total, 68 thin omitted)
 
 ### Community 0 - ".create"
 Cohesion: 0.05
 Nodes (10): ActionQueryCountTests, AdminApiTests, CoverTests, LifecycleTests, PortalCreateTests, PortalEditTests, PortalPermissionTests, PortalTestCase (+2 more)
 
 ### Community 1 - "training/services.py"
-Cohesion: 0.09
-Nodes (37): TrainingMode, TrainingStatus, LearningOutcome, Meta, TrainingLocation, admin_counts(), annotate_category_training_count(), approve() (+29 more)
+Cohesion: 0.07
+Nodes (40): TrainingMode, TrainingStatus, Command, LearningOutcome, Meta, TrainingContact, TrainingDetail, Meta (+32 more)
 
 ### Community 2 - "training/models.py"
-Cohesion: 0.08
-Nodes (13): duration_q(), prefix_query(), TrainingFilter, Meta, DurationBucket, DurationUnit, StartBucket, TrainingLevel (+5 more)
+Cohesion: 0.09
+Nodes (12): duration_q(), prefix_query(), TrainingFilter, Meta, DurationBucket, DurationUnit, StartBucket, TrainingLevel (+4 more)
 
-### Community 3 - "InstituteRegistrationSerializer"
-Cohesion: 0.22
-Nodes (3): InstituteRegistrationSerializer, Meta, OTPField
+### Community 3 - "Institute"
+Cohesion: 0.17
+Nodes (10): AdminInstituteFilter, Meta, ChoiceInFilter, DocumentStatus, InstituteStatus, InstituteType, Institute, Meta (+2 more)
 
-### Community 4 - "institutes/api/v1/views.py"
-Cohesion: 0.08
-Nodes (15): DistributedKeyAuthentication, GalleryReorderSerializer, StaffSerializer, Meta, AcceptInvitationView, PortalCoverView, PortalDocumentViewSet, PortalGalleryViewSet (+7 more)
+### Community 4 - "IsInstituteMember"
+Cohesion: 0.13
+Nodes (10): GalleryReorderSerializer, PortalDocumentViewSet, PortalGalleryViewSet, PortalInvitationViewSet, PortalLocationViewSet, PortalSocialLinkViewSet, PortalStaffViewSet, InstituteScopedMixin (+2 more)
 
 ### Community 5 - "institutes/services.py"
-Cohesion: 0.14
-Nodes (19): InstituteStatus, accept_invitation(), admin_counts(), approve(), deactivate_location(), _hash(), invite(), _notify_status_change() (+11 more)
+Cohesion: 0.08
+Nodes (25): InvitationStatus, InstituteInvitation, Meta, accept_invitation(), approve(), deactivate_location(), _hash(), invite() (+17 more)
 
 ### Community 6 - "ActionRequiredTests"
 Cohesion: 0.08
 Nodes (3): ActionRequiredTests, CoverTests, DocumentAndGalleryTests
 
-### Community 7 - "institutes/models.py"
-Cohesion: 0.12
-Nodes (17): BaseModel, Meta, AdminInstituteFilter, Meta, ChoiceInFilter, _pending_documents_count(), DocumentStatus, InstituteType (+9 more)
+### Community 7 - "control_panel/api/v1/views.py"
+Cohesion: 0.08
+Nodes (17): AdminCategoryFilter, Meta, AdminEnquiryFilter, Meta, AdminTrainingFilter, Meta, AdminDashboardSummarySerializer, AdminCategoryViewSet (+9 more)
 
-### Community 8 - "users/api/v1/views.py"
-Cohesion: 0.07
-Nodes (11): IdentityScopedRateThrottle, ActionAPIView, RegisterVerifyOTPView, UpdateStatusSerializer, Meta, LogoutView, PasswordChangeView, RefreshView (+3 more)
+### Community 8 - "users/api/v1/serializers.py"
+Cohesion: 0.11
+Nodes (4): NormalizedEmailSerializer, OTPField, RegistrationOTPSerializer, RegistrationOTPVerifySerializer
 
-### Community 10 - "RegistrationApiTests"
+### Community 11 - "TrainingTestCase"
 Cohesion: 0.09
-Nodes (3): SeatRaceTests, convert(), RegistrationApiTests
-
-### Community 11 - "EditTests"
-Cohesion: 0.06
-Nodes (7): CreateTests, EditTests, ExpiryTests, ReviewTests, SubmitTests, TrainingTestCase, TransitionTableTests
+Nodes (6): CreateTests, ExpiryTests, ReviewTests, SubmitTests, TrainingTestCase, TransitionTableTests
 
 ### Community 12 - "AdminInstituteViewSet"
-Cohesion: 0.18
-Nodes (3): AdminInstituteViewSet, _locations_queryset(), _trainings_count()
+Cohesion: 0.07
+Nodes (6): DynamicFieldsSerializer, AdminTrainingFeaturedSerializer, ReasonSerializer, AdminEnquiryViewSet, AdminInstituteViewSet, AdminTrainingViewSet
 
 ### Community 13 - "viewsets.py"
 Cohesion: 0.19
@@ -230,232 +235,220 @@ Cohesion: 0.08
 Nodes (8): DetailTests, FilterOptionTests, FilterTests, PublicTrainingTestCase, SearchTests, ShiftsAreShownTests, titles(), VisibilityTests
 
 ### Community 16 - "Institute model"
-Cohesion: 0.12
-Nodes (24): Category (two-level tree), common app (shared base classes and reference data), Core entities (section 3), Institute model, Entity: InstituteCEO, Entity: InstituteContact, Entity: InstituteGalleryImage, Entity: InstituteLocation (office) (+16 more)
+Cohesion: 0.11
+Nodes (26): Categories: two-level tree with icon and hue, training uses a leaf, Category (two-level tree), common app (shared base classes and reference data), Core entities (section 3), Institute model, Entity: InstituteCEO, Entity: InstituteContact, Entity: InstituteGalleryImage (+18 more)
 
 ### Community 17 - "AdminEnquiryTests"
 Cohesion: 0.07
 Nodes (3): AdminDashboardSummaryTests, AdminEnquiryTests, ControlPanelRoutesTests
 
-### Community 18 - "training/api/v1/views.py"
-Cohesion: 0.07
-Nodes (12): DeleteTrainingTests, CoverSerializer, PortalTrainingListSerializer, Meta, as_options(), PortalTrainingViewSet, PublicTrainingViewSet, transition() (+4 more)
+### Community 18 - "PublicTrainingViewSet"
+Cohesion: 0.08
+Nodes (12): DeleteTrainingTests, PortalTrainingListSerializer, Meta, as_options(), PortalTrainingViewSet, PublicTrainingViewSet, transition(), run() (+4 more)
 
 ### Community 19 - "institutes app"
-Cohesion: 0.12
-Nodes (26): Dashboard analytics gap (needs analytics app and view counting), admin/dashboard/summary/ endpoint, admin/enquiries/ read-only monitor, analytics app (planned), Admin audience (Super Admin plus holders of matching manage_* permission, in-app only), Event admin.document_reuploaded, Event admin.institute_verification, Event admin.training_review (+18 more)
+Cohesion: 0.13
+Nodes (24): Dashboard analytics gap (needs analytics app and view counting), admin/dashboard/summary/ endpoint, analytics app (planned), Admin audience (Super Admin plus holders of matching manage_* permission, in-app only), Event admin.document_reuploaded, Event admin.institute_verification, InstituteDocument (with rejection reason), Entity: InstituteInvitation (+16 more)
 
 ### Community 20 - "SubmitTests"
-Cohesion: 0.09
-Nodes (6): ChangeStatusTests, NoteTests, ServiceTestCase, submit(), SubmitTests, SummaryTests
+Cohesion: 0.11
+Nodes (5): ChangeStatusTests, NoteTests, ServiceTestCase, submit(), SubmitTests
 
 ### Community 21 - ".as_"
-Cohesion: 0.11
-Nodes (3): ProfileTests, StaffTests, SummaryTests
+Cohesion: 0.09
+Nodes (4): CEOTests, ProfileTests, StaffTests, SummaryTests
 
-### Community 22 - "InstituteSocialLink"
-Cohesion: 0.10
-Nodes (14): AdminInstituteSerializer, Meta, InstituteContactSerializer, Meta, InstituteSocialLinkSerializer, Meta, InstituteSocialLink, Meta (+6 more)
+### Community 22 - "control_panel/api/v1/serializers.py"
+Cohesion: 0.06
+Nodes (32): AdminInstituteSerializer, Meta, AdminTrainingListSerializer, Meta, DashboardEnquiryCountsSerializer, DashboardInstituteCountsSerializer, DashboardTrainingCountsSerializer, DocumentReviewSerializer (+24 more)
 
-### Community 23 - "review_document"
-Cohesion: 0.21
-Nodes (3): reupload_document(), review_document(), DocumentEventTests
+### Community 23 - "InstituteDocument"
+Cohesion: 0.16
+Nodes (8): AdminDocumentSerializer, Meta, AdminDocumentView, InstituteDocument, Meta, reupload_document(), review_document(), DocumentEventTests
 
 ### Community 24 - "Training"
-Cohesion: 0.12
-Nodes (11): _event(), institute_activity(), Training, Meta, annotate_institute_public_counts(), refresh_search_vectors(), refresh_category_trainings(), refresh_institute_trainings() (+3 more)
+Cohesion: 0.09
+Nodes (14): _event(), institute_activity(), Training, Meta, annotate_institute_public_categories(), annotate_institute_public_counts(), annotate_institute_public_training_modes(), refresh_search_vectors() (+6 more)
 
 ### Community 25 - "institutes/tests/test_api_portal.py"
-Cohesion: 0.09
-Nodes (10): _owner_prefetch(), ListTests, PortalTestCase, MemberRole, InstituteMember, Meta, make_staff(), PermissionMatrixTests (+2 more)
+Cohesion: 0.13
+Nodes (8): PortalTestCase, MemberRole, InstituteMember, Meta, remove_staff(), make_staff(), RemoveStaffTests, Role
+
+### Community 26 - "enquiries/services.py"
+Cohesion: 0.15
+Nodes (14): admin_counts(), _check_converted_milestone(), _check_intake_milestones(), _claim_phone_slot(), counts(), _fire_highest(), _is_open_duplicate(), _milestone_counts() (+6 more)
 
 ### Community 27 - "CappedLimitOffsetPaginationTests"
 Cohesion: 0.17
 Nodes (3): CappedLimitOffsetPagination, CappedLimitOffsetPaginationTests, limit_for()
 
-### Community 28 - "models/base.py"
-Cohesion: 0.13
-Nodes (6): SlugModel, Meta, _slug_strip(), unique_slugify(), NepalMobileField, normalize_phone()
-
-### Community 29 - "2. What was built"
-Cohesion: 0.22
-Nodes (6): registration_open_q(), 2.2 Rules (`apps/enquiries/services.py`), 2.3 API (all under `/api/v1/`), 2.4 Changes outside the new app, 2.5 Tests (`apps/enquiries/tests/`), 2. What was built
+### Community 29 - "EnquiryNote"
+Cohesion: 0.10
+Nodes (13): EnquiryNoteSerializer, Meta, PortalEnquiryNoteView, EnquiryNote, Meta, add_note(), registration_open_q(), 2.1 Data (`apps/enquiries/models.py`) (+5 more)
 
 ### Community 30 - "enquiries-status.md"
 Cohesion: 0.10
 Nodes (25): 1. In short, 3. Where the build differs from the prototype, 4.1 Before it works end to end, 4.2 Frontend changes against the prototype, 4.3 Backend work not done, 4.4 Risks and limits to know about, 4.5 Questions still open (numbers as in `docs/System Design.md`, section 8), 4. What needs changes (+17 more)
 
-### Community 31 - "Product Requirements Document (PRD)"
-Cohesion: 0.15
-Nodes (16): Phase 2: Application (approve/reject/capacity) and learners, Categories: two-level tree with icon and hue, training uses a leaf, My enquiries: browser device token, last 90 days, Open question: do institutes keep enquiries after 90 days, Reviews and ratings out of MVP, Training duration (value + unit, derived weeks) and weekly class slots, Entity: TrainingSession (weekly slot), Workflow: enquiry (planned) (+8 more)
+### Community 31 - "8. Open questions"
+Cohesion: 0.11
+Nodes (23): 4.5 Questions still open (1, 8, 14), Phase 2: Application (approve/reject/capacity) and learners, Availability: seats minus CONVERTED enquiries above zero, Auth: email + password, JWT RS256 via simplejwt, My enquiries: browser device token, last 90 days, 8. Open questions, Open question 1: enquiry retention, Open question: do institutes keep enquiries after 90 days (+15 more)
 
-### Community 32 - "enquiries/services.py"
-Cohesion: 0.16
-Nodes (14): EnquiryType, _check_converted_milestone(), _check_intake_milestones(), _claim_phone_slot(), _fire_highest(), _is_open_duplicate(), _milestone_counts(), _notify_converted() (+6 more)
+### Community 33 - "InstituteCategoriesTests"
+Cohesion: 0.21
+Nodes (4): entry(), InstituteCategoriesQueryTests, InstituteCategoriesTests, top_level()
 
-### Community 33 - "8. Open questions"
-Cohesion: 0.20
-Nodes (12): 4.5 Questions still open (1, 8, 14), Availability: seats minus CONVERTED enquiries above zero, Auth: email + password, JWT RS256 via simplejwt, 8. Open questions, Open question 1: enquiry retention, Open question: how an admin's password is reset, Open question: PRD 'Instructor Name' search has no field, Open question: endpoint that consumes a verified password-reset code (+4 more)
-
-### Community 34 - "control_panel/api/v1/views.py"
-Cohesion: 0.05
-Nodes (29): AdminCategoryFilter, Meta, AdminEnquiryFilter, Meta, AdminTrainingFilter, Meta, AdminDashboardSummarySerializer, AdminDocumentSerializer (+21 more)
+### Community 34 - "HasPlatformPermission"
+Cohesion: 0.18
+Nodes (5): AdminDocumentDownloadView, HasAnyPlatformPermission, HasPlatformPermission, IsInstituteStaff, IsPlatformAdmin
 
 ### Community 35 - "SubmitTests"
-Cohesion: 0.14
-Nodes (4): NoVisitorIdentityTests, PublicTestCase, SubmitTests, ThrottleTests
+Cohesion: 0.10
+Nodes (7): VisitorEnquirySerializer, Meta, NoVisitorIdentityTests, PublicTestCase, SubmitTests, ThrottleTests, VisitorViewTests
 
-### Community 37 - "Notification"
-Cohesion: 0.19
-Nodes (6): NotificationViewset, Notification, Meta, mark_all_read(), mark_read(), unread_count()
+### Community 37 - "common/validators.py"
+Cohesion: 0.15
+Nodes (9): combine_date_parts(), get_today(), validate_attachment(), validate_coded_phone_number(), validate_dob(), validate_future_datetime(), validate_is_future_datetime(), validate_otp() (+1 more)
 
 ### Community 38 - "training/api/v1/serializers.py"
-Cohesion: 0.07
-Nodes (18): LocationInputSerializer, validate_document_file(), validate_image_file(), _validate_upload(), available_categories(), duration_text(), format_class_days(), PublicTrainingDetailSerializer (+10 more)
+Cohesion: 0.05
+Nodes (24): build_category_tree(), Category, Meta, InstituteExperienceTests, _duration(), get_upload_path(), get_uuid_filename(), institute_experience() (+16 more)
 
 ### Community 39 - "notify() service (notification.services.notify)"
-Cohesion: 0.12
-Nodes (22): Claim: qcluster is not needed for enquiries, users.services.admins_with_permission, control_panel app (admin API under admin/), users.services.create_admin, Event admin.account_created (note to change initial password), admin/institutes/{slug}/activity/ timeline, notification app (apps/notification), Notification email task (django-q2, one per row) (+14 more)
+Cohesion: 0.13
+Nodes (18): Claim: qcluster is not needed for enquiries, users.services.admins_with_permission, control_panel app (admin API under admin/), users.services.create_admin, Event admin.account_created (note to change initial password), notification app (apps/notification), Notification email task (django-q2, one per row), Notifications inbox API (notifications/) (+10 more)
 
 ### Community 40 - ".url"
 Cohesion: 0.18
 Nodes (3): AccessTests, DetailTests, NoteTests
 
-### Community 42 - "django_db"
-Cohesion: 0.07
-Nodes (18): LocationFilter, Meta, active_municipalities(), LocationSerializer, Meta, build_category_tree(), build_tree(), CategoryTreeView (+10 more)
+### Community 42 - "Location"
+Cohesion: 0.18
+Nodes (9): active_municipalities(), LocationLevel, MunicipalityType, Command, Location, Meta, clear_category_tree_cache(), clear_location_tree_cache() (+1 more)
 
-### Community 43 - "institutes/api/v1/serializers.py"
-Cohesion: 0.11
-Nodes (13): membership_duration(), EnquiryCountsSerializer, GalleryImageSerializer, Meta, PublicInstituteDetailSerializer, Meta, PublicInstituteListSerializer, Meta (+5 more)
-
-### Community 44 - "CategoryConstraintTests"
-Cohesion: 0.13
-Nodes (3): CategoryConstraintTests, CategoryServiceTests, LoadCategoriesTests
-
-### Community 46 - "settings/base.py"
-Cohesion: 0.09
-Nodes (4): PrivateStorage, Command, env_list(), load_jwt_key()
-
-### Community 48 - "LocationApiTests"
-Cohesion: 0.09
-Nodes (4): load(), LoadLocationsTests, LocationApiTests, LocationModelTests
-
-### Community 51 - "users/api/v1/serializers.py"
-Cohesion: 0.11
-Nodes (5): NormalizedEmailSerializer, RegistrationOTPSerializer, RegistrationOTPVerifySerializer, SendOTPSerializer, VerifyOTPSerializer
-
-### Community 52 - "common/validators.py"
+### Community 43 - "DynamicFieldsModelSerializer"
 Cohesion: 0.05
-Nodes (13): ValidatePanVatNumberTests, ValidatePhoneNumberTests, combine_date_parts(), get_today(), validate_attachment(), validate_coded_phone_number(), validate_dob(), validate_future_datetime() (+5 more)
+Nodes (19): LocationInputSerializer, DynamicFieldsModelSerializer, _check_parent(), create_category(), update_category(), membership_duration(), AdminCategorySerializer, Meta (+11 more)
 
-### Community 53 - "Enquiry"
-Cohesion: 0.07
-Nodes (24): PortalEnquiryFilter, Meta, EnquiryCreateSerializer, Meta, EnquiryNoteSerializer, Meta, PortalEnquiryListSerializer, Meta (+16 more)
+### Community 46 - "institutes/validators.py"
+Cohesion: 0.11
+Nodes (6): validate_document_file(), validate_image_file(), _validate_upload(), Command, env_list(), load_jwt_key()
 
-### Community 57 - "Enquiry model (apps/enquiries)"
+### Community 51 - "NotificationViewset"
 Cohesion: 0.24
-Nodes (14): Changing the status rules (change_status), EnquiryNote, Seat check on submit does not lock the training, Enquiry statuses, types and preferred time, enquiries.services.change_status, enquiries app, Enquiry model (apps/enquiries), Enquiry statuses (seven, any to any) (+6 more)
+Nodes (4): NotificationViewset, mark_all_read(), mark_read(), unread_count()
 
-### Community 59 - "DynamicFieldsModelSerializer"
-Cohesion: 0.16
-Nodes (5): DynamicFieldsModelSerializer, InvitationSerializer, Meta, NotificationSerializer, Meta
+### Community 53 - "enquiries/api/v1/views.py"
+Cohesion: 0.09
+Nodes (10): PortalEnquiryFilter, Meta, EnquiryCreateSerializer, Meta, PortalEnquiryListSerializer, Meta, PortalEnquirySerializer, Meta (+2 more)
+
+### Community 57 - "validate_phone_number"
+Cohesion: 0.26
+Nodes (4): ValidatePanVatNumberTests, ValidatePhoneNumberTests, validate_pan_vat_number(), validate_phone_number()
 
 ### Community 61 - "Notification event registry (registry.EVENTS)"
-Cohesion: 0.24
-Nodes (11): Update 2026-11-20: enquiry events now notify institute staff, Institute staff audience (owner and staff, in-app and email), Event document.rejected, Event enquiry.converted (other staff only), Event enquiry.new (plain enquiry or interest), Events institute.approved/.rejected/.info_requested/.suspended/.reinstated, Events milestone.enquiries/.interest/.converted, Notification event registry (registry.EVENTS) (+3 more)
+Cohesion: 0.26
+Nodes (10): Update 2026-11-20: enquiry events now notify institute staff, Institute staff audience (owner and staff, in-app and email), Event document.rejected, Event enquiry.converted (other staff only), Event enquiry.new (plain enquiry or interest), Events institute.approved/.rejected/.info_requested/.suspended/.reinstated, Events milestone.enquiries/.interest/.converted, Notification event registry (registry.EVENTS) (+2 more)
 
 ### Community 63 - "notify"
 Cohesion: 0.18
 Nodes (3): Event, notify(), NotifyTests
 
-### Community 65 - "is_valid_key"
-Cohesion: 0.18
-Nodes (5): _cache_key(), forget_key(), is_valid_key(), parse_app_key(), forget_deleted_key()
+### Community 65 - "Enquiry model (apps/enquiries)"
+Cohesion: 0.19
+Nodes (17): Changing the status rules (change_status), EnquiryNote, Seat check on submit does not lock the training, Enquiry statuses, types and preferred time, admin/enquiries/ read-only monitor, enquiries.services.change_status, enquiries app, Enquiry model (apps/enquiries) (+9 more)
 
-### Community 66 - "Institute"
-Cohesion: 0.12
-Nodes (10): InstituteCoverSerializer, Meta, InstituteProfileSerializer, Meta, InstituteProfileView, PortalContactView, Institute, Meta (+2 more)
+### Community 66 - "InstituteProfileSerializer"
+Cohesion: 0.17
+Nodes (5): InstituteProfileSerializer, Meta, InstituteProfileView, PortalContactView, ResubmitView
 
 ### Community 67 - "users/services.py"
 Cohesion: 0.11
-Nodes (15): register(), OTPPurpose, admins_with_permission(), consume_otp(), get_otp(), normalize_email(), _otp_keys(), send_otp() (+7 more)
-
-### Community 69 - "Category"
-Cohesion: 0.20
-Nodes (7): Category, Meta, _check_parent(), create_category(), update_category(), AdminCategorySerializer, Meta
+Nodes (17): register(), OTPPurpose, admins_with_permission(), consume_otp(), get_otp(), normalize_email(), _otp_keys(), send_otp() (+9 more)
 
 ### Community 70 - "notification/services.py"
-Cohesion: 0.21
+Cohesion: 0.20
 Nodes (5): Channel, NotificationDedupe, Meta, claim(), mark_seen()
 
-### Community 71 - "TooManyRequests"
-Cohesion: 0.12
-Nodes (5): TooManyRequests, RegistrationOtpServiceTests, verify_otp(), verify_registration_otp(), api_exception_handler()
-
 ### Community 72 - "training app"
-Cohesion: 0.29
-Nodes (10): registration_open_q change in training/services.py, expire_trainings daily job, Training.is_featured flag and set_featured, training.services.registration_open_q, training app, Training expiry: daily expire_trainings job sets EXPIRED after end_date, training.services approve / reject / request_changes, Training status workflow (DRAFT to EXPIRED) (+2 more)
+Cohesion: 0.18
+Nodes (15): registration_open_q change in training/services.py, Event admin.training_review, expire_trainings daily job, Training.is_featured flag and set_featured, institute/summary/ endpoint (portal counts), users.manage_trainings permission, purge_notifications daily purge, Redis cache and django-q2 (qcluster worker) (+7 more)
 
-### Community 74 - "apps_notification_init"
-Cohesion: 0.11
-Nodes (6): send(), Command, purge_old(), purge_notifications(), send_notification_email(), PurgeTests
-
-### Community 75 - "enquiries/tests/test_services.py"
-Cohesion: 0.08
-Nodes (11): InstituteExperienceTests, _duration(), get_upload_path(), get_uuid_filename(), institute_experience(), nested_getattr(), set_instance_fields(), update_instance() (+3 more)
+### Community 75 - "TooManyRequests"
+Cohesion: 0.16
+Nodes (3): TooManyRequests, RegistrationOtpServiceTests, api_exception_handler()
 
 ### Community 76 - "PortalTestCase"
-Cohesion: 0.20
-Nodes (3): EndToEndTests, PortalTestCase, ResubmitTests
-
-### Community 85 - "AdminTrainingSerializer"
 Cohesion: 0.15
-Nodes (7): AdminTrainingSerializer, Meta, LearningOutcomeSerializer, Meta, TrainingContentFields, TrainingModuleSerializer, Meta
+Nodes (4): EndToEndTests, PermissionMatrixTests, PortalTestCase, ResubmitTests
+
+### Community 83 - "TrainingSession"
+Cohesion: 0.22
+Nodes (4): WeekDay, TrainingSession, Meta, TrainingSessionConstraintTests
+
+### Community 84 - "Enquiry"
+Cohesion: 0.14
+Nodes (9): NepalMobileField, EnquiryStatus, EnquiryType, PreferredTime, Enquiry, Meta, SeatRaceTests, SummaryTests (+1 more)
+
+### Community 85 - "BaseModel"
+Cohesion: 0.17
+Nodes (5): BaseModel, Meta, InstituteCEO, annotate_profile_completion(), _at_least()
 
 ### Community 87 - "create_admin"
 Cohesion: 0.11
 Nodes (8): change_password(), create_admin(), _revoke_refresh_tokens(), _set_permissions(), set_status(), update_admin(), AdminApiTests, StatusApiTests
 
-### Community 88 - "InstituteContact"
-Cohesion: 0.21
-Nodes (3): InstituteContact, add_contact(), InstituteAdminSiteTests
-
 ### Community 89 - "InstituteSummaryView"
-Cohesion: 0.20
+Cohesion: 0.18
 Nodes (4): InstituteActionRequiredSerializer, InstituteSummarySerializer, InstituteActionRequiredView, InstituteSummaryView
 
-### Community 95 - "InstituteReviewEventTests"
-Cohesion: 0.18
-Nodes (3): AdminAccountEventTests, InstituteReviewEventTests, TrainingReviewEventTests
+### Community 91 - "Notification"
+Cohesion: 0.27
+Nodes (4): NotificationSerializer, Meta, Notification, Meta
 
-### Community 96 - "InstituteLocation"
-Cohesion: 0.28
-Nodes (7): InstituteLocationSerializer, Meta, InstituteLocation, Meta, _create_registration(), update_location(), validate_institute_location()
+### Community 93 - "AdminTrainingSerializer"
+Cohesion: 0.10
+Nodes (9): AdminTrainingSerializer, Meta, LearningOutcomeSerializer, Meta, PortalTrainingSerializer, Meta, TrainingContentFields, TrainingSessionSerializer (+1 more)
 
-### Community 99 - "app_key/tests.py"
+### Community 96 - "UpdateStatusSerializer"
+Cohesion: 0.25
+Nodes (4): UpdateStatusSerializer, Meta, PasswordChangeView, UserStatusView
+
+### Community 103 - "users/api/v1/views.py"
+Cohesion: 0.14
+Nodes (7): LoginSerializer, ProfileSerializer, Meta, LoginView, LogoutView, MeView, RefreshView
+
+### Community 106 - "common/api/v1/views.py"
 Cohesion: 0.12
-Nodes (3): DistributedAppKey, AppKeyCorsTests, AppKeyModelTests
+Nodes (8): LocationFilter, Meta, LocationSerializer, Meta, build_tree(), CategoryTreeView, LocationTreeView, LocationViewSet
 
-### Community 103 - "AdminSerializer"
-Cohesion: 0.11
-Nodes (7): AdminSerializer, Meta, LoginSerializer, ProfileSerializer, Meta, LoginView, MeView
-
-### Community 109 - "InstituteCEO"
-Cohesion: 0.16
-Nodes (7): InstituteCEOSerializer, Meta, PortalCEOView, InstituteCEO, annotate_profile_completion(), _at_least(), save_ceo()
-
-### Community 113 - "IsInstituteMember"
+### Community 107 - "InstituteGalleryImage"
 Cohesion: 0.25
-Nodes (3): PortalDocumentDownloadView, IsInstituteMember, IsInstituteOwner
+Nodes (6): GalleryImageSerializer, Meta, PublicInstituteViewSet, InstituteGalleryImage, Meta, add_gallery_image()
 
-### Community 115 - "expire_trainings"
+### Community 109 - "notification/tasks.py"
 Cohesion: 0.25
-Nodes (3): Command, expire_trainings(), expire_trainings()
+Nodes (3): send(), purge_notifications(), send_notification_email()
+
+### Community 111 - "is_valid_key"
+Cohesion: 0.29
+Nodes (4): _cache_key(), forget_key(), is_valid_key(), parse_app_key()
+
+### Community 112 - "ActionAPIView"
+Cohesion: 0.25
+Nodes (3): ActionAPIView, RegisterSendOTPView, RegisterVerifyOTPView
+
+### Community 113 - "institutes/api/v1/views.py"
+Cohesion: 0.12
+Nodes (6): AcceptInvitationSerializer, AcceptInvitationView, PortalCEOView, PortalDocumentDownloadView, private_file_response(), RegisterView
 
 ### Community 123 - "TrainingHub Backend System Design (DRAFT v0.6)"
-Cohesion: 0.14
-Nodes (9): Audit trail gap (change_status takes by, TODO(audit)), TrainingHub Backend System Design (DRAFT v0.6), Django apps and their state (section 2), AuditLog (proposed, not built), Decision log (answered questions), Decisions made (section 1), Non-functional requirements (section 6), 3.8 Notifications (built) (+1 more)
+Cohesion: 0.13
+Nodes (11): Audit trail gap (change_status takes by, TODO(audit)), TrainingHub Backend System Design (DRAFT v0.6), Django apps and their state (section 2), AuditLog (proposed, not built), Decision log (answered questions), Decisions made (section 1), admin/institutes/{slug}/activity/ timeline, InstituteStatusLog (+3 more)
+
+### Community 124 - "InstituteCoverSerializer"
+Cohesion: 0.25
+Nodes (3): InstituteCoverSerializer, Meta, PortalCoverView
 
 ## Ambiguous Edges - Review These
 - `Decision: hybrid mode dropped (2026-10-13)` → `PRD training modes: Physical, Online, Hybrid`  [AMBIGUOUS]
@@ -469,22 +462,22 @@ Nodes (9): Audit trail gap (change_status takes by, TODO(audit)), TrainingHub Ba
 
 ## Knowledge Gaps
 - **23 isolated node(s):** `Dependency: Django 5.2.4`, `Dependency: django-q2 1.8.0`, `Dependency: django-redis 6.0.0`, `Dependency: djangorestframework 3.16.0`, `Dev extras: debug toolbar, django-extensions, ipdb, ipython, fabric3, pylint` (+18 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 782 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **52 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 792 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **68 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Training` connect `Training` to `.create`, `training/services.py`, `training/models.py`, `institutes/api/v1/views.py`, `institutes/models.py`, `EditTests`, `AdminInstituteViewSet`, `AdminInstitutesApiTests`, `FilterTests`, `AdminEnquiryTests`, `training/api/v1/views.py`, `SubmitTests`, `institutes/tests/test_api_portal.py`, `models/base.py`, `enquiries/services.py`, `control_panel/api/v1/views.py`, `training/api/v1/serializers.py`, `Enquiry`, `AdminTrainingsFeaturedAndReviewApiTests`, `EnquiryEventTests`, `Institute`, `AdminTrainingViewSet`, `Category`, `notification/services.py`, `enquiries/tests/test_services.py`, `TrainingConstraintTests`, `AdminTrainingSerializer`, `InstituteSummaryView`, `PortalTrainingSerializer`, `expire_trainings`?**
-  _High betweenness centrality (0.137) - this node is a cross-community bridge._
-- **Are the 57 inferred relationships involving `Training` (e.g. with `AdminTrainingFilter` and `institute_activity()`) actually correct?**
-  _`Training` has 57 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `Training` connect `Training` to `.create`, `training/services.py`, `training/models.py`, `Institute`, `SlugModel`, `control_panel/api/v1/views.py`, `TrainingTestCase`, `AdminInstituteViewSet`, `AdminInstitutesApiTests`, `FilterTests`, `AdminEnquiryTests`, `PublicTrainingViewSet`, `SubmitTests`, `control_panel/api/v1/serializers.py`, `institutes/tests/test_api_portal.py`, `enquiries/services.py`, `training/api/v1/serializers.py`, `enquiries/api/v1/views.py`, `AdminTrainingsFeaturedAndReviewApiTests`, `EnquiryEventTests`, `EditTests`, `TrainingSession`, `Enquiry`, `BaseModel`, `InstituteSummaryView`, `AdminTrainingSerializer`, `institutes/api/v1/views.py`?**
+  _High betweenness centrality (0.155) - this node is a cross-community bridge._
+- **Are the 59 inferred relationships involving `Training` (e.g. with `AdminTrainingFilter` and `institute_activity()`) actually correct?**
+  _`Training` has 59 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `Dependency: Django 5.2.4`, `Dependency: django-q2 1.8.0`, `Dependency: django-redis 6.0.0` to the rest of the system?**
   _23 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `.create` be split into smaller, more focused modules?**
   _Cohesion score 0.0504828797190518 - nodes in this community are weakly interconnected._
-- **Why does `Institute` connect `Institute` to `training/services.py`, `training/models.py`, `InstituteRegistrationSerializer`, `institutes/api/v1/views.py`, `institutes/services.py`, `ActionRequiredTests`, `institutes/models.py`, `RegistrationApiTests`, `AdminInstituteViewSet`, `AdminInstitutesApiTests`, `AdminEnquiryTests`, `SubmitTests`, `.as_`, `InstituteSocialLink`, `Training`, `institutes/tests/test_api_portal.py`, `models/base.py`, `control_panel/api/v1/views.py`, `SubmitTests`, `AdminApiTests`, `institutes/api/v1/serializers.py`, `AdminInstituteListSerializer`, `PublicInstituteApiTests`, `Enquiry`, `enquiries/tests/test_services.py`, `PortalTestCase`, `RegistrationTests`, `add_location`, `InstituteSummaryView`, `InstituteLocation`, `InstituteCEO`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
+- **Why does `Role` connect `institutes/tests/test_api_portal.py` to `.create`, `UserManager`, `Institute`, `IsInstituteMember`, `institutes/services.py`, `ActionRequiredTests`, `control_panel/api/v1/views.py`, `InvitationTests`, `RegistrationApiTests`, `AdminEnquiryTests`, `control_panel/api/v1/serializers.py`, `HasPlatformPermission`, `.url`, `DocumentTests`, `RegistrationTests`, `PublicInstituteApiTests`, `ContactTests`, `users/services.py`, `PortalTestCase`, `add_location`, `Enquiry`, `BaseModel`, `User`, `create_admin`, `InstituteAdminSiteTests`, `UserConstraintTests`, `AuthApiTests`?**
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
