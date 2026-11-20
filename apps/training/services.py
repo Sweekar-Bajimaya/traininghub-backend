@@ -219,9 +219,9 @@ def _ready_for_submission(training):
         if value in (None, "", []):
             errors[name] = "This is required before submitting."
     venue = getattr(training, "venue", None)
-    # detail = getattr(training, "detail", None)
-    # if detail is None or not detail.target_audience:
-    #     errors["target_audience"] = "This is required before submitting."
+    detail = getattr(training, "detail", None)
+    if detail is None or not detail.target_audience:
+        errors["target_audience"] = "This is required before submitting."
     if venue is None or not venue.address:
         errors["venue"] = "Add where the training is held."
     elif training.mode == TrainingMode.PHYSICAL:
