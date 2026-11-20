@@ -7,6 +7,7 @@ from django.db.models import (
     IntegerField,
     OuterRef,
     Prefetch,
+    Q,
     Subquery,
     Value,
     When,
@@ -59,11 +60,47 @@ from apps.institutes.models import (
 )
 from apps.training import services as training_services
 from apps.training.api.v1.views import with_content
+from apps.training.constants import TrainingStatus
 from apps.training.models import Training
 from apps.users.constants import Role
 from apps.users.permissions import HasAnyPlatformPermission, HasPlatformPermission
 
 User = get_user_model()
+
+
+# counts: a correlated subquery per row, so a page never runs one query per row
+def _count_of(rows):
+    """How many `rows` belong to each row of the outer query (`rows` is filtered on an OuterRef).
+    A subquery, so there is no join fan-out and no GROUP BY."""
+    counted = rows.order_by().annotate(
+        n=Func(F("pk"), function="COUNT", output_field=IntegerField())
+    )
+    return Coalesce(Subquery(counted.values("n"), output_field=IntegerField()), 0)
+
+
+def _live_trainings_in_category():
+    """Live trainings of a category and of its sub-categories: the training is approved and so is
+    its institute. An expired, unpublished or cancelled training is no longer approved."""
+    return _count_of(
+        Training.objects.filter(
+            status=TrainingStatus.APPROVED, institute__status=InstituteStatus.APPROVED
+        ).filter(Q(category=OuterRef("pk")) | Q(category__parent=OuterRef("pk")))
+    )
+
+
+def _enquiries_in_category():
+    """Every enquiry that came for a training of the category or of its sub-categories."""
+    return _count_of(
+        Enquiry.objects.filter(
+            Q(training__category=OuterRef("pk"))
+            | Q(training__category__parent=OuterRef("pk"))
+        )
+    )
+
+
+def _enquiries_of_training():
+    """Every enquiry of the training, any status and type."""
+    return _count_of(Enquiry.objects.filter(training=OuterRef("pk")))
 
 
 # dashboard
@@ -92,9 +129,7 @@ class AdminDashboardSummaryView(RetrieveAPIView):
                 Training.objects.all()
             )
         if user.has_perm("users.manage_enquiries"):
-            summary["enquiries"] = enquiry_services.admin_counts(
-                Enquiry.objects.all()
-            )
+            summary["enquiries"] = enquiry_services.admin_counts(Enquiry.objects.all())
         return summary
 
 
@@ -126,7 +161,32 @@ class AdminCategoryViewSet(CreateListRetrieveUpdateViewSet):
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminCategoryFilter
     search_fields = ("name",)
-    queryset = Category.objects.select_related("parent").order_by("name", "pk")
+    queryset = (
+        Category.objects.select_related("parent")
+        .annotate(
+            live_trainings_count=_live_trainings_in_category(),
+            enquiries_count=_enquiries_in_category(),
+        )
+        .order_by("name", "pk")
+    )
+
+    def _detail(self, pk):
+        # re-read through the annotated queryset, so the response of a create or an update
+        # carries the counts too
+        return self.get_serializer(self.get_queryset().get(pk=pk)).data
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        category = serializer.save()
+        return Response(self._detail(category.pk), status=201)
+
+    def partial_update(self, request, *args, **kwargs):
+        category = self.get_object()
+        serializer = self.get_serializer(category, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(self._detail(category.pk))
 
 
 # institutes
@@ -226,11 +286,15 @@ class AdminInstituteViewSet(ReadOnlyViewSet):
                     pending_documents_count=_pending_documents_count(),
                 )
             )
-        return queryset.select_related("contact", "ceo").prefetch_related(
-            "documents",
-            "social_links",
-            Prefetch("locations", queryset=_locations_queryset()),
-            _owner_prefetch(),
+        return (
+            queryset.select_related("contact", "ceo")
+            .prefetch_related(
+                "documents",
+                "social_links",
+                Prefetch("locations", queryset=_locations_queryset()),
+                _owner_prefetch(),
+            )
+            .annotate(trainings_count=_trainings_count())
         )
 
     @action(detail=False, methods=["get"])
@@ -355,9 +419,13 @@ class AdminTrainingViewSet(ReadOnlyViewSet):
     filter_backends = (DjangoFilterBackend, SearchFilter)
     filterset_class = AdminTrainingFilter
     search_fields = ("title", "institute__name")
-    queryset = Training.objects.select_related(
-        "institute", "category__parent", "venue__location"
-    ).order_by("-created_at", "-pk")
+    queryset = (
+        Training.objects.select_related(
+            "institute", "category__parent", "venue__location"
+        )
+        .annotate(enquiries_count=_enquiries_of_training())
+        .order_by("-created_at", "-pk")
+    )
 
     def get_serializer_class(self):
         if self.action == "list":
