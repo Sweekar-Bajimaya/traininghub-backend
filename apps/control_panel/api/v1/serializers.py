@@ -10,6 +10,7 @@ from apps.common.serializers import (
     DynamicFieldsSerializer,
 )
 from apps.enquiries.models import Enquiry
+from apps.faq.api.v1.serializers import FAQSerializer
 from apps.institutes.api.v1.serializers import (
     InstituteCEOSerializer,
     InstituteContactSerializer,
@@ -30,7 +31,6 @@ from apps.training.models import Training
 from apps.users import services as user_services
 from apps.users.api.v1.serializers import ProfileSerializer
 from apps.users.constants import GRANTABLE_PERMISSIONS
-from apps.faq.api.v1.serializers import FAQSerializer
 
 User = get_user_model()
 
