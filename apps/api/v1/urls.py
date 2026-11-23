@@ -15,4 +15,5 @@ urlpatterns = [
     path("institute/", include("apps.institutes.api.v1.urls.portal")),
     # every admin endpoint lives in the control panel: one include
     path("admin/", include("apps.control_panel.api.v1.urls")),
+    path("notifications/", include("apps.notification.api.v1.urls")),
 ]

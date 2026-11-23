@@ -57,5 +57,10 @@ class PreferredTime:
 
 
 PHONE_DAILY_LIMIT = 3  # enquiries accepted per phone number
-PHONE_LIMIT_SECONDS = 24 * 60 * 60  # ... in this window (the IP limit is the `enquiry` throttle scope)
+PHONE_LIMIT_SECONDS = (
+    24 * 60 * 60
+)  # ... in this window (the IP limit is the `enquiry` throttle scope)
 MESSAGE_MAX_LENGTH = 2000
+
+MILESTONE_COUNTS = (10, 25, 50, 100)  # enquiries, and INTEREST enquiries, per training
+MILESTONE_SEAT_PERCENTS = (50, 100)  # converted enquiries against the training's seats

@@ -388,7 +388,10 @@ class AdminDocumentView(GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = institute_services.review_document(
-            document, status=serializer.validated_data["status"], by=request.user
+            document,
+            status=serializer.validated_data["status"],
+            reason=serializer.validated_data.get("reason", ""),
+            by=request.user,
         )
         return Response(
             AdminDocumentSerializer(

@@ -2,6 +2,7 @@ import re
 from datetime import timedelta
 from unittest import mock
 
+from django.conf import settings
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -1181,6 +1182,7 @@ class EndToEndTests(TempMediaMixin, APITestCase):
 
         # 1. verify the login email, then register
         owner_client = APIClient()
+        owner_client.credentials(HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0])  # as our frontend's browser
         with mock.patch("apps.users.services.async_task") as queued:
             res = owner_client.post(
                 BASE + "register/send-otp/", {"email": "boss@example.com"}, format="json"
