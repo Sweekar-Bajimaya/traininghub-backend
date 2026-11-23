@@ -87,7 +87,10 @@ or an open question gets answered. Rules:
   class slots (`TrainingSession.class_days` and times). A training uses a category or a sub-category (two levels): the
   portal API takes `category` (top-level) and an optional `sub_category` and answers with both, while the database keeps
   one `Training.category` column that holds the leaf. `shifts` is a list of `TrainingShift` values (Morning, Day, Evening):
-  an independent label, not checked against the sessions, empty in a draft and required to submit.
+  an independent label, not checked against the sessions, empty in a draft and required to submit. `target_audience` (on
+  `TrainingDetail`, shown flat in the API) is a list of up to 10 texts of up to 300 characters, empty in a draft and
+  required to submit. A training also has up to 25 **FAQs** (`apps/faq`: a question and an answer each, optional, shown on
+  the public detail), sent as a nested `faqs` list like `sessions`: a list replaces the whole list, leaving it out keeps it.
   Statuses `DRAFT` → `SUBMITTED` → `APPROVED` / `CHANGES_REQUESTED` / `REJECTED`; then `UNPUBLISHED`, `CANCELLED`, and
   `EXPIRED` (set by a daily job after `end_date`). Editing an `APPROVED` / `UNPUBLISHED` training sends it back to
   `SUBMITTED`; only a `DRAFT` can be deleted; only an `APPROVED` institute creates, submits or republishes. Empty
@@ -176,7 +179,7 @@ apps/
                           also owns the registration OTP serializers that `institute/register/send-otp|verify-otp/` use;
                           `services.admins_with_permission` resolves the admin recipients of a notification, and `create_admin`
                           notifies the new admin
-  training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills) and `TrainingContact`
+  training/               `Training`, `TrainingDetail` (overview, eligibility, certification, skills, target audience) and `TrainingContact`
                           (one row each, created with the training; the API still shows them as flat fields),
                           `TrainingLocation` (the venue, one row), `TrainingSession` (weekly slot), `TrainingModule`, `LearningOutcome` (modules and outcomes keep
                           the order they were sent in: ordered by pk, no position column);
@@ -185,10 +188,20 @@ apps/
                           APIs: public `trainings/` (filters, prefix search, ordering; the `duration` and `start` filter
                           options are served by `trainings/durations/` and `trainings/start-dates/`, built from
                           `DurationBucket` / `StartBucket` in `constants.py`), portal `institute/trainings/`
-                          (nested sessions / modules / outcomes, submit, withdraw, unpublish, republish, cancel,
+                          (nested sessions / modules / outcomes / faqs, submit, withdraw, unpublish, republish, cancel,
                           cover); the admin review API and the featuring are in `control_panel`. `services.institute_counts` feeds the
                           portal's `institute/summary/` (served by `institutes`). `submit`, the review rule in `update_training`,
-                          `approve`, `reject` and `request_changes` call `notification.services.notify`
+                          `approve`, `reject` and `request_changes` call `notification.services.notify`; `create_training` and
+                          `update_training` call `faq.services.replace_faqs`; `_ready_for_submission` (submit, and the edit of an
+                          `APPROVED` / `UNPUBLISHED` training) also needs a `target_audience`
+  faq/                    `FAQ` (`training`, `question` up to 255 characters, `answer`; ordered by pk, so the order sent is the
+                          display order); `services.replace_faqs(training, faqs)` (`None` keeps the list, a list, even an empty
+                          one, replaces it; at most `FAQ_MAX_PER_TRAINING` = 25, both fields required once stripped, all checked
+                          before the old rows are deleted); `api/v1/serializers.py` (`FAQSerializer`: `question`, `answer`). No
+                          URLs of its own: FAQs are the nested `faqs` list of the portal training (writable) and of the public
+                          and admin training details (read-only). A child of `training`: `faq.models` imports `training.models`,
+                          and `training` imports `faq.services` and `faq.api.v1.serializers`, so `faq` must never import
+                          `training.services` or the training serializers (a cycle). FAQs do not feed the search vector
   institutes/             Institute, members, invitations, documents, locations, gallery, contact, CEO, social links, `InstituteStatusLog` (one row per status change); `services.py` (status
                           workflow, registration, locations, documents, gallery, staff invitations), `tasks.py`
                           (invitation email), private `storage.py`; APIs: public `institutes/`, portal `institute/`
@@ -224,7 +237,12 @@ apps/
                           `GET admin/` lists the five. Also `dashboard/summary/` (a plain `path`, so not in that list): the
                           console's cards for institutes, trainings and enquiries in one call, a section per permission
                           (`HasAnyPlatformPermission`; a section the caller may not see is left out), from each app's
-                          `services.admin_counts`. It only calls the services
+                          `services.admin_counts`. List and detail rows carry annotated counts, each a correlated `COUNT` subquery on
+                          the viewset's queryset (`_count_of` in `views.py`: no join fan-out, no query per row): `categories/`
+                          `live_trainings_count` (`APPROVED` trainings of `APPROVED` institutes in the category or its
+                          sub-categories) and `enquiries_count` (every enquiry for those trainings), `institutes/` `trainings_count`
+                          (all its trainings, any status), `trainings/` `enquiries_count`; a category's create and `PATCH` re-read
+                          the row through the annotated queryset so their answer has the counts too. It only calls the services
                           of the other apps, which keep the rules. `users/{id}/status/` (suspend) is still in `users`.
                           Nothing imports `control_panel` except `apps/api/v1/urls.py`; new admin endpoints go here,
                           not in the resource's own app (the notification inbox is the exception: it serves every signed-in user)
@@ -368,11 +386,21 @@ Run through the venv (`source .venv/bin/activate`, or prefix `.venv/bin/python`)
   `common:category-tree:v1`). `post_save` / `post_delete` (and `load_locations`) clear them; `QuerySet.update()` and
   `bulk_update()` do not, so delete the key yourself after those.
 - **Trainings carry a stored search vector.** Write them through `apps/training/services.py` (it rebuilds the vector and
-  `duration_weeks`, and writes the `TrainingDetail` / `TrainingContact` rows); a direct `create()` / `update()` leaves
+  `duration_weeks`, and writes the `TrainingDetail` / `TrainingContact` rows and the FAQs); a direct `create()` / `update()` leaves
   search stale and makes no detail or contact row (readers treat a missing row as empty). The overview and skills feed
   the vector, so change them through `update_training(detail={...})` too. Renaming an institute, renaming or moving a
   category refresh the affected trainings through queued tasks, so they need
   `qcluster`.
+- **FAQs are written only through `apps/training/services.py`**, which calls `faq.services.replace_faqs`: it deletes the
+  training's rows and `bulk_create`s the list, so an FAQ's id changes on every save that sends `faqs`. The rules (at most 25, a
+  question and an answer both non-blank after stripping) live in that service, not only in the serializer, because a `PATCH`
+  is partial and DRF skips a missing required field of a nested item. The Django admin site registers `FAQ` with add and
+  change rights, which skip those rules.
+- **`target_audience` is required to submit, and a training saved without one fails.** `training/0005` added the column
+  with an empty default and `_ready_for_submission` (the `submit` check, and the one an edit of an `APPROVED` /
+  `UNPUBLISHED` training runs before it goes back to review) refuses an empty list or a training with no detail row, with
+  a 400 on `target_audience`. So such a training cannot be submitted, and editing it while it is live is refused (the whole
+  edit rolls back) until the request sends a `target_audience`.
 - **Expiry only happens if `expire_trainings` is scheduled** (daily); otherwise past trainings stay `APPROVED` and
   public.
 - **`select_for_update()` with a nullable `select_related`** fails in Postgres ("FOR UPDATE cannot be applied to the
