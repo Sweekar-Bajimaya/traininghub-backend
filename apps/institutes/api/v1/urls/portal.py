@@ -44,7 +44,7 @@ urlpatterns = [
         name="action-required",
     ),
     path(
-        "dashboard_summary/",
+        "dashboard/summary/",
         views.InstituteDashboardSummaryView.as_view(),
         name="institute-dashboard-summary",
     ),
