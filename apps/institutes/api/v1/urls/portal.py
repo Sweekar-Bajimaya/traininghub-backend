@@ -44,7 +44,9 @@ urlpatterns = [
         name="action-required",
     ),
     path(
-        "dashboard/", views.InstituteDashboardView.as_view(), name="institute-dashboard"
+        "dashboard_summary/",
+        views.InstituteDashboardSummaryView.as_view(),
+        name="institute-dashboard-summary",
     ),
     path("summary/", views.InstituteSummaryView.as_view(), name="summary"),
     path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),

@@ -349,7 +349,7 @@ class InstituteSummaryView(RetrieveAPIView):
         }
 
 
-class InstituteDashboardView(RetrieveAPIView):
+class InstituteDashboardSummaryView(RetrieveAPIView):
     """The portal dashboard's cards for the caller's own institute: `trainings` (total, active,
     pending_review) and `enquiries` (total, new, interested_users). Both staff and the owner see them."""
 
