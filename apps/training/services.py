@@ -773,4 +773,3 @@ def start_date_range(bucket, today=None):
     if bucket == StartBucket.LATER:
         return today + timedelta(days=max(StartBucket.DAYS.values()) + 1), None
     return today, today + timedelta(days=StartBucket.DAYS[bucket])
-
