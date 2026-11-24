@@ -353,4 +353,3 @@ class InstituteSummaryView(RetrieveAPIView):
                 Enquiry.objects.filter(institute_id=institute_id)
             ),
         }
-
