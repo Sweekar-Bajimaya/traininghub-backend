@@ -48,7 +48,15 @@ Check it works: open `http://localhost:8000/api/root/` (Swagger UI, only when `D
 
 Optional settings are environment variables with defaults: `REDIS_URL` (`redis://localhost:6379/0`),
 `EMAIL_*`, `DEFAULT_FROM_EMAIL`, `RECAPTCHA_SECRET_KEY`, `FRONTEND_BASE_URL` (`http://localhost:3000`, used in
-staff invitation links).
+staff invitation links and as the default CORS origin).
+
+To run with `DEBUG=false` set `SECRET_KEY` (required) and `ALLOWED_HOSTS` (comma-separated), and `CORS_ALLOWED_ORIGINS` for
+any frontend origin besides `FRONTEND_BASE_URL`. `DEBUG=false` also turns on https redirect, secure cookies and HSTS; behind
+a proxy that ends TLS add `TRUST_X_FORWARDED_PROTO=true`.
+
+The public write endpoints (enquiry submit, institute registration and its one-time codes) accept a request from the
+frontend's origin (`FRONTEND_BASE_URL` / `CORS_ALLOWED_ORIGINS`) or one that sends an `App-Key` header. Create a key in the Django admin
+(Distributed app keys > Add) and give it to the client, for example the Next.js server or a mobile app.
 
 Institute verification documents are stored in `private_media/` in the project root (created on first upload,
 gitignored, never served by URL). Staff invitation emails are sent by the background worker, so run
@@ -84,13 +92,17 @@ apps/
               municipality) and training categories, with their loaders and APIs
   users/      User model, roles and permissions, JWT auth
   training/   trainings, weekly class slots, curriculum, search; public and portal APIs
+  faq/        a training's questions and answers (no URLs: they travel inside the training's JSON)
   institutes/ institutes, staff and invitations, documents, locations, gallery; public and portal APIs
-  control_panel/ the admin API (`/api/v1/admin/`): admin team, categories, institute and training review
+  enquiries/  visitors' enquiries and interests, internal notes, status changes; public submit and portal APIs
+  notification/ in-app inbox and email for institute staff and admins (`/api/v1/notifications/`)
+  app_key/    `App-Key` header for the public write endpoints
+  control_panel/ the admin API (`/api/v1/admin/`): admin team, categories, institute and training review, enquiries monitor, dashboard counts
 docs/         PRD and system design
 design/       UI prototypes (bundled HTML, decode before searching)
 ```
 
-Planned apps: `notifications`, `analytics`.
+Planned apps: `analytics`.
 
 ## Users API (`/api/v1/user/`)
 
@@ -133,7 +145,7 @@ An institute becomes public only when an admin approves it, which needs at least
 | `/api/v1/categories/` | public | category > sub-category tree (cached), with icon and hue |
 | `/api/v1/admin/categories/` | `manage_categories` | list, create, rename, move, deactivate (no delete) |
 | `/api/v1/trainings/` | public | approved trainings: list and `{slug}/`; filters `category`, `sub_category`, `mode`, `level`, `province`, `district`, `municipality`, `fee_min`, `fee_max`, `start_from`, `start_to`, `duration` (`short`, `mid`, `long`), `institute`, `registration_open`; `search`; `ordering` (`published_at`, `start_date`, `fee_npr`) |
-| `/api/v1/institute/trainings/` | institute staff | create and edit (with `sessions`, `modules`, `outcomes`), `submit`, `withdraw`, `unpublish`, `republish`, `cancel`, `cover`; delete a draft |
+| `/api/v1/institute/trainings/` | institute staff | create and edit (with `sessions`, `modules`, `outcomes`, `faqs`; a `target_audience` is needed to submit), `submit`, `withdraw`, `unpublish`, `republish`, `cancel`, `cover`; delete a draft |
 | `/api/v1/admin/trainings/` | `manage_trainings` | review queue (`?status=SUBMITTED`): `approve`, `request-changes`, `reject` |
 
 A training starts as `DRAFT`, becomes `SUBMITTED` (shown as "Pending Review") when the institute submits it, and is

@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -27,6 +28,8 @@ VISITOR_FIELDS = {"id", "type", "training", "institute_name", "status_label", "c
 
 class PublicTestCase(APITestCase):
     def setUp(self):
+        # the submit needs our frontend's origin (or an App-Key): send what its browser sends
+        self.client.credentials(HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0])
         reset_limits()
         self.institute, self.owner, _ = approved_institute()
         self.training = make_training(self.institute)

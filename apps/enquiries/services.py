@@ -5,13 +5,18 @@ from django.db.models import Count, Q
 
 from apps.common.exceptions import TooManyRequests
 from apps.enquiries.constants import (
+    MILESTONE_COUNTS,
+    MILESTONE_SEAT_PERCENTS,
     PHONE_DAILY_LIMIT,
     PHONE_LIMIT_SECONDS,
     EnquiryStatus,
     EnquiryType,
 )
 from apps.enquiries.models import Enquiry, EnquiryNote
+from apps.institutes import services as institute_services
 from apps.institutes.constants import InstituteStatus
+from apps.notification import services as notification_services
+from apps.notification.constants import EventType
 from apps.training import services as training_services
 from apps.training.constants import TrainingStatus
 from apps.training.models import Training
@@ -50,9 +55,7 @@ def _require_open_for_enquiry(training):
             training=training, status=EnquiryStatus.CONVERTED
         ).count()
         if taken >= training.seats:
-            raise ValidationError(
-                "This training is full. You can still show interest."
-            )
+            raise ValidationError("This training is full. You can still show interest.")
 
 
 def _claim_phone_slot(phone):
@@ -69,6 +72,104 @@ def _claim_phone_slot(phone):
             "Too many enquiries from this phone number today. Please try again tomorrow.",
             wait=cache.ttl(key) or PHONE_LIMIT_SECONDS,
         )
+
+
+def _milestone_counts(training):
+    return Enquiry.objects.filter(training=training).aggregate(
+        enquiries=Count("pk"),
+        interest=Count("pk", filter=Q(type=EnquiryType.INTEREST)),
+        converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
+    )
+
+
+def _fire_highest(event, staff, training, metric, crossed, payload_for):
+    """Notify for the highest threshold reached and record the lower ones without sending, so
+    data that already passed them does not trigger a burst. `crossed` is ascending. The dedupe
+    key lets each threshold fire once per person, even when two requests arrive together."""
+
+    if not crossed:
+        return
+
+    def key(label):
+        return f"milestone:{metric}:{training.pk}:{label}"
+
+    for label in crossed[:-1]:
+        notification_services.mark_seen(staff, key(label))
+    top = crossed[-1]
+    notification_services.notify(
+        event, recipients=staff, payload=payload_for(top), dedupe_key=key(top)
+    )
+
+
+def _check_intake_milestones(training, staff):
+    counts = _milestone_counts(training)
+    base = {"training_title": training.title, "training_slug": training.slug}
+    for metric, event in (
+        ("enquiries", EventType.MILESTONE_ENQUIRIES),
+        ("interest", EventType.MILESTONE_INTEREST),
+    ):
+        crossed = [n for n in MILESTONE_COUNTS if counts[metric] >= n]
+        _fire_highest(
+            event, staff, training, metric, crossed, lambda n: {**base, "threshold": n}
+        )
+
+
+def _check_converted_milestone(training, staff):
+    if not training.seats:
+        return  # unlimited seats: there is no percentage to reach
+    converted = _milestone_counts(training)["converted"]
+    crossed = [
+        p for p in MILESTONE_SEAT_PERCENTS if converted * 100 >= training.seats * p
+    ]
+    _fire_highest(
+        EventType.MILESTONE_CONVERTED,
+        staff,
+        training,
+        "converted",
+        crossed,
+        lambda p: {
+            "training_title": training.title,
+            "training_slug": training.slug,
+            "percent": p,
+            "converted": converted,
+            "seats": training.seats,
+        },
+    )
+
+
+def _notify_enquiry_created(enquiry, training):
+    staff = list(institute_services.staff_users(enquiry.institute))
+    notification_services.notify(
+        EventType.ENQUIRY_NEW,
+        recipients=staff,
+        payload={
+            "kind": "interest" if enquiry.type == EnquiryType.INTEREST else "enquiry",
+            "name": enquiry.name,  # typed by a visitor: plain text only, never in an email subject
+            "enquiry_id": enquiry.pk,
+            "training_title": training.title,
+            "training_slug": training.slug,
+        },
+    )
+    _check_intake_milestones(training, staff)
+
+
+def _notify_converted(enquiry, by):
+    training = enquiry.training
+    everyone = list(institute_services.staff_users(enquiry.institute))
+    # the owner and the other staff hear about it; the person who made the change already knows
+    others = [user for user in everyone if user.pk != by.pk]
+    notification_services.notify(
+        EventType.ENQUIRY_CONVERTED,
+        recipients=others,
+        payload={
+            "name": enquiry.name,
+            "enquiry_id": enquiry.pk,
+            "training_title": training.title,
+            "training_slug": training.slug,
+            "changed_by": by.full_name or by.email,
+        },
+    )
+    _check_converted_milestone(training, everyone)  # the milestone goes to everyone
 
 
 def submit_enquiry(
@@ -94,10 +195,12 @@ def submit_enquiry(
         training=training, phone=phone, status__in=EnquiryStatus.OPEN
     ).exists():
         raise duplicate
-    _claim_phone_slot(phone)  # after the rules, so a refused enquiry does not use the allowance
+    _claim_phone_slot(
+        phone
+    )  # after the rules, so a refused enquiry does not use the allowance
     try:
         with transaction.atomic():
-            return Enquiry.objects.create(
+            enquiry = Enquiry.objects.create(
                 training=training,
                 institute=training.institute,
                 name=name,
@@ -107,6 +210,8 @@ def submit_enquiry(
                 type=type,
                 preferred_time=preferred_time,
             )
+            _notify_enquiry_created(enquiry, training)
+        return enquiry
     except IntegrityError as error:  # two submits at once: the unique index decides
         if _is_open_duplicate(error):
             raise duplicate from error
@@ -127,7 +232,10 @@ def change_status(enquiry, *, status, by):
         return enquiry
     if status == EnquiryStatus.CONVERTED:
         seats = (
-            Training.objects.select_for_update().only("seats").get(pk=enquiry.training_id).seats
+            Training.objects.select_for_update()
+            .only("seats")
+            .get(pk=enquiry.training_id)
+            .seats
         )
         if (
             seats is not None
@@ -137,11 +245,15 @@ def change_status(enquiry, *, status, by):
             >= seats
         ):
             raise ValidationError(
-                {"status": "All seats of this training are already taken by converted enquiries."}
+                {
+                    "status": "All seats of this training are already taken by converted enquiries."
+                }
             )
     enquiry.status = status
     try:
-        with transaction.atomic():  # a savepoint, so the error does not poison the outer transaction
+        with (
+            transaction.atomic()
+        ):  # a savepoint, so the error does not poison the outer transaction
             enquiry.save(update_fields=["status", "modified_at"])
     except IntegrityError as error:
         if not _is_open_duplicate(error):
@@ -152,6 +264,8 @@ def change_status(enquiry, *, status, by):
                 "for this training."
             }
         ) from error
+    if status == EnquiryStatus.CONVERTED:
+        _notify_converted(enquiry, by)
     # TODO(audit): who changed the status (`by`)
     return enquiry
 

@@ -10,6 +10,7 @@ from apps.common.serializers import (
     DynamicFieldsSerializer,
 )
 from apps.enquiries.models import Enquiry
+from apps.faq.api.v1.serializers import FAQSerializer
 from apps.institutes.api.v1.serializers import (
     InstituteCEOSerializer,
     InstituteContactSerializer,
@@ -30,7 +31,6 @@ from apps.training.models import Training
 from apps.users import services as user_services
 from apps.users.api.v1.serializers import ProfileSerializer
 from apps.users.constants import GRANTABLE_PERMISSIONS
-from apps.faq.api.v1.serializers import FAQSerializer
 
 User = get_user_model()
 
@@ -101,6 +101,10 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
         allow_null=True,
     )
     parent_name = serializers.SerializerMethodField()
+    # annotated by AdminCategoryViewSet: approved trainings of approved institutes in the category
+    # (sub-categories included), and every enquiry that came for the category's trainings
+    live_trainings_count = serializers.IntegerField(read_only=True)
+    enquiries_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Category
@@ -113,6 +117,8 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
             "icon",
             "hue",
             "is_active",
+            "live_trainings_count",
+            "enquiries_count",
             "created_at",
         )
         read_only_fields = ("id", "slug", "created_at")
@@ -147,14 +153,21 @@ class AdminCategorySerializer(DynamicFieldsModelSerializer):
 class AdminDocumentSerializer(DynamicFieldsModelSerializer):
     class Meta:
         model = InstituteDocument
-        fields = ("id", "name", "status", "created_at")  # never the file path or URL
-        read_only_fields = ("id", "name", "created_at")
+        fields = (
+            "id",
+            "name",
+            "status",
+            "reason",
+            "created_at",
+        )  # never the file path or URL
+        read_only_fields = ("id", "name", "reason", "created_at")
 
 
 class DocumentReviewSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=(DocumentStatus.VERIFIED, DocumentStatus.REJECTED)
     )
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 
 # the review actions an admin can take, by the status they move the institute to
@@ -176,6 +189,9 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
     social_links = InstituteSocialLinkSerializer(many=True, read_only=True)
     locations = InstituteLocationSerializer(many=True, read_only=True)
     available_actions = serializers.SerializerMethodField()
+    trainings_count = serializers.IntegerField(
+        read_only=True
+    )  # all its trainings, any status
 
     class Meta:
         model = Institute
@@ -198,6 +214,7 @@ class AdminInstituteSerializer(DynamicFieldsModelSerializer):
             "locations",
             "documents",
             "available_actions",
+            "trainings_count",
         )
 
     def get_owner_email(self, obj):
@@ -277,13 +294,20 @@ class AdminTrainingFeaturedSerializer(DynamicFieldsSerializer):
                 {key: "This field cannot be changed here." for key in sorted(extra)}
             )
         return super().to_internal_value(data)
-        
+
 
 class AdminTrainingListSerializer(PortalTrainingListSerializer):
     institute_name = serializers.CharField(source="institute.name", read_only=True)
+    enquiries_count = serializers.IntegerField(
+        read_only=True
+    )  # annotated by the viewset
 
     class Meta(PortalTrainingListSerializer.Meta):
-        fields = PortalTrainingListSerializer.Meta.fields + ("institute_name", "is_featured")
+        fields = PortalTrainingListSerializer.Meta.fields + (
+            "institute_name",
+            "is_featured",
+            "enquiries_count",
+        )
 
 
 class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerializer):
@@ -297,10 +321,17 @@ class AdminTrainingSerializer(TrainingContentFields, DynamicFieldsModelSerialize
     modules = TrainingModuleSerializer(many=True, read_only=True)
     outcomes = LearningOutcomeSerializer(many=True, read_only=True)
     faqs = FAQSerializer(many=True, read_only=True)
+    enquiries_count = serializers.IntegerField(
+        read_only=True
+    )  # annotated by the viewset
 
     class Meta:
         model = Training
-        fields = PortalTrainingSerializer.Meta.fields + ("institute", "is_featured")
+        fields = PortalTrainingSerializer.Meta.fields + (
+            "institute",
+            "is_featured",
+            "enquiries_count",
+        )
         read_only_fields = fields
 
     def get_institute(self, obj):

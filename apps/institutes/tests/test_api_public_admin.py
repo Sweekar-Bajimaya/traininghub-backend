@@ -1,5 +1,6 @@
 from unittest import mock
 
+from django.conf import settings
 from django.core import mail
 from django.utils.module_loading import import_string
 from rest_framework.test import APITestCase
@@ -41,6 +42,8 @@ ADMIN_URL = "/api/v1/admin/institutes/"
 
 class RegistrationApiTests(APITestCase):
     def setUp(self):
+        # registration needs our frontend's origin (or an App-Key): send what its browser sends
+        self.client.credentials(HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0])
         reset_throttles()
         reset_otps()
         self.municipality = make_municipality()
@@ -431,6 +434,7 @@ class RegistrationApiTests(APITestCase):
 
 class RegistrationOtpApiTests(APITestCase):
     def setUp(self):
+        self.client.credentials(HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0])
         reset_throttles()
         reset_otps()
 

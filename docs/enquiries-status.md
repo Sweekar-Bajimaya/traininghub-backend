@@ -8,13 +8,16 @@ in its section 3.7.
 Updated 2026-11-02: the device token, the `X-Device-Token` header and the visitor's "My enquiries" list were removed.
 This file describes the app without them; the decision is the last entry of the log in `docs/System Design.md`.
 
+Updated 2026-11-20: a new enquiry, a converted enquiry and the enquiry milestones now notify the institute's staff in-app
+and by email (the `notification` app, section 3.8 of `docs/System Design.md`). The enquirer is still never notified.
+
 ## 1. In short
 
 - **Built:** a visitor sends an enquiry or an interest without an account; the institute's staff and owner list,
   search, filter and open enquiries, change the status, add internal notes and read the counts. The visitor has no
   identity after the submit and no list of their own.
 - **Tested:** 82 tests in `apps/enquiries`, and the whole suite is 516 tests, all passing (`python manage.py test`).
-- **Not built:** email or in-app alerts, captcha, the admin enquiries monitor, dashboard analytics, and "seats left" on
+- **Not built:** captcha, the admin enquiries monitor, dashboard analytics, and "seats left" on
   public trainings (section 5).
 - **Before it works end to end:** run `python manage.py migrate` (a database built before 2026-11-02 has to roll the
   app back first, section 4.1).
@@ -116,7 +119,7 @@ query counts that stay constant as lists and notes grow.
 | :---- | :---- | :---- |
 | "Preferred location" in the modal, drawer and admin data model | Dropped | Decided 2026-10-10 |
 | Status change adds "Status changed to X" to the notes | Not added | Decided 2026-10-10: notes only; the status change leaves no history |
-| Alerts by in-app, email and SMS | None yet | Decided 2026-10-10: no email for now |
+| Alerts by in-app, email and SMS | In-app and email to the institute's staff (new enquiry, converted, milestones); no SMS, and never to the visitor | Decided 2026-10-10: no email for now; reversed 2026-11-18 (built in `notification`) |
 | Captcha | None | Decided 2026-10-10: not for now |
 | Phone check `^9[678]\d{8}$` with the message "97 or 98" | Same pattern; the message says "96, 97 or 98" | The pattern already allowed 96 |
 | `+977` stripped from the start of any number | Stripped only when ten digits remain | Otherwise a real number starting 977 is cut short |
@@ -133,7 +136,8 @@ query counts that stay constant as lists and notes grow.
       `python manage.py migrate enquiries zero` (this deletes every enquiry), then `migrate`. A fresh database is fine.
 - [ ] **The deployment proxy must pass the real client IP**, or the 10-an-hour limit counts every visitor together.
 - [ ] **Redis must be up.** The throttle and the phone counter need it; if it is down, a submit fails with a 500.
-- [ ] `qcluster` is **not** needed for enquiries (they queue nothing).
+- [ ] `qcluster` is needed only for the staff's notification emails (a new enquiry, a converted one, a milestone); the
+      enquiry itself is saved without it, and the in-app notification is written at once.
 
 ### 4.2 Frontend changes against the prototype
 
@@ -160,10 +164,8 @@ query counts that stay constant as lists and notes grow.
 | Item | What is missing | Depends on |
 | :---- | :---- | :---- |
 | Admin enquiries monitor | `admin/enquiries/` in `control_panel` (`users.manage_enquiries`), with the Admin Console's filters (institute, training, category, date, status) and an export. Its "Location" filter and column have no data now that preferred location is dropped; the training's location could replace it | Undecided: read-only or editing, and what the location column shows |
-| New-enquiry alerts | Email to the institute, in-app notification, SMS (the prototype shows all three). The enquiry service has no hook for it yet | The `notifications` app and open question 5 |
 | Dashboard analytics | Enquiries per week (12 weeks), counts by training, conversion by institute, page views, response rate on the public institute page | The `analytics` app; page views need view counting (open question 14) |
 | "Seats left" and the availability filter | `seats` minus `CONVERTED` enquiries on public trainings, and the filter in `trainings/` | Touches the public training serializers and filters |
-| Cancelled trainings | Tell people who enquired when a training is cancelled (`TODO(notify)` in `training/services.py`) | Open question 4 and `notifications` |
 | Audit trail | Who changed a status and when. `change_status` takes `by` and does nothing with it (`TODO(audit)`) | The planned audit log |
 | Captcha | `RECAPTCHA_SECRET_KEY` is in settings but nothing verifies a token, and no HTTP client is pinned in `requirements/base.txt` (`requests` arrives only through `requests-oauthlib`) | A decision to turn it on |
 
@@ -185,8 +187,6 @@ query counts that stay constant as lists and notes grow.
 ### 4.5 Questions still open (numbers as in `docs/System Design.md`, section 8)
 
 1. Keep every enquiry indefinitely, or delete old ones?
-4. Tell enquirers when a training is cancelled?
-5. Which events notify whom; is the enquirer ever emailed?
 8. Privacy: retention, consent and export rules for the visitor's name and phone.
 14. The featured flag and view counts behind the relevance sort (also needed for page-view analytics).
 

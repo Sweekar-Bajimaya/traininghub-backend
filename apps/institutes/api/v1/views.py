@@ -18,6 +18,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.app_key.api.v1.permissions import DistributedKeyAuthentication
 from apps.common.throttling import IdentityScopedRateThrottle
 from apps.common.viewsets import (
     ActionAPIView,
@@ -70,7 +71,11 @@ from apps.institutes.permissions import (
 )
 from apps.training import services as training_services
 from apps.training.models import Training
-from apps.training.services import annotate_institute_public_counts
+from apps.training.services import (
+    annotate_institute_public_categories,
+    annotate_institute_public_counts,
+    annotate_institute_public_training_modes,
+)
 from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
@@ -90,7 +95,7 @@ def private_file_response(document):
 # public
 class RegisterView(CreateAPIView):
     serializer_class = InstituteRegistrationSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [DistributedKeyAuthentication]  # our frontend's origin, or an App-Key
     authentication_classes = []
     throttle_scope = "institute_register"
 
@@ -99,7 +104,7 @@ class RegisterSendOTPView(ActionAPIView):
     """Step 1: email a verification code to the institute's own address."""
 
     serializer_class = RegistrationOTPSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [DistributedKeyAuthentication]
     authentication_classes = []
     throttle_classes = [IdentityScopedRateThrottle]
     throttle_scope = "register_otp"
@@ -110,7 +115,7 @@ class RegisterVerifyOTPView(ActionAPIView):
     used up, by RegisterView)."""
 
     serializer_class = RegistrationOTPVerifySerializer
-    permission_classes = [AllowAny]
+    permission_classes = [DistributedKeyAuthentication]
     authentication_classes = []
     throttle_classes = [IdentityScopedRateThrottle]
     throttle_scope = "register_otp_verify"
@@ -160,6 +165,8 @@ class PublicInstituteViewSet(ReadOnlyViewSet):
             queryset = queryset.select_related("contact", "ceo").prefetch_related(
                 "social_links"
             )
+            queryset = annotate_institute_public_categories(queryset)
+            queryset = annotate_institute_public_training_modes(queryset)
         return annotate_institute_public_counts(queryset)
 
 
