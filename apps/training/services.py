@@ -774,13 +774,3 @@ def start_date_range(bucket, today=None):
         return today + timedelta(days=max(StartBucket.DAYS.values()) + 1), None
     return today, today + timedelta(days=StartBucket.DAYS[bucket])
 
-
-def institute_dashboard_counts(institute):
-    """The training cards of the institute's dashboard. `active` is what the public can see: an
-    approved training of an approved institute (an expired training is no longer approved), so a
-    suspended institute has none. The portal's trainings summary keeps counting every approved
-    training, because its Approved tab lists them."""
-    counts = institute_counts(Training.objects.filter(institute=institute))
-    if institute.status != InstituteStatus.APPROVED:
-        counts["active"] = 0
-    return counts

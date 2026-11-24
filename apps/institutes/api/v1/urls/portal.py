@@ -43,11 +43,6 @@ urlpatterns = [
         views.InstituteActionRequiredView.as_view(),
         name="action-required",
     ),
-    path(
-        "dashboard/summary/",
-        views.InstituteDashboardSummaryView.as_view(),
-        name="institute-dashboard-summary",
-    ),
     path("summary/", views.InstituteSummaryView.as_view(), name="summary"),
     path("resubmit/", views.ResubmitView.as_view(), name="resubmit"),
     path(

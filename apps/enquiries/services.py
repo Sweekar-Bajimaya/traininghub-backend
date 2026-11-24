@@ -279,7 +279,11 @@ def summary(enquiries):
     list shows (without a status filter, or the other tabs read zero)."""
     counts = enquiries.aggregate(
         total=Count("pk"),
-        unique_phones=Count("phone", distinct=True),
+        interested_users=Count(
+            "phone",
+            filter=Q(type=EnquiryType.INTEREST),
+            distinct=True,
+        ),
         **{
             status: Count("pk", filter=Q(status=status))
             for status in EnquiryStatus.VALUES
@@ -288,7 +292,7 @@ def summary(enquiries):
     return {
         "total": counts["total"],
         "new": counts[EnquiryStatus.NEW],
-        "unique_phones": counts["unique_phones"],
+        "interested_users": counts["interested_users"],
         "by_status": {status: counts[status] for status in EnquiryStatus.VALUES},
     }
 
@@ -308,17 +312,4 @@ def admin_counts(enquiries):
         total=Count("pk"),
         new=Count("pk", filter=Q(status=EnquiryStatus.NEW)),
         converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
-    )
-
-
-def institute_dashboard_counts(enquiries):
-    """The institute dashboard's cards, in one query: every enquiry, the new ones, and the people
-    who asked to hear about the next batch (INTEREST type, one per phone number, because a visitor
-    has no account). Pass the institute's own enquiries."""
-    return enquiries.aggregate(
-        total=Count("pk"),
-        new=Count("pk", filter=Q(status=EnquiryStatus.NEW)),
-        interested_users=Count(
-            "phone", filter=Q(type=EnquiryType.INTEREST), distinct=True
-        ),
     )
