@@ -460,3 +460,22 @@ class InstituteSummarySerializer(serializers.Serializer):
 
     trainings = TrainingCountsSerializer()
     enquiries = EnquiryCountsSerializer()
+
+
+class InstituteDashboardTrainingsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    active = serializers.IntegerField()
+    pending_review = serializers.IntegerField()
+
+
+class InstituteDashboardEnquiriesSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    new = serializers.IntegerField()
+    interested_users = serializers.IntegerField()
+
+
+class InstituteDashboardSerializer(serializers.Serializer):
+    """The cards of the institute portal's dashboard."""
+
+    trainings = InstituteDashboardTrainingsSerializer()
+    enquiries = InstituteDashboardEnquiriesSerializer()

@@ -75,6 +75,7 @@ from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
 )
+from apps.institutes.api.v1.serializers import InstituteDashboardSerializer
 
 
 def private_file_response(document):
@@ -344,5 +345,22 @@ class InstituteSummaryView(RetrieveAPIView):
             ),
             "enquiries": enquiry_services.summary(
                 Enquiry.objects.filter(institute_id=institute_id)
+            ),
+        }
+
+
+class InstituteDashboardView(RetrieveAPIView):
+    """The portal dashboard's cards for the caller's own institute: `trainings` (total, active,
+    pending_review) and `enquiries` (total, new, interested_users). Both staff and the owner see them."""
+
+    serializer_class = InstituteDashboardSerializer
+    permission_classes = [IsInstituteMember]
+
+    def get_object(self):
+        institute = self.request.user.membership.institute
+        return {
+            "trainings": training_services.institute_dashboard_counts(institute),
+            "enquiries": enquiry_services.institute_dashboard_counts(
+                Enquiry.objects.filter(institute=institute)
             ),
         }

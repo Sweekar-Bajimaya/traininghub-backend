@@ -195,3 +195,16 @@ def admin_counts(enquiries):
         new=Count("pk", filter=Q(status=EnquiryStatus.NEW)),
         converted=Count("pk", filter=Q(status=EnquiryStatus.CONVERTED)),
     )
+
+
+def institute_dashboard_counts(enquiries):
+    """The institute dashboard's cards, in one query: every enquiry, the new ones, and the people
+    who asked to hear about the next batch (INTEREST type, one per phone number, because a visitor
+    has no account). Pass the institute's own enquiries."""
+    return enquiries.aggregate(
+        total=Count("pk"),
+        new=Count("pk", filter=Q(status=EnquiryStatus.NEW)),
+        interested_users=Count(
+            "phone", filter=Q(type=EnquiryType.INTEREST), distinct=True
+        ),
+    )
