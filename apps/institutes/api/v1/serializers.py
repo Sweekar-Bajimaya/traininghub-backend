@@ -466,4 +466,3 @@ class InstituteSummarySerializer(serializers.Serializer):
 
     trainings = TrainingCountsSerializer()
     enquiries = EnquiryCountsSerializer()
-

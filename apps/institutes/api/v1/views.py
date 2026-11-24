@@ -80,7 +80,6 @@ from apps.users.api.v1.serializers import (
     RegistrationOTPSerializer,
     RegistrationOTPVerifySerializer,
 )
-from apps.institutes.api.v1.serializers import InstituteDashboardSerializer
 
 
 def private_file_response(document):
