@@ -457,7 +457,7 @@ class TrainingCountsSerializer(serializers.Serializer):
 class EnquiryCountsSerializer(serializers.Serializer):
     total = serializers.IntegerField()
     new = serializers.IntegerField()
-    unique_phones = serializers.IntegerField()
+    interested_users = serializers.IntegerField()
     by_status = serializers.DictField(child=serializers.IntegerField())
 
 

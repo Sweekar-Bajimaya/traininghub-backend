@@ -279,7 +279,11 @@ def summary(enquiries):
     list shows (without a status filter, or the other tabs read zero)."""
     counts = enquiries.aggregate(
         total=Count("pk"),
-        unique_phones=Count("phone", distinct=True),
+        interested_users=Count(
+            "phone",
+            filter=Q(type=EnquiryType.INTEREST),
+            distinct=True,
+        ),
         **{
             status: Count("pk", filter=Q(status=status))
             for status in EnquiryStatus.VALUES
@@ -288,7 +292,7 @@ def summary(enquiries):
     return {
         "total": counts["total"],
         "new": counts[EnquiryStatus.NEW],
-        "unique_phones": counts["unique_phones"],
+        "interested_users": counts["interested_users"],
         "by_status": {status: counts[status] for status in EnquiryStatus.VALUES},
     }
 
